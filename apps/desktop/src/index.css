@@ -1,0 +1,66 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@font-face {
+  font-family: 'Kaiti';
+  src: local('KaiTi'), local('STKaiti');
+}
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 222.2 84% 4.9%;
+  }
+}
+
+@layer components {
+  .idea-mark {
+    border-bottom: 2px solid #facc15;
+    /* Solid yellow underline */
+    background-color: transparent;
+    border-radius: 0;
+    cursor: pointer;
+    transition: background-color 0.2s;
+    color: inherit;
+  }
+
+  .idea-mark:hover {
+    background-color: rgba(254, 240, 138, 0.3);
+  }
+
+  /* Dark mode adaptation if needed, can rely on parent class or media query */
+  :is(.dark .idea-mark) {
+    border-bottom-color: #facc15;
+    /* yellow-400 */
+    color: inherit;
+  }
+
+  :is(.dark .idea-mark:hover) {
+    background-color: rgba(250, 204, 21, 0.2);
+  }
+}
+
+@keyframes shake {
+
+  10%,
+  90% {
+    transform: translate3d(-1px, 0, 0);
+  }
+
+  20%,
+  80% {
+    transform: translate3d(2px, 0, 0);
+  }
+
+  30%,
+  50%,
+  70% {
+    transform: translate3d(-4px, 0, 0);
+  }
+
+  40%,
+  60% {
+    transform: translate3d(4px, 0, 0);
+  }
+}

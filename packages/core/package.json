@@ -1,0 +1,29 @@
+{
+  "name": "@novel-editor/core",
+  "version": "0.0.0",
+  "type": "module",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "lint": "eslint . --ext .ts,.tsx",
+    "db:push": "prisma db push",
+    "db:studio": "prisma studio",
+    "generate": "prisma generate",
+    "build": "tsc"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.10.2",
+    "zod": "^3.22.4"
+  },
+  "devDependencies": {
+    "prisma": "^5.10.2",
+    "typescript": "^5.3.3",
+    "@types/node": "^20.11.24"
+  }
+}

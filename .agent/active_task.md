@@ -1,0 +1,31 @@
+# 任务列表 (Active Task)
+
+- [x] 初始化项目上下文
+    - [x] 阅读 .agent/OVERVIEW.md
+    - [x] 阅读 DEVELOPMENT.md
+    - [x] 阅读 README.md
+    - [x] 阅读 SyncDesign.md
+- [x] 优化上下文初始化流程
+    - [x] 创建 `.agent/active_task.md` 持久化任务文件
+    - [x] 创建 `.agent/MEMORY.md` 记忆文件
+    - [x] 创建 `.agent/workflows/init-context.md` 工作流
+- [x] 优化灵感系统 (Idea System) - 2026-02-04
+    - [x] 后端实体重构：Idea.java 继承 BaseEntity，添加 version/deleted 字段
+    - [x] 重构高亮逻辑：创建自定义 IdeaMarkNode 扩展 @lexical/mark
+    - [x] 修复主题配置：theme.mark 替换 theme.ideaMark
+    - [x] 实现 data-idea-id 属性渲染，支持点击检测和跳转定位
+    - [x] 更新 IdeaInteractionPlugin：优先使用 data-idea-id 属性检测
+    - [x] 修复 UI 交互：补全 i18n 翻译 (zh.json / en.json)
+    - [x] 黄色下划线样式（CSS 已配置）
+    - [x] 修复手动创建灵感保存问题
+    - [x] 添加 Ctrl+I 快捷键创建全局灵感
+    - [x] 修复灵感列表过滤逻辑（显示小说全部灵感）
+    - [x] 添加 F12/Ctrl+Shift+I 开发者工具快捷键
+- [ ] 灵感搜索与过滤功能 - 参考 `searchDesign.md`
+    - [ ] 快捷按钮：全部/当前章节过滤
+    - [ ] 内容模糊搜索
+    - [ ] 时间区间选择
+    - [ ] 过滤器 UI 组件
+- [ ] 云同步功能开发
+    - [ ] 审查 `apps/backend/src/main/java/com/noveleditor/backend/service/SyncService.java`
+    - [ ] 确定下一步同步功能开发计划

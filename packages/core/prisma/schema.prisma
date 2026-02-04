@@ -1,0 +1,109 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Novel {
+  id          String   @id @default(cuid())
+  title       String
+  description String?
+  coverUrl    String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  version     Int      @default(1)
+  deleted     Boolean  @default(false)
+
+  wordCount   Int      @default(0)
+  formatting  String   @default("{}") // JSON: { "volume": "...", "chapter": "..." }
+
+  volumes    Volume[]
+  characters Character[]
+  ideas      Idea[]
+  tags       Tag[]
+}
+
+model Volume {
+  id      String @id @default(cuid())
+  title   String
+  order   Int
+  novelId String
+  novel   Novel  @relation(fields: [novelId], references: [id], onDelete: Cascade)
+  
+  version     Int      @default(1)
+  deleted     Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  chapters Chapter[]
+}
+
+model Chapter {
+  id       String @id @default(cuid())
+  title    String
+  content  String
+  wordCount Int @default(0)
+  order    Int
+  volumeId String
+  volume   Volume @relation(fields: [volumeId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  version     Int      @default(1)
+  deleted     Boolean  @default(false)
+  
+  ideas Idea[]
+}
+
+model SyncState {
+  id        String   @id @default("global") 
+  cursor    BigInt   @default(0)
+  updatedAt DateTime @updatedAt
+}
+
+model Character {
+  id          String  @id @default(cuid())
+  name        String
+  age         String?
+  role        String? // 主角, 配角...
+  description String?
+  personality String?
+  appearance  String?
+
+  novelId String
+  novel   Novel  @relation(fields: [novelId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Idea {
+  id        String   @id @default(cuid())
+  content   String
+  quote     String?  // 选中的原文 (可选)
+  cursor    String?  // 游标/定位信息 (可选)
+  isStarred Boolean  @default(false)
+  tags      Tag[]
+  
+  novelId   String
+  novel     Novel    @relation(fields: [novelId], references: [id], onDelete: Cascade)
+  
+  chapterId String?  // 关联章节 (可选)
+  chapter   Chapter? @relation(fields: [chapterId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Tag {
+  id      String @id @default(cuid())
+  name    String
+  novelId String
+  novel   Novel  @relation(fields: [novelId], references: [id], onDelete: Cascade)
+  ideas   Idea[]
+
+  @@unique([name, novelId])
+}

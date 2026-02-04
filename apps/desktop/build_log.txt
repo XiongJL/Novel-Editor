@@ -1,0 +1,9 @@
+﻿  鈥?electron-builder  version=24.13.3 os=10.0.26100
+  鈥?loaded configuration  file=D:\aiproject\novalEditor\apps\desktop\electron-builder.yml
+  鈥?description is missed in the package.json  appPackageFile=D:\aiproject\novalEditor\apps\desktop\package.json
+  鈥?author is missed in the package.json  appPackageFile=D:\aiproject\novalEditor\apps\desktop\package.json
+  鈥?packaging       platform=win32 arch=x64 electron=29.1.1 appOutDir=release\win-unpacked
+  鈥?building        target=nsis file=release\灏忚缂栬緫鍣?Setup-0.0.0.exe archs=x64 oneClick=false perMachine=false
+  鈥?default Electron icon is used  reason=application icon is not set
+  鈥?building block map  blockMapFile=release\灏忚缂栬緫鍣?Setup-0.0.0.exe.blockmap
+  鈥?building        target=portable file=release\灏忚缂栬緫鍣?Portable-0.0.0.exe archs=x64

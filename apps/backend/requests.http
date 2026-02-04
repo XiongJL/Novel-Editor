@@ -1,0 +1,29 @@
+### VS Code REST Client Config
+@baseUrl = http://localhost:8080
+
+### 1. 模拟 Pull 操作 (获取增量数据)
+POST {{baseUrl}}/api/sync/pull
+Content-Type: application/json
+
+{
+    "lastSyncCursor": 0
+}
+
+### 2. 模拟 Push 操作 (上传新小说)
+POST {{baseUrl}}/api/sync/push
+Content-Type: application/json
+
+{
+    "lastSyncCursor": 1700000000000,
+    "changes": {
+        "novels": [
+            {
+                "id": "test-novel-1",
+                "title": "测试小说",
+                "description": "这是一个通过 HTTP Client 创建的测试小说",
+                "updatedAt": "2024-01-01T12:00:00"
+            }
+        ],
+        "chapters": []
+    }
+}

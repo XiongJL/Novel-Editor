@@ -1,0 +1,45 @@
+appId: com.noveleditor.app
+productName: 小说编辑器
+copyright: Copyright © 2024
+
+directories:
+  output: release
+  buildResources: build
+
+files:
+  - dist/**/*
+  - dist-electron/**/*
+  - package.json
+  - node_modules/@prisma/**/*
+  - node_modules/.prisma/**/*
+  - node_modules/@novel-editor/**/*
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+    - target: portable
+      arch:
+        - x64
+  icon: build/icon.ico
+  sign: null
+  signAndEditExecutable: false
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: 小说编辑器
+  artifactName: ${productName}-Setup-${version}.${ext}
+
+portable:
+  artifactName: ${productName}-Portable-${version}.${ext}
+
+asar: true
+asarUnpack:
+  - "**/*.node"
+  - "**/node_modules/.prisma/**/*"
+  - "**/node_modules/@prisma/engines/**/*"

@@ -1,0 +1,46 @@
+{
+  "name": "@novel-editor/desktop",
+  "version": "0.0.0",
+  "type": "module",
+  "private": true,
+  "main": "dist-electron/main.js",
+  "scripts": {
+    "dev": "vite",
+    "copy-prisma": "node scripts/copy-prisma.js",
+    "prebuild": "npm run copy-prisma",
+    "build": "tsc && vite build && electron-builder",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@lexical/history": "^0.40.0",
+    "@lexical/mark": "^0.40.0",
+    "@lexical/react": "^0.40.0",
+    "@lexical/rich-text": "^0.40.0",
+    "@lexical/selection": "^0.40.0",
+    "@lexical/utils": "^0.40.0",
+    "@novel-editor/core": "workspace:*",
+    "clsx": "^2.1.0",
+    "framer-motion": "^12.29.2",
+    "i18next": "^25.8.0",
+    "lexical": "^0.40.0",
+    "lucide-react": "^0.563.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-i18next": "^16.5.4",
+    "tailwind-merge": "^2.2.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.64",
+    "@types/react-dom": "^18.2.21",
+    "@vitejs/plugin-react": "^4.2.1",
+    "autoprefixer": "^10.4.18",
+    "electron": "^29.1.1",
+    "electron-builder": "^24.13.3",
+    "postcss": "^8.4.35",
+    "tailwindcss": "^3.4.1",
+    "typescript": "^5.4.2",
+    "vite": "^5.1.5",
+    "vite-plugin-electron": "^0.28.2",
+    "vite-plugin-electron-renderer": "^0.14.5"
+  }
+}

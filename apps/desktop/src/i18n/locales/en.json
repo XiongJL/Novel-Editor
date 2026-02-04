@@ -1,0 +1,121 @@
+{
+  "common": {
+    "cancel": "Cancel",
+    "save": "Save",
+    "confirm": "Confirm",
+    "delete": "Delete",
+    "loading": "Loading...",
+    "search": "Search"
+  },
+  "home": {
+    "greeting": "Good Evening, Writer",
+    "noNovels": "No libraries found.",
+    "create": "Create New Novel",
+    "editNovel": "Edit Novel",
+    "title": "Title",
+    "coverUrl": "Cover URL",
+    "autoCover": "Leave empty to auto-generate artistic cover.",
+    "continue": "Continue Writing",
+    "words": "Words"
+  },
+  "editor": {
+    "chapterTitle": "Chapter Title",
+    "startWriting": "Start writing...",
+    "words": "words",
+    "selectChapter": "Select a Chapter",
+    "editing": "Editing",
+    "save": "Save (Ctrl+S)",
+    "settings": "Novel Settings"
+  },
+  "sidebar": {
+    "explorer": "Explorer",
+    "outline": "Outline",
+    "characters": "Characters & World",
+    "map": "Mind Map",
+    "idea": "Ideas",
+    "newVolume": "New Volume",
+    "addChapter": "Add Chapter",
+    "noChapters": "No chapters",
+    "renameTip": "Double click to rename",
+    "search": "Search"
+  },
+  "search": {
+    "scope": {
+        "all": "All",
+        "idea": "Ideas",
+        "chapter": "Chapters",
+        "novel": "Novels"
+    },
+    "noResults": "No results found",
+    "placeholder": "Search...",
+    "filter": {
+        "allNovels": "All Novels",
+        "allChapters": "All Chapters",
+        "starredOnly": "Starred Only"
+    }
+  },
+  "idea": {
+    "create": "Add Idea",
+    "placeholder": "Write something...",
+    "jump": "Jump to quote",
+    "jumpFailed": "Unable to locate, original text may have changed"
+  },
+  "tag": {
+    "add": "Add Tag",
+    "searchOrCreate": "Search or create...",
+    "create": "Create",
+    "noTags": "No tags yet"
+  },
+  "toolbar": {
+    "undo": "Undo",
+    "redo": "Redo",
+    "bold": "Bold",
+    "italic": "Italic",
+    "underline": "Underline",
+    "strikethrough": "Strikethrough",
+    "alignLeft": "Align Left",
+    "alignCenter": "Center",
+    "alignRight": "Align Right",
+    "justify": "Justify",
+    "indent": "Indent",
+    "format": "Format",
+    "wideMode": "Wide Mode",
+    "mobileMode": "Mobile Preview",
+    "fontSerif": "Serif",
+    "fontSans": "Sans",
+    "fontKaiti": "Kaiti"
+  },
+  "settings": {
+    "title": "Settings",
+    "general": {
+      "title": "General",
+      "language": "Language",
+      "selectLanguage": "Select Language",
+      "theme": "Theme",
+      "dark": "Dark Mode",
+      "darkDesc": "Eye-friendly dark interface",
+      "light": "Light Mode",
+      "lightDesc": "Clean and bright interface"
+    },
+    "novel": {
+      "title": "Novel Settings",
+      "numbering": "Numbering Format",
+      "volumeFormat": "Volume Format",
+      "chapterFormat": "Chapter Format",
+      "preview": "Preview"
+    },
+    "shortcuts": {
+      "title": "Shortcuts",
+      "recordTip": "Click button to record new shortcut. Esc to cancel.",
+      "recording": "Recording...",
+      "unbind": "Unbind",
+      "actions": {
+        "format": "Auto Format",
+        "save": "Save",
+        "undo": "Undo",
+        "redo": "Redo",
+        "toggle_sidebar": "Toggle Sidebar"
+      }
+    }
+  }
+}

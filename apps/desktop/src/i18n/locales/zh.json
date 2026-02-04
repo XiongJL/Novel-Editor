@@ -1,0 +1,121 @@
+{
+  "common": {
+    "cancel": "取消",
+    "save": "保存",
+    "confirm": "确认",
+    "delete": "删除",
+    "loading": "加载中...",
+    "search": "搜索"
+  },
+  "home": {
+    "greeting": "晚上好，作家",
+    "noNovels": "暂无作品",
+    "create": "创建新作品",
+    "editNovel": "编辑作品信息",
+    "title": "标题",
+    "coverUrl": "封面链接",
+    "autoCover": "留空自动生成封面",
+    "continue": "继续写作",
+    "words": "字"
+  },
+  "editor": {
+    "chapterTitle": "章节标题",
+    "startWriting": "开始写作...",
+    "words": "字数",
+    "selectChapter": "选择章节",
+    "editing": "编辑中",
+    "save": "保存 (Ctrl+S)",
+    "settings": "作品设置"
+  },
+  "sidebar": {
+    "explorer": "目录",
+    "outline": "大纲",
+    "characters": "角色与世界观",
+    "map": "思维导图",
+    "idea": "灵感",
+    "newVolume": "新建卷",
+    "addChapter": "添加章节",
+    "noChapters": "暂无章节",
+    "renameTip": "双击重命名",
+    "search": "搜索"
+  },
+  "search": {
+    "scope": {
+        "all": "全部",
+        "idea": "灵感",
+        "chapter": "章节",
+        "novel": "小说"
+    },
+    "noResults": "没有找到相关内容",
+    "placeholder": "搜索...",
+    "filter": {
+        "allNovels": "所有小说",
+        "allChapters": "所有章节",
+        "starredOnly": "仅收藏"
+    }
+  },
+    "idea": {
+        "create": "添加灵感",
+        "placeholder": "记录点什么...",
+        "jump": "跳转到原文",
+        "jumpFailed": "原文已变更，无法定位"
+    },
+    "tag": {
+        "add": "添加标签",
+        "searchOrCreate": "搜索或创建标签...",
+        "create": "创建",
+        "noTags": "暂无标签"
+    },
+  "toolbar": {
+    "undo": "撤销",
+    "redo": "重做",
+    "bold": "加粗",
+    "italic": "斜体",
+    "underline": "下划线",
+    "strikethrough": "删除线",
+    "alignLeft": "左对齐",
+    "alignCenter": "居中",
+    "alignRight": "右对齐",
+    "justify": "两端对齐",
+    "indent": "缩进",
+    "format": "排版",
+    "wideMode": "宽屏模式",
+    "mobileMode": "手机预览",
+    "fontSerif": "宋体",
+    "fontSans": "黑体",
+    "fontKaiti": "楷体"
+  },
+  "settings": {
+    "title": "设置",
+    "general": {
+      "title": "通用",
+      "language": "语言",
+      "selectLanguage": "选择语言",
+      "theme": "外观主题",
+      "dark": "深色模式",
+      "darkDesc": "保护视力的深色界面",
+      "light": "浅色模式",
+      "lightDesc": "清新明亮的浅色界面"
+    },
+    "novel": {
+      "title": "作品设置",
+      "numbering": "章节编号格式",
+      "volumeFormat": "卷格式",
+      "chapterFormat": "章格式",
+      "preview": "预览"
+    },
+    "shortcuts": {
+      "title": "快捷键",
+      "recordTip": "点击按钮可重新录制快捷键。Esc 取消录制。",
+      "recording": "录制中...",
+      "unbind": "取消绑定",
+      "actions": {
+        "format": "一键排版",
+        "save": "保存",
+        "undo": "撤销",
+        "redo": "重做",
+        "toggle_sidebar": "切换侧边栏"
+      }
+    }
+  }
+}

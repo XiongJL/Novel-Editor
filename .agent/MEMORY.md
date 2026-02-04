@@ -1,0 +1,53 @@
+# 🧠 Project Memory & Development Log (项目记忆与开发日志)
+
+此文件用于记录跨会话的项目记忆、关键决策、已知问题和解决方案。每次会话结束或达成重要里程碑时，请考虑更新此文件。
+
+## 📅 最新状态 (Latest Status)
+> 最近更新时间: 2026-02-04
+> 当前焦点: 灵感管理系统重构与搜索功能整合。
+
+## 🏛️ 关键架构决策 (Architecture Decisions)
+- **双数据库架构**: 桌面端使用 SQLite (离线优先)，服务端使用 MariaDB (云同步)。
+- **UI 框架**: React + TailwindCSS + Radix UI (计划中)。
+- **编辑器核心**: Meta Lexical (支持插件化、Markdown快捷键)。
+- **构建系统**: Electron + Vite + React (纯 ESM 模式)。
+- **文本标记方案**: 弃用自定义 `IdeaMarkNode`，迁移至官方 `@lexical/mark` 插件，利用 `MarkNode` 处理高亮与关联 ID。
+- **功能侧边栏分离**: 弃用通用的 `UnifiedSearchWorkbench` 切换模式，将“灵感”拆分为独立的灵感工作台（Idea Sidebar），“搜索”使用独立的 `SearchSidebar`，以保持交互单一职责。
+- **代码类型规范**: 建立 `src/types.ts` 集中管理核心接口（如 `Idea`），解决跨组件引用循环依赖问题。
+
+## 🐛 踩坑与解决方案 (Troubleshooting Log)
+- **Electron Builder**: 打包时需确保 `packages/core` 已编译且 `node_modules` 正确包含 Prisma Client。
+- **Prisma Client**: 在 Electron 主进程中使用时，需确保 schema.prisma 已生成且路径配置正确。
+- **Lexical 选区还原**: 当焦点从编辑器移动到外部输入框（如灵感备注）时，`$getSelection()` 会返回 null。需在失去焦点前 `clone()` 并在 `editor.update` 中手动恢复。
+- **MarkNode 点击检测**: `$getNearestNodeFromDOMNode` 往往返回 TextNode。检测关联 ID 时需递归检查父节点（是否为 `MarkNode`）。
+- **构建崩溃 (Turbo/ESM)**: 多次自动化代码合并可能导致 import 语法错误（如重复块或缺失括号），导致渲染进程白屏。需人工复读 imports。
+- **TSC 类型定义冲突**: `preload.ts` 中的数据库方法实现与 `vite-env.d.ts` 中的手动补充定义可能不一致（如 `updateIdea` 参数格式）。`tsc` 报错时应优先检查 `.d.ts` 文件。
+- **未使用变量报错**: `tsc` 在生产模式下对未使用的变量（特别是 Props 或 回调参数）非常敏感。如果变量暂不使用但需声明，建议移除或使用下划线前缀。
+- **大文件编辑损坏**: 在对 `Editor.tsx` 等大型组件进行大规模替换操作时，由于正则匹配或行号偏移可能导致组件定义（`export default function...`）意外丢失。建议操作后立即运行类型检查。
+
+
+## 📝 长期待办 (Backlog)
+- [ ] 完善云同步的冲突解决策略 (CRDT 或 Last-Write-Wins)。
+- [ ] 增加端到端测试 (E2E Tests)。
+- [ ] 优化移动端预览样式的准确性。
+
+## 🌍 全局开发规范 (Global Requirements)
+> **⚠️ 重要**: 所有新组件和功能必须遵循以下规范：
+
+1.  **主题适配 (Theme Adaptation)**:
+    *   所有 UI 组件必须同时支持 **Light Mode** 和 **Dark Mode**。
+    *   严禁使用硬编码颜色（如 `#000` 或 `#fff`），应使用 Tailwind 的 `neutral-900/white` 或基于 `isDark` 状态动态切换的颜色类。
+    *   始终检查 `useEditorPreferences().preferences.theme`。
+
+2.  **国际化 (Internationalization / i18n)**:
+    *   界面上显示的所有文字 **必须** 使用 `i18n` 键值，禁止直接写死中文字符串。
+    *   确保在 `apps/desktop/src/i18n/locales/zh.json` 和 `en.json` 中添加对应翻译。
+    *   **文档语言**: `implementation_plan.md` 和 `walkthrough.md` 的内容必须使用中文。
+
+## 💻 开发环境配置 (Development Environment)
+- **操作系统**: Windows
+- **终端**: PowerShell（默认）
+- **WSL**: 如果连接了 WSL2，则使用 Linux/Bash 命令
+- **命令生成规则**:
+  - 对于 Windows 本地操作：生成 PowerShell 语法命令
+  - 对于 WSL 相关操作：生成 Linux/Bash 语法命令
