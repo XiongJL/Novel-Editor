@@ -4,6 +4,225 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { execSync } from "child_process";
 import fs from "fs";
+async function initSearchIndex() {
+  try {
+    const tableExists = await db.$queryRaw`
+            SELECT name FROM sqlite_master WHERE type='table' AND name='search_index';
+        `;
+    if (tableExists.length === 0) {
+      await db.$executeRaw`
+                CREATE VIRTUAL TABLE search_index USING fts5(
+                    content,
+                    entity_type,
+                    entity_id UNINDEXED,
+                    novel_id UNINDEXED,
+                    chapter_id UNINDEXED,
+                    title,
+                    tokenize='unicode61'
+                );
+            `;
+      console.log("[SearchIndex] FTS5 table created successfully");
+    }
+  } catch (error) {
+    console.error("[SearchIndex] Failed to initialize FTS5 table:", error);
+  }
+}
+function extractPlainText(lexicalJson) {
+  try {
+    const state = JSON.parse(lexicalJson);
+    const textParts = [];
+    const traverse = (node) => {
+      if (node.type === "text" && node.text) {
+        textParts.push(node.text);
+      }
+      if (node.children && Array.isArray(node.children)) {
+        node.children.forEach(traverse);
+      }
+    };
+    if (state.root) {
+      traverse(state.root);
+    }
+    return textParts.join("");
+  } catch {
+    return lexicalJson;
+  }
+}
+async function indexChapter(chapter) {
+  const plainText = extractPlainText(chapter.content);
+  let novelId = chapter.novelId;
+  if (!novelId) {
+    const volume = await db.volume.findUnique({
+      where: { id: chapter.volumeId },
+      select: { novelId: true }
+    });
+    novelId = volume == null ? void 0 : volume.novelId;
+  }
+  if (!novelId) {
+    console.warn("[SearchIndex] Cannot index chapter without novelId");
+    return;
+  }
+  try {
+    await db.$executeRaw`
+            DELETE FROM search_index WHERE entity_type = 'chapter' AND entity_id = ${chapter.id};
+        `;
+    await db.$executeRaw`
+            INSERT INTO search_index (content, entity_type, entity_id, novel_id, chapter_id, title)
+            VALUES (${plainText}, 'chapter', ${chapter.id}, ${novelId}, ${chapter.id}, ${chapter.title});
+        `;
+  } catch (error) {
+    console.error("[SearchIndex] Failed to index chapter:", error);
+  }
+}
+async function indexIdea(idea) {
+  const searchContent = [idea.content, idea.quote].filter(Boolean).join(" ");
+  try {
+    await db.$executeRaw`
+            DELETE FROM search_index WHERE entity_type = 'idea' AND entity_id = ${idea.id};
+        `;
+    await db.$executeRaw`
+            INSERT INTO search_index (content, entity_type, entity_id, novel_id, chapter_id, title)
+            VALUES (${searchContent}, 'idea', ${idea.id}, ${idea.novelId}, ${idea.chapterId || ""}, ${idea.content.substring(0, 50)});
+        `;
+  } catch (error) {
+    console.error("[SearchIndex] Failed to index idea:", error);
+  }
+}
+async function removeFromIndex(entityType, entityId) {
+  try {
+    await db.$executeRaw`
+            DELETE FROM search_index WHERE entity_type = ${entityType} AND entity_id = ${entityId};
+        `;
+  } catch (error) {
+    console.error("[SearchIndex] Failed to remove from index:", error);
+  }
+}
+async function search(novelId, keyword, limit = 20, offset = 0) {
+  if (!keyword.trim())
+    return [];
+  try {
+    const escapedKeyword = keyword.replace(/[%_]/g, "\\$&");
+    const likePattern = `%${escapedKeyword}%`;
+    const results = await db.$queryRaw`
+            SELECT 
+                entity_type,
+                entity_id,
+                chapter_id,
+                novel_id,
+                title,
+                content
+            FROM search_index
+            WHERE novel_id = ${novelId} AND content LIKE ${likePattern}
+            LIMIT ${limit} OFFSET ${offset};
+        `;
+    const allResults = [];
+    const lowerKeyword = keyword.toLowerCase();
+    for (const r of results) {
+      const docContent = r.content || "";
+      const lowerContent = docContent.toLowerCase();
+      const indices = [];
+      let pos = 0;
+      while (pos < lowerContent.length && indices.length < 50) {
+        const idx = lowerContent.indexOf(lowerKeyword, pos);
+        if (idx === -1)
+          break;
+        indices.push(idx);
+        pos = idx + lowerKeyword.length;
+      }
+      if (indices.length === 0) {
+        continue;
+      }
+      for (const index of indices) {
+        allResults.push({
+          entityType: r.entity_type,
+          entityId: r.entity_id,
+          chapterId: r.chapter_id,
+          novelId: r.novel_id,
+          title: r.title,
+          // Use a shorter context for the list item (10 chars before)
+          snippet: generateSnippetAtIndex(docContent, keyword, index, 10, true),
+          // Use longer context for tooltip preview (60 chars before/after), no HTML
+          preview: generateSnippetAtIndex(docContent, keyword, index, 60, false),
+          keyword
+        });
+      }
+    }
+    return allResults;
+  } catch (error) {
+    console.error("[SearchIndex] Search failed:", error);
+    return [];
+  }
+}
+function generateSnippetAtIndex(content, keyword, index, contextLength = 30, useMark = true) {
+  if (!content)
+    return "";
+  const start = Math.max(0, index - contextLength);
+  const end = Math.min(content.length, index + keyword.length + contextLength * 3);
+  let snippet = "";
+  if (start > 0)
+    snippet += "...";
+  const before = content.substring(start, index);
+  const match = content.substring(index, index + keyword.length);
+  const after = content.substring(index + keyword.length, end);
+  if (useMark) {
+    snippet += before + "<mark>" + match + "</mark>" + after;
+  } else {
+    snippet += before + match + after;
+  }
+  if (end < content.length)
+    snippet += "...";
+  return snippet;
+}
+async function rebuildIndex(novelId) {
+  let chaptersIndexed = 0;
+  let ideasIndexed = 0;
+  try {
+    await db.$executeRaw`
+            DELETE FROM search_index WHERE novel_id = ${novelId};
+        `;
+    const chapters = await db.chapter.findMany({
+      where: { volume: { novelId } },
+      select: { id: true, title: true, content: true, volumeId: true }
+    });
+    for (const chapter of chapters) {
+      await indexChapter({ ...chapter, novelId });
+      chaptersIndexed++;
+    }
+    const ideas = await db.idea.findMany({
+      where: { novelId },
+      select: { id: true, content: true, quote: true, novelId: true, chapterId: true }
+    });
+    for (const idea of ideas) {
+      await indexIdea(idea);
+      ideasIndexed++;
+    }
+    console.log(`[SearchIndex] Rebuilt index: ${chaptersIndexed} chapters, ${ideasIndexed} ideas`);
+  } catch (error) {
+    console.error("[SearchIndex] Rebuild failed:", error);
+  }
+  return { chapters: chaptersIndexed, ideas: ideasIndexed };
+}
+async function getIndexStats(novelId) {
+  try {
+    const result = await db.$queryRaw`
+            SELECT entity_type, COUNT(*) as count 
+            FROM search_index 
+            WHERE novel_id = ${novelId} 
+            GROUP BY entity_type;
+        `;
+    let chapters = 0;
+    let ideas = 0;
+    result.forEach((r) => {
+      if (r.entity_type === "chapter")
+        chapters = Number(r.count);
+      if (r.entity_type === "idea")
+        ideas = Number(r.count);
+    });
+    return { chapters, ideas };
+  } catch (error) {
+    console.error("[SearchIndex] Failed to get stats:", error);
+    return { chapters: 0, ideas: 0 };
+  }
+}
 const API_BASE = "http://localhost:8080/api/sync";
 class SyncManager {
   // Get the global sync cursor
@@ -338,6 +557,13 @@ ipcMain.handle("db:save-chapter", async (_, { chapterId, content }) => {
         }
       })
     ]);
+    const chapterData = await db.chapter.findUnique({
+      where: { id: chapterId },
+      select: { id: true, title: true, content: true, volumeId: true }
+    });
+    if (chapterData) {
+      await indexChapter({ ...chapterData, novelId });
+    }
     return updatedChapter;
   } catch (e) {
     console.error("[Main] db:save-chapter failed:", e);
@@ -360,11 +586,19 @@ ipcMain.handle("db:create-idea", async (_, data) => {
       },
       include: { tags: true }
     });
-    return {
+    const mappedResult = {
       ...result,
       tags: result.tags.map((t) => t.name),
       timestamp: result.createdAt.getTime()
     };
+    await indexIdea({
+      id: result.id,
+      content: result.content,
+      quote: result.quote,
+      novelId: result.novelId,
+      chapterId: result.chapterId
+    });
+    return mappedResult;
   } catch (e) {
     console.error("[Main] db:create-idea failed:", e);
     throw e;
@@ -416,11 +650,19 @@ ipcMain.handle("db:update-idea", async (_, id, data) => {
       },
       include: { tags: true }
     });
-    return {
+    const mappedResult = {
       ...result,
       tags: result.tags.map((t) => t.name),
       timestamp: result.createdAt.getTime()
     };
+    await indexIdea({
+      id: result.id,
+      content: result.content,
+      quote: result.quote,
+      novelId: result.novelId,
+      chapterId: result.chapterId
+    });
+    return mappedResult;
   } catch (e) {
     console.error("[Main] db:update-idea failed:", e);
     throw e;
@@ -428,9 +670,31 @@ ipcMain.handle("db:update-idea", async (_, id, data) => {
 });
 ipcMain.handle("db:delete-idea", async (_, id) => {
   try {
-    return await db.idea.delete({ where: { id } });
+    const result = await db.idea.delete({ where: { id } });
+    await removeFromIndex("idea", id);
+    return result;
   } catch (e) {
     console.error("[Main] db:delete-idea failed:", e);
+    throw e;
+  }
+});
+ipcMain.handle("db:check-index-status", async (_, novelId) => {
+  try {
+    const stats = await getIndexStats(novelId);
+    const chapterCount = await db.chapter.count({
+      where: { volume: { novelId } }
+    });
+    const ideaCount = await db.idea.count({
+      where: { novelId }
+    });
+    return {
+      indexedChapters: stats.chapters,
+      totalChapters: chapterCount,
+      indexedIdeas: stats.ideas,
+      totalIdeas: ideaCount
+    };
+  } catch (e) {
+    console.error("[Main] db:check-index-status failed:", e);
     throw e;
   }
 });
@@ -448,6 +712,22 @@ ipcMain.handle("sync:push", async () => {
     return await syncManager.push();
   } catch (e) {
     console.error("[Main] sync:push failed:", e);
+    throw e;
+  }
+});
+ipcMain.handle("db:search", async (_, { novelId, keyword, limit = 20, offset = 0 }) => {
+  try {
+    return await search(novelId, keyword, limit, offset);
+  } catch (e) {
+    console.error("[Main] db:search failed:", e);
+    throw e;
+  }
+});
+ipcMain.handle("db:rebuild-search-index", async (_, novelId) => {
+  try {
+    return await rebuildIndex(novelId);
+  } catch (e) {
+    console.error("[Main] db:rebuild-search-index failed:", e);
     throw e;
   }
 });
@@ -521,6 +801,8 @@ app.whenReady().then(async () => {
     }
   }
   initDb(dbUrl);
+  await initSearchIndex();
+  console.log("[Main] Search index initialized");
   createWindow();
 });
 export {

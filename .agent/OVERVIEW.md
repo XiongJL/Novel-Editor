@@ -2,7 +2,7 @@
 
 This document provides a high-level summary of the Novel Editor project to help AI agents quickly establish context.
 
-**Last Updated**: 2026-02-04
+**Last Updated**: 2026-02-05
 
 ## 1. Essentials
 *   **Project**: Novel Editor (Monorepo)
@@ -15,6 +15,7 @@ This document provides a high-level summary of the Novel Editor project to help 
 *   **Important Paths**:
     *   `apps/desktop`: Main Electron application.
     *   `apps/desktop/src/components/LexicalEditor`: Lexical editor components and plugins.
+    *   `apps/desktop/electron/search`: FTS5 search index utility.
     *   `apps/backend`: Spring Boot sync server.
     *   `packages/core`: Shared database client (Prisma/SQLite) and types.
 *   **must use i18n**: All interface text must use internationalization (`react-i18next`).
@@ -61,6 +62,18 @@ This document provides a high-level summary of the Novel Editor project to help 
     *   Jump to idea location in editor
     *   Star/unstar ideas
     *   Underline highlighting for marked text
+*   **Global Search** (FTS5):
+    *   Full-text search across chapters and ideas
+    *   Real-time keyword highlighting on jump
+    *   Progressive loading (20 results per batch)
+    *   Progressive loading (20 results per batch)
+    *   Auto-indexing on save
+*   **Local Search (In-Editor)**:
+    *   Ctrl+F to trigger floating search bar
+    *   Search and Replace functionality
+    *   Regex and Case sensitivity support
+    *   Real-time highlighting using CSS Highlight API
+    *   Keyboard navigation (Enter/Shift+Enter) and ESC support
 
 ## 5. Current Status & Known Issues
 *   **Status**: 
@@ -68,6 +81,7 @@ This document provides a high-level summary of the Novel Editor project to help 
     *   Mobile view preview with iPhone frame.
     *   One-click formatting with language-aware punctuation.
     *   All toolbar items support i18n.
+    *   **Global search with FTS5 indexing complete.**
 *   **Critical Notes**:
     *   `packages/core` MUST be built (`pnpm build`) for Electron to load it.
     *   Old `EditorToolbar.tsx` component is deprecated (replaced by Lexical `ToolbarPlugin`).

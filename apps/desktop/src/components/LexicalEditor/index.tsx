@@ -17,6 +17,7 @@ import ShortcutsPlugin from './plugins/ShortcutsPlugin';
 import AutoFormatPlugin from './plugins/AutoFormatPlugin';
 import FloatingTextFormatToolbarPlugin from './plugins/FloatingTextFormatToolbarPlugin';
 import IdeaInteractionPlugin from './plugins/IdeaInteractionPlugin';
+import EditorSearchToolbar from './ui/EditorSearchToolbar';
 import { EditorPreferences } from '../../hooks/useEditorPreferences';
 import { ShortcutMap } from '../../hooks/useShortcuts';
 
@@ -234,6 +235,7 @@ export default function LexicalChapterEditor({
 
                 <FloatingTextFormatToolbarPlugin onAddIdea={onAddIdea} />
                 <IdeaInteractionPlugin onIdeaClick={onIdeaClick} />
+                <EditorSearchToolbar />
             </div>
         </LexicalComposer>
     );

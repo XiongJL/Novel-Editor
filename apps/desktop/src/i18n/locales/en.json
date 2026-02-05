@@ -47,12 +47,24 @@
         "novel": "Novels"
     },
     "noResults": "No results found",
-    "placeholder": "Search...",
+    "placeholder": "Search chapters and ideas...",
     "filter": {
         "allNovels": "All Novels",
         "allChapters": "All Chapters",
         "starredOnly": "Starred Only"
-    }
+    },
+    "chapters": "Chapters",
+    "ideas": "Ideas",
+    "loadMore": "Load more",
+    "hint": "Enter keywords to search",
+    "untitled": "Untitled",
+    "rebuildIndex": "Rebuild Index",
+    "toggleReplace": "Toggle Replace",
+    "matchCase": "Match Case",
+    "regex": "Use Regular Expression",
+    "replace": "Replace",
+    "replaceAll": "Replace All",
+    "find": "Find"
   },
   "idea": {
     "create": "Add Idea",

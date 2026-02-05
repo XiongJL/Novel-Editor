@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import { execSync } from 'child_process'
 import fs from 'fs'
+import * as searchIndex from './search/searchIndex'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -282,6 +283,15 @@ ipcMain.handle('db:save-chapter', async (_, { chapterId, content }: { chapterId:
             })
         ]);
 
+        // 3. Update Search Index
+        const chapterData = await db.chapter.findUnique({
+            where: { id: chapterId },
+            select: { id: true, title: true, content: true, volumeId: true }
+        });
+        if (chapterData) {
+            await searchIndex.indexChapter({ ...chapterData, novelId });
+        }
+
         return updatedChapter;
     } catch (e) {
         console.error('[Main] db:save-chapter failed:', e);
@@ -309,11 +319,22 @@ ipcMain.handle('db:create-idea', async (_, data: any) => {
         }) as any;
 
         // Map back for frontend
-        return {
+        const mappedResult = {
             ...result,
             tags: result.tags.map((t: any) => t.name),
             timestamp: result.createdAt.getTime()
         };
+
+        // Update search index
+        await searchIndex.indexIdea({
+            id: result.id,
+            content: result.content,
+            quote: result.quote,
+            novelId: result.novelId,
+            chapterId: result.chapterId
+        });
+
+        return mappedResult;
     } catch (e) {
         console.error('[Main] db:create-idea failed:', e);
         throw e;
@@ -373,11 +394,22 @@ ipcMain.handle('db:update-idea', async (_, id: string, data: any) => {
             include: { tags: true }
         }) as any;
 
-        return {
+        const mappedResult = {
             ...result,
             tags: result.tags.map((t: any) => t.name),
             timestamp: result.createdAt.getTime()
         };
+
+        // Update search index
+        await searchIndex.indexIdea({
+            id: result.id,
+            content: result.content,
+            quote: result.quote,
+            novelId: result.novelId,
+            chapterId: result.chapterId
+        });
+
+        return mappedResult;
     } catch (e) {
         console.error('[Main] db:update-idea failed:', e);
         throw e;
@@ -386,13 +418,41 @@ ipcMain.handle('db:update-idea', async (_, id: string, data: any) => {
 
 ipcMain.handle('db:delete-idea', async (_, id: string) => {
     try {
-        return await db.idea.delete({ where: { id } });
+        const result = await db.idea.delete({ where: { id } });
+        // Remove from search index
+        await searchIndex.removeFromIndex('idea', id);
+        return result;
     } catch (e) {
         console.error('[Main] db:delete-idea failed:', e);
         throw e;
     }
 });
 
+
+// Check index status
+ipcMain.handle('db:check-index-status', async (_, novelId: string) => {
+    try {
+        const stats = await searchIndex.getIndexStats(novelId);
+
+        // Get actual counts
+        const chapterCount = await db.chapter.count({
+            where: { volume: { novelId } }
+        });
+        const ideaCount = await db.idea.count({
+            where: { novelId }
+        });
+
+        return {
+            indexedChapters: stats.chapters,
+            totalChapters: chapterCount,
+            indexedIdeas: stats.ideas,
+            totalIdeas: ideaCount
+        };
+    } catch (e) {
+        console.error('[Main] db:check-index-status failed:', e);
+        throw e;
+    }
+});
 
 // --- Sync IPC ---
 import { SyncManager } from './sync/SyncManager';
@@ -412,6 +472,25 @@ ipcMain.handle('sync:push', async () => {
         return await syncManager.push();
     } catch (e) {
         console.error('[Main] sync:push failed:', e);
+        throw e;
+    }
+});
+
+// --- Search IPC ---
+ipcMain.handle('db:search', async (_, { novelId, keyword, limit = 20, offset = 0 }) => {
+    try {
+        return await searchIndex.search(novelId, keyword, limit, offset);
+    } catch (e) {
+        console.error('[Main] db:search failed:', e);
+        throw e;
+    }
+});
+
+ipcMain.handle('db:rebuild-search-index', async (_, novelId: string) => {
+    try {
+        return await searchIndex.rebuildIndex(novelId);
+    } catch (e) {
+        console.error('[Main] db:rebuild-search-index failed:', e);
         throw e;
     }
 });
@@ -513,6 +592,10 @@ app.whenReady().then(async () => {
     // 4. Initialize Core Database
     initDb(dbUrl);
 
-    // 5. Create Window
+    // 5. Initialize Search Index
+    await searchIndex.initSearchIndex();
+    console.log('[Main] Search index initialized');
+
+    // 6. Create Window
     createWindow();
 })

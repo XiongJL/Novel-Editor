@@ -11,6 +11,19 @@
   :root {
     --background: 0 0% 100%;
     --foreground: 222.2 84% 4.9%;
+
+    /* Light Theme Search Colors */
+    --search-highlight: rgba(253, 224, 71, 0.4);
+    --search-highlight-active: #f6b93b;
+    --search-highlight-text: inherit;
+  }
+
+  /* We might need a proper .dark selector if using class strategy */
+  .dark {
+    /* Dark Theme Search Colors */
+    --search-highlight: rgba(255, 255, 255, 0.2);
+    /* VS Code dark theme match highlight color is roughly this */
+    --search-highlight-active: #ea580c;
   }
 }
 
@@ -63,4 +76,22 @@
   60% {
     transform: translate3d(4px, 0, 0);
   }
+}
+
+/* CSS Highlight API for search results */
+::highlight(search-results) {
+  background-color: rgba(253, 224, 71, 0.5);
+  color: inherit;
+}
+
+/* Editor Local Search Highlights */
+::highlight(editor-search) {
+  background-color: var(--search-highlight);
+  color: inherit;
+}
+
+::highlight(editor-search-active) {
+  background-color: var(--search-highlight-active);
+  color: white;
+  /* Active match should be very visible */
 }

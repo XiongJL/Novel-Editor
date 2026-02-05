@@ -46,6 +46,19 @@ export default function SettingsModal({ isOpen, onClose, novelContext }: Setting
         }
     }, [isOpen, novelContext]);
 
+    // ESC to close
+    useEffect(() => {
+        if (!isOpen) return;
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') {
+                e.stopPropagation();
+                onClose();
+            }
+        };
+        window.addEventListener('keydown', handleKeyDown, { capture: true });
+        return () => window.removeEventListener('keydown', handleKeyDown, { capture: true });
+    }, [isOpen, onClose]);
+
     const handleSaveFormatting = async () => {
         if (novelContext) {
             await novelContext.onSaveFormatting(JSON.stringify(config));

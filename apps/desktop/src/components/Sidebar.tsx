@@ -118,10 +118,16 @@ export default function Sidebar({ volumes, currentChapterId, formatting, onSelec
                     <div key={volume.id} className="mb-4">
                         <div
                             className={clsx(
-                                "flex items-center justify-between p-2 rounded cursor-pointer group",
+                                "flex items-center justify-between p-2 rounded cursor-pointer group outline-none focus:ring-1 focus:ring-purple-500",
                                 isDark ? "text-neutral-300 hover:bg-white/5" : "text-neutral-700 hover:bg-black/5"
                             )}
+                            tabIndex={0}
                             onDoubleClick={(e) => startEdit(volume.id, volume.title, e)}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                    toggleVolume(volume.id);
+                                }
+                            }}
                         >
                             <span className="flex items-center gap-2 text-sm font-medium flex-1">
                                 <button
@@ -179,8 +185,14 @@ export default function Sidebar({ volumes, currentChapterId, formatting, onSelec
                                             key={chapter.id}
                                             onClick={() => onSelectChapter(chapter.id)}
                                             onDoubleClick={(e) => startEdit(chapter.id, chapter.title, e)}
+                                            tabIndex={0}
+                                            onKeyDown={(e) => {
+                                                if (e.key === 'Enter') {
+                                                    onSelectChapter(chapter.id);
+                                                }
+                                            }}
                                             className={clsx(
-                                                "flex items-center gap-2 p-2 mt-1 rounded text-sm cursor-pointer transition-colors min-h-[32px]",
+                                                "flex items-center gap-2 p-2 mt-1 rounded text-sm cursor-pointer transition-colors min-h-[32px] outline-none focus:ring-1 focus:ring-purple-500",
                                                 currentChapterId === chapter.id
                                                     ? (isDark ? "bg-purple-500/10 text-purple-300" : "bg-purple-500/10 text-purple-700")
                                                     : (isDark ? "text-neutral-500 hover:text-neutral-300 hover:bg-white/5" : "text-neutral-500 hover:text-neutral-800 hover:bg-black/5")
@@ -219,6 +231,6 @@ export default function Sidebar({ volumes, currentChapterId, formatting, onSelec
                     </div>
                 ))}
             </div>
-        </div>
+        </div >
     );
 }

@@ -1,31 +1,46 @@
-# 任务列表 (Active Task)
+# Tasks
 
-- [x] 初始化项目上下文
-    - [x] 阅读 .agent/OVERVIEW.md
-    - [x] 阅读 DEVELOPMENT.md
-    - [x] 阅读 README.md
-    - [x] 阅读 SyncDesign.md
-- [x] 优化上下文初始化流程
-    - [x] 创建 `.agent/active_task.md` 持久化任务文件
-    - [x] 创建 `.agent/MEMORY.md` 记忆文件
-    - [x] 创建 `.agent/workflows/init-context.md` 工作流
-- [x] 优化灵感系统 (Idea System) - 2026-02-04
-    - [x] 后端实体重构：Idea.java 继承 BaseEntity，添加 version/deleted 字段
-    - [x] 重构高亮逻辑：创建自定义 IdeaMarkNode 扩展 @lexical/mark
-    - [x] 修复主题配置：theme.mark 替换 theme.ideaMark
-    - [x] 实现 data-idea-id 属性渲染，支持点击检测和跳转定位
-    - [x] 更新 IdeaInteractionPlugin：优先使用 data-idea-id 属性检测
-    - [x] 修复 UI 交互：补全 i18n 翻译 (zh.json / en.json)
-    - [x] 黄色下划线样式（CSS 已配置）
-    - [x] 修复手动创建灵感保存问题
-    - [x] 添加 Ctrl+I 快捷键创建全局灵感
-    - [x] 修复灵感列表过滤逻辑（显示小说全部灵感）
-    - [x] 添加 F12/Ctrl+Shift+I 开发者工具快捷键
-- [ ] 灵感搜索与过滤功能 - 参考 `searchDesign.md`
-    - [ ] 快捷按钮：全部/当前章节过滤
-    - [ ] 内容模糊搜索
-    - [ ] 时间区间选择
-    - [ ] 过滤器 UI 组件
+- [ ] 灵感搜索与过滤功能 (Idea Search & Filtering)
+    - [x] **Phase 1: 统一搜索工作台基础框架**
+        - [x] 创建侧边栏/弹窗容器组件 (`UnifiedSearchWorkbench`)
+        - [x] 实现一级过滤器 (搜索范围: 全部/灵感/章节/小说)
+        - [x] 实现内容类型过滤器 (已整合进搜索范围)
+        - [x] 实现防抖关键词搜索框
+        - [x] 确保核心数据结构支持字段检索
+    - [x] **Phase 2: 灵感工作台深度功能**
+        - [x] 实现二级过滤器 (小说/卷/章节联动) - *已精简为灵感专用过滤器*
+        - [x] 标签筛选与管理 - *已实现带搜索功能的自定义下拉菜单*
+        - [x] 时间范围与收藏筛选 - *已实现*
+        - [x] 灵感结果卡片 UI (带原文引用)
+        - [x] **Phase 2.5: 功能整合 (IdeaList -> UnifiedSearchWorkbench)**
+            - [x] 增强 `SearchResultsList`: 添加星标(Star)与删除(Delete)按钮
+            - [x] 增强 `UnifiedSearchWorkbench`: 添加新建灵感(+)入口
+            - [x] 重构 `Editor.tsx`: 替换灵感Tab为增强版搜索工作台
+            - [x] **侧边栏分离 (Separation)**
+                - [x] 创建 `SearchSidebar`: 独立的搜索侧边栏组件
+                - [x] 简化 `UnifiedSearchWorkbench`: 仅保留灵感搜索，移除Scope切换
+                - [x] 简化 `IdeaAdvancedFilter`: 移除小说/章节下拉过滤
+            - [x] 废弃并移除 `IdeaList.tsx`
+            - [x] **反向导航反馈 (Reverse Feedback)**
+                - [x] 在 `Editor.tsx` 增加高亮状态逻辑
+                - [x] 在 `SearchResultsList` 实现自动滚动与闪烁动画
+            - [x] **灵感卡片收藏 UI 增强 (Starred UI Refinement)**
+                - [x] 迭代收藏样式：移除边框变色，采用更优雅的角标 Banner 设计
+            - [x] **编辑器暗色模式适配 (Dark Mode Fix)**
+                - [x] 修复编辑器高亮文字在暗色模式下显示为黑色的问题
+            - [x] **设置区域国际化 (Settings i18n)**
+                - [x] 为设置面板的“通用”和“快捷键”区域添加完整的多语言支持
+            - [x] **设置区域主题适配 (Settings Theme Fix)**
+                - [x] 修复设置面板在浅色模式下样式不生效的问题，实现完整的视觉适配
+            - [x] **主页列表主题适配 (Home Theme Fix)**
+                - [x] 适配 `Home.tsx` 及其子组件 `ProjectCard` 在浅色模式下的样式
+    - [x] **Git 初始化与备份 (Git Init)**
+        - [x] 初始化 Git 仓库并推送到远程 GitHub
+        - [x] 配置完善的 `.gitignore` 规则（排除日志、构建产物、依赖等）
+    - [x] **Phase 3: 全局搜索集成**
+        - [x] 接入小说与章节内容索引 (FTS5 全文索引)
+        - [x] 搜索结果分组展示 (章节/灵感)
+        - [x] 实现点击跳转 + 关键词高亮
 - [ ] 云同步功能开发
-    - [ ] 审查 `apps/backend/src/main/java/com/noveleditor/backend/service/SyncService.java`
-    - [ ] 确定下一步同步功能开发计划
+    - [ ] `SyncService.java` 代码审查
+    - [ ] 增量同步逻辑完善

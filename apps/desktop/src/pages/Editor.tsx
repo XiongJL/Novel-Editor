@@ -57,6 +57,10 @@ export default function Editor({ novelId, onBack }: EditorProps) {
         if (activeTab === tab) {
             setIsSidePanelOpen(!isSidePanelOpen);
         } else {
+            // Clear search highlights when leaving search tab
+            if (activeTab === 'search') {
+                clearSearchHighlights();
+            }
             setActiveTab(tab);
             setIsSidePanelOpen(true);
         }
@@ -65,6 +69,7 @@ export default function Editor({ novelId, onBack }: EditorProps) {
     // Editor State
     const [title, setTitle] = useState('');
     const [content, setContent] = useState(''); // Stores JSON string or plain text
+    const [activeSearchKeyword, setActiveSearchKeyword] = useState<string>(''); // Current search keyword for highlighting
 
     // Lexical Instance
     const editorRef = useRef<LexicalEditor | null>(null);
@@ -251,6 +256,20 @@ export default function Editor({ novelId, onBack }: EditorProps) {
     // Shortcuts
     const { shortcuts } = useShortcuts();
 
+    // Global Search Shortcut (Ctrl+Shift+F)
+    useEffect(() => {
+        const handleGlobalKeyDown = (e: KeyboardEvent) => {
+            if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'f') {
+                e.preventDefault();
+                setActiveTab('search');
+                setIsSidePanelOpen(true);
+            }
+        };
+
+        window.addEventListener('keydown', handleGlobalKeyDown);
+        return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+    }, []);
+
     // Idea Handlers
     const handleAddIdea = async (id: string, quote: string, cursor: string, note: string) => {
         if (!currentChapter) return;
@@ -283,6 +302,18 @@ export default function Editor({ novelId, onBack }: EditorProps) {
         setGlobalIdeaContent('');
         setIsGlobalIdeaModalOpen(true);
     };
+
+    useEffect(() => {
+        if (!isGlobalIdeaModalOpen) return;
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') {
+                e.stopPropagation();
+                setIsGlobalIdeaModalOpen(false);
+            }
+        };
+        window.addEventListener('keydown', handleKeyDown, { capture: true });
+        return () => window.removeEventListener('keydown', handleKeyDown, { capture: true });
+    }, [isGlobalIdeaModalOpen]);
 
     const submitGlobalIdea = async () => {
         if (!globalIdeaContent.trim()) {
@@ -363,6 +394,8 @@ export default function Editor({ novelId, onBack }: EditorProps) {
     };
 
     const [pendingJumpIdea, setPendingJumpIdea] = useState<Idea | null>(null);
+    const [pendingSearchJump, setPendingSearchJump] = useState<{ chapterId: string; keyword: string } | null>(null);
+
     useEffect(() => {
         if (pendingJumpIdea && currentChapter?.id === pendingJumpIdea.chapterId) {
             // Check if Lexical is ready? We rely on it being mounted.
@@ -373,6 +406,100 @@ export default function Editor({ novelId, onBack }: EditorProps) {
             }, 300);
         }
     }, [pendingJumpIdea, currentChapter]);
+
+    // Handle search result jump with keyword highlighting
+    useEffect(() => {
+        if (pendingSearchJump && currentChapter?.id === pendingSearchJump.chapterId) {
+            setTimeout(() => {
+                highlightKeyword(pendingSearchJump.keyword);
+                setPendingSearchJump(null);
+            }, 300);
+        }
+    }, [pendingSearchJump, currentChapter]);
+
+    const handleJumpToChapter = (chapterId: string, keyword: string) => {
+        if (currentChapter?.id === chapterId) {
+            // Same chapter, just highlight
+            highlightKeyword(keyword);
+        } else {
+            // Switch chapter first, then highlight
+            handleSelectChapter(chapterId).then(() => {
+                setPendingSearchJump({ chapterId, keyword });
+            });
+        }
+    };
+
+    const highlightKeyword = (keyword: string) => {
+        const editor = editorRef.current;
+        if (!editor) return;
+
+        // Store keyword for persistent highlighting
+        setActiveSearchKeyword(keyword);
+
+        const editorRoot = editor.getRootElement();
+        if (!editorRoot) return;
+
+        // Clear previous highlights
+        if ('highlights' in CSS) {
+            (CSS as any).highlights.delete('search-results');
+        }
+
+        const ranges: Range[] = [];
+        const lowerKeyword = keyword.toLowerCase();
+        let firstMatch = true;
+
+        // Use TreeWalker to find text nodes
+        const treeWalker = document.createTreeWalker(
+            editorRoot,
+            NodeFilter.SHOW_TEXT,
+            null
+        );
+
+        let currentNode;
+        while ((currentNode = treeWalker.nextNode())) {
+            const textContent = currentNode.textContent || '';
+            const lowerText = textContent.toLowerCase();
+            let startPos = 0;
+
+            while (startPos < textContent.length) {
+                const index = lowerText.indexOf(lowerKeyword, startPos);
+                if (index === -1) break;
+
+                const range = new Range();
+                range.setStart(currentNode, index);
+                range.setEnd(currentNode, index + keyword.length);
+                ranges.push(range);
+
+                // Scroll to first match
+                if (firstMatch) {
+                    const rect = range.getBoundingClientRect();
+                    if (rect.top) {
+                        (currentNode.parentElement as HTMLElement)?.scrollIntoView({
+                            behavior: 'smooth',
+                            block: 'center'
+                        });
+                    }
+                    firstMatch = false;
+                }
+
+                startPos = index + keyword.length;
+            }
+        }
+
+        // Apply CSS Highlight API if supported
+        if ('highlights' in CSS && ranges.length > 0) {
+            const highlight = new (window as any).Highlight(...ranges);
+            (CSS as any).highlights.set('search-results', highlight);
+        }
+    };
+
+    // Clear search highlights
+    const clearSearchHighlights = () => {
+        setActiveSearchKeyword('');
+        if ('highlights' in CSS) {
+            (CSS as any).highlights.delete('search-results');
+        }
+    };
 
     const executeJump = (idea: Idea) => {
         const editor = editorRef.current;
@@ -542,7 +669,21 @@ export default function Editor({ novelId, onBack }: EditorProps) {
                         {activeTab === 'search' && (
                             <SearchSidebar
                                 theme={preferences.theme}
-                                onClose={() => setIsSidePanelOpen(false)}
+                                novelId={novelId}
+                                onClose={() => {
+                                    clearSearchHighlights();
+                                    setIsSidePanelOpen(false);
+                                }}
+                                onJumpToChapter={handleJumpToChapter}
+                                onJumpToIdea={(ideaId) => {
+                                    const idea = ideas.find(i => i.id === ideaId);
+                                    if (idea) handleJumpToIdea(idea);
+                                }}
+                                onSearchChange={(keyword) => {
+                                    if (!keyword.trim()) {
+                                        clearSearchHighlights();
+                                    }
+                                }}
                             />
                         )}
                     </motion.div>

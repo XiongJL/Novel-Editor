@@ -47,12 +47,24 @@
         "novel": "小说"
     },
     "noResults": "没有找到相关内容",
-    "placeholder": "搜索...",
+    "placeholder": "搜索章节和灵感...",
     "filter": {
         "allNovels": "所有小说",
         "allChapters": "所有章节",
         "starredOnly": "仅收藏"
-    }
+    },
+    "chapters": "章节",
+    "ideas": "灵感",
+    "loadMore": "加载更多",
+    "hint": "输入关键词搜索",
+    "untitled": "无标题",
+    "rebuildIndex": "重建索引",
+    "toggleReplace": "显示/隐藏替换",
+    "matchCase": "区分大小写",
+    "regex": "使用正则表达式",
+    "replace": "替换",
+    "replaceAll": "全部替换",
+    "find": "查找"
   },
     "idea": {
         "create": "添加灵感",

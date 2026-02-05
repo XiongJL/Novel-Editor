@@ -19,6 +19,12 @@ contextBridge.exposeInMainWorld('db', {
     createIdea: (data: any) => ipcRenderer.invoke('db:create-idea', data),
     updateIdea: (id: string, data: any) => ipcRenderer.invoke('db:update-idea', id, data),
     deleteIdea: (id: string) => ipcRenderer.invoke('db:delete-idea', id),
+
+    // Search
+    search: (params: { novelId: string; keyword: string; limit?: number; offset?: number }) =>
+        ipcRenderer.invoke('db:search', params),
+    rebuildSearchIndex: (novelId: string) => ipcRenderer.invoke('db:rebuild-search-index', novelId),
+    checkIndexStatus: (novelId: string) => ipcRenderer.invoke('db:check-index-status', novelId),
 })
 
 contextBridge.exposeInMainWorld('sync', {

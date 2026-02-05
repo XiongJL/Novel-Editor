@@ -16,7 +16,11 @@ electron.contextBridge.exposeInMainWorld("db", {
   getIdeas: (novelId) => electron.ipcRenderer.invoke("db:get-ideas", novelId),
   createIdea: (data) => electron.ipcRenderer.invoke("db:create-idea", data),
   updateIdea: (id, data) => electron.ipcRenderer.invoke("db:update-idea", id, data),
-  deleteIdea: (id) => electron.ipcRenderer.invoke("db:delete-idea", id)
+  deleteIdea: (id) => electron.ipcRenderer.invoke("db:delete-idea", id),
+  // Search
+  search: (params) => electron.ipcRenderer.invoke("db:search", params),
+  rebuildSearchIndex: (novelId) => electron.ipcRenderer.invoke("db:rebuild-search-index", novelId),
+  checkIndexStatus: (novelId) => electron.ipcRenderer.invoke("db:check-index-status", novelId)
 });
 electron.contextBridge.exposeInMainWorld("sync", {
   pull: () => electron.ipcRenderer.invoke("sync:pull"),

@@ -16,3 +16,8 @@ pnpm-debug.log*
 .env
 .env.local
 .env.*.local
+target
+
+# SQLite database
+*.db
+*.db-journal
