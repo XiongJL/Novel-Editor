@@ -30,6 +30,7 @@
                 - [x] 修复编辑器高亮文字在暗色模式下显示为黑色的问题
             - [x] **设置区域国际化 (Settings i18n)**
                 - [x] 为设置面板的“通用”和“快捷键”区域添加完整的多语言支持
+                - [x] 修复漏掉的快捷键翻译 ("Enter Focus", "Create Idea")
             - [x] **设置区域主题适配 (Settings Theme Fix)**
                 - [x] 修复设置面板在浅色模式下样式不生效的问题，实现完整的视觉适配
             - [x] **主页列表主题适配 (Home Theme Fix)**
@@ -41,6 +42,12 @@
         - [x] 接入小说与章节内容索引 (FTS5 全文索引)
         - [x] 搜索结果分组展示 (章节/灵感)
         - [x] 实现点击跳转 + 关键词高亮
+- [x] **数据备份与恢复 (Backup & Restore System)**
+    - [x] 数据导出 (Export): 格式为 `.nebak` (ZIP + JSON + Manifest)
+    - [x] 数据加密 (Encryption): AES-256-GCM + PBKDF2
+    - [x] 自动备份 (Auto Backup): 恢复前自动快照，自动轮替保留最新3份
+    - [x] 数据恢复 (Restore): 事务性恢复 (Atomicity)，清空旧数据后写入新数据
+    - [x] 备份设置面板 (Settings UI): 集成于设置模态框，支持密码保护
 - [ ] 云同步功能开发
     - [ ] `SyncService.java` 代码审查
     - [ ] 增量同步逻辑完善

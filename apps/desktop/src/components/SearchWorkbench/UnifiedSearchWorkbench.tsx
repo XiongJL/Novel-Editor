@@ -130,7 +130,7 @@ export default function UnifiedSearchWorkbench({ ideas, novelId, onJump, onUpdat
                         type="text"
                         value={query}
                         onChange={(e) => setQuery(e.target.value)}
-                        placeholder={t('search.placeholder', '搜索...')}
+                        placeholder={t('idea.searchPlaceholder')}
                         className={clsx(
                             "w-full pl-9 pr-3 py-2 text-sm rounded-lg border outline-none transition-all",
                             isDark

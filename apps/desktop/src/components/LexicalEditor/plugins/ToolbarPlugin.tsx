@@ -1,11 +1,13 @@
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext';
+import { useState } from 'react';
 import {
     FORMAT_TEXT_COMMAND,
     FORMAT_ELEMENT_COMMAND,
     UNDO_COMMAND,
     REDO_COMMAND,
     TextFormatType,
-    ElementFormatType
+    ElementFormatType,
+    $getRoot
 } from 'lexical';
 import {
     Undo, Redo,
@@ -13,23 +15,40 @@ import {
     AlignLeft, AlignCenter, AlignRight, AlignJustify,
     Indent,
     Monitor, Smartphone,
-    GalleryHorizontalEnd
+    GalleryHorizontalEnd,
+    Copy,
+    Check
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { EditorPreferences } from '../../../hooks/useEditorPreferences';
 import { FORMAT_CONTENT_COMMAND } from './AutoFormatPlugin';
+import { RecentFilesDropdown, RecentFile } from '../../RecentFilesDropdown';
 
 const Divider = ({ isDark }: { isDark: boolean }) => <div className={`w-[1px] h-6 mx-1 ${isDark ? 'bg-neutral-700' : 'bg-neutral-300'}`} />;
 
 interface ToolbarPluginProps {
     preferences: EditorPreferences;
     onUpdatePreference: <K extends keyof EditorPreferences>(key: K, value: EditorPreferences[K]) => void;
+    recentFiles?: RecentFile[];
+    onDeleteRecent?: (id: string) => void;
+    onRecentFileSelect?: (id: string) => void;
 }
 
-export default function ToolbarPlugin({ preferences, onUpdatePreference }: ToolbarPluginProps) {
+export default function ToolbarPlugin({ preferences, onUpdatePreference, recentFiles = [], onDeleteRecent, onRecentFileSelect }: ToolbarPluginProps) {
     const [editor] = useLexicalComposerContext();
     const { t } = useTranslation();
     const isDark = preferences.theme === 'dark';
+    const [isCopied, setIsCopied] = useState(false);
+
+    const handleCopy = () => {
+        editor.getEditorState().read(() => {
+            const textContent = $getRoot().getTextContent();
+            navigator.clipboard.writeText(textContent).then(() => {
+                setIsCopied(true);
+                setTimeout(() => setIsCopied(false), 2000);
+            });
+        });
+    };
 
     const formatText = (format: TextFormatType) => {
         editor.dispatchCommand(FORMAT_TEXT_COMMAND, format);
@@ -51,7 +70,7 @@ export default function ToolbarPlugin({ preferences, onUpdatePreference }: Toolb
     );
 
     return (
-        <div className={`flex flex-wrap items-center gap-1 p-2 border-b z-10 transition-colors ${isDark ? 'bg-[#1a1a1f] border-white/5' : 'bg-white border-gray-200'}`}>
+        <div className={`flex flex-wrap items-center gap-1 py-2 px-6 border-b z-10 transition-colors ${isDark ? 'bg-[#1a1a1f] border-white/5' : 'bg-white border-gray-200'}`}>
             {/* Settings Group */}
             <div className="flex items-center gap-2 mr-2">
                 {/* Font Family */}
@@ -96,6 +115,16 @@ export default function ToolbarPlugin({ preferences, onUpdatePreference }: Toolb
                         <Smartphone className="w-3.5 h-3.5" />
                     </button>
                 </div>
+
+                {/* Recent Files Dropdown */}
+                {onDeleteRecent && onRecentFileSelect && (
+                    <RecentFilesDropdown
+                        files={recentFiles}
+                        onSelect={onRecentFileSelect}
+                        onDelete={onDeleteRecent}
+                        theme={preferences.theme}
+                    />
+                )}
             </div>
 
             <Divider isDark={isDark} />
@@ -144,6 +173,17 @@ export default function ToolbarPlugin({ preferences, onUpdatePreference }: Toolb
                     label={t('toolbar.format')}
                 />
             </div>
+
+            <Divider isDark={isDark} />
+
+            {/* Copy */}
+            <Button
+                onClick={handleCopy}
+                icon={isCopied ? Check : Copy}
+                title={t('toolbar.copy')}
+                label={isCopied ? t('toolbar.copied') : t('toolbar.copy')}
+                active={isCopied}
+            />
         </div>
     );
 }

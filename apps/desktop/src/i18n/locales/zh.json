@@ -25,7 +25,11 @@
     "selectChapter": "选择章节",
     "editing": "编辑中",
     "save": "保存 (Ctrl+S)",
-    "settings": "作品设置"
+    "settings": "作品设置",
+    "flowMode": "心流模式",
+    "inFlow": "心流中",
+    "newIdea": "记录灵感",
+    "ideaPlaceholder": "写下你的想法..."
   },
   "sidebar": {
     "explorer": "目录",
@@ -47,7 +51,7 @@
         "novel": "小说"
     },
     "noResults": "没有找到相关内容",
-    "placeholder": "搜索章节和灵感...",
+    "placeholder": "搜索所有……",
     "filter": {
         "allNovels": "所有小说",
         "allChapters": "所有章节",
@@ -55,6 +59,7 @@
     },
     "chapters": "章节",
     "ideas": "灵感",
+    "volumes": "卷",
     "loadMore": "加载更多",
     "hint": "输入关键词搜索",
     "untitled": "无标题",
@@ -68,6 +73,7 @@
   },
     "idea": {
         "create": "添加灵感",
+        "searchPlaceholder": "搜索灵感……",
         "placeholder": "记录点什么...",
         "jump": "跳转到原文",
         "jumpFailed": "原文已变更，无法定位"
@@ -95,7 +101,9 @@
     "mobileMode": "手机预览",
     "fontSerif": "宋体",
     "fontSans": "黑体",
-    "fontKaiti": "楷体"
+    "fontKaiti": "楷体",
+    "copy": "复制全文",
+    "copied": "已复制"
   },
   "settings": {
     "title": "设置",
@@ -126,8 +134,32 @@
         "save": "保存",
         "undo": "撤销",
         "redo": "重做",
-        "toggle_sidebar": "切换侧边栏"
+        "toggle_sidebar": "切换侧边栏",
+        "enter_focus": "进入专注模式",
+        "create_idea": "新建灵感"
       }
     }
+  },
+  "backup": {
+    "title": "备份与恢复",
+    "exportTitle": "导出数据 (导出为 .nebak)",
+    "exportDesc": "创建当前所有作品的完整备份，包含所有小说、章节、角色和灵感数据。",
+    "encryptOption": "使用密码加密保护",
+    "passwordPlaceholder": "请输入加密密码...",
+    "exportBtn": "导出备份",
+    "exportSuccess": "备份已导出成功！",
+    "exportFailed": "导出失败，请重试。",
+    "importTitle": "从备份恢复",
+    "importDesc": "可跨设备恢复。警告：此操作将清空当前所有数据并将软件还原到备份时的状态。恢复前系统会自动创建一个临时的自动备份。",
+    "importBtn": "选择备份文件恢复...",
+    "importSuccess": "恢复成功，正在刷新...",
+    "importFailed": "恢复失败",
+    "enterPassword": "此备份已加密，请输入密码：",
+    "passwordRequiredDesc": "此备份已加密，请输入密码进行恢复。",
+    "passwordInvalid": "密码错误或损坏",
+    "autoTitle": "最近自动备份",
+    "autoDesc": "最近3次危险操作（如恢复）前的自动快照。",
+    "confirmRestoreAuto": "确定要回滚到此自动备份吗？当前数据将丢失。",
+    "restoreBtn": "回滚"
   }
 }

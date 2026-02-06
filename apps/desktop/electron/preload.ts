@@ -27,7 +27,23 @@ contextBridge.exposeInMainWorld('db', {
     checkIndexStatus: (novelId: string) => ipcRenderer.invoke('db:check-index-status', novelId),
 })
 
+contextBridge.exposeInMainWorld('electron', {
+    toggleFullScreen: () => ipcRenderer.invoke('app:toggle-fullscreen'),
+    onFullScreenChange: (callback: (isFullScreen: boolean) => void) => {
+        const listener = (_event: any, state: boolean) => callback(state);
+        ipcRenderer.on('app:fullscreen-change', listener);
+        return () => ipcRenderer.removeListener('app:fullscreen-change', listener);
+    }
+})
+
 contextBridge.exposeInMainWorld('sync', {
     pull: () => ipcRenderer.invoke('sync:pull'),
     push: () => ipcRenderer.invoke('sync:push'),
+})
+
+contextBridge.exposeInMainWorld('backup', {
+    export: (password?: string) => ipcRenderer.invoke('backup:export', password),
+    import: (filePath?: string, password?: string) => ipcRenderer.invoke('backup:import', { filePath, password }),
+    getAutoBackups: () => ipcRenderer.invoke('backup:get-auto'),
+    restoreAutoBackup: (filename: string) => ipcRenderer.invoke('backup:restore-auto', filename),
 })

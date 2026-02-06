@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowLeft, Save, PanelLeftClose, PanelLeftOpen, Settings, Info } from 'lucide-react';
+import { ArrowLeft, Save, PanelLeftClose, PanelLeftOpen, Settings, Info, ChevronRight } from 'lucide-react';
 import Sidebar from '../components/Sidebar';
 import ActivityBar, { ActivityTab } from '../components/ActivityBar';
 import SettingsModal from '../components/SettingsModal';
@@ -14,6 +14,9 @@ import { $isMarkNode, $unwrapMarkNode } from '@lexical/mark';
 import { $isIdeaMarkNode } from '../components/LexicalEditor/nodes/IdeaMarkNode';
 import UnifiedSearchWorkbench from '../components/SearchWorkbench/UnifiedSearchWorkbench';
 import SearchSidebar from '../components/SearchWorkbench/SearchSidebar';
+import { FlowModeButton } from '../components/FlowModeButton';
+import { GlobalIdeaModal } from '../components/GlobalIdeaModal';
+import { RecentFile } from '../components/RecentFilesDropdown';
 import { Idea } from '../types';
 // TODO: Add filter state for chapter-only, search text, date range
 // const filteredIdeas = ideas;
@@ -46,7 +49,98 @@ export default function Editor({ novelId, onBack }: EditorProps) {
 
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
     const [isGlobalIdeaModalOpen, setIsGlobalIdeaModalOpen] = useState(false);
-    const [globalIdeaContent, setGlobalIdeaContent] = useState('');
+    const [recentFiles, setRecentFiles] = useState<RecentFile[]>([]);
+
+    const [isFlowMode, setIsFlowMode] = useState(false);
+    const [isFlowEntering, setIsFlowEntering] = useState(false);
+    const [isFlowSwitching, setIsFlowSwitching] = useState(false);
+
+    const toggleFlowMode = useCallback(async () => {
+        // 1. Curtain Down (Start Transition)
+        setIsFlowSwitching(true);
+
+        const nextState = !isFlowMode;
+        console.log('[FlowMode] Toggling state to:', nextState);
+
+        // Allow curtain to fade in before shifting layout
+        setTimeout(async () => {
+            // 2. Layout & Class Sync
+            try {
+                if (nextState) {
+                    document.body.classList.add('flow-mode-active');
+                    setIsSidePanelOpen(false);
+                    // Trigger entering animation (vignette)
+                    setIsFlowEntering(true);
+                    setTimeout(() => setIsFlowEntering(false), 1500);
+                } else {
+                    document.body.classList.remove('flow-mode-active');
+                    setIsSidePanelOpen(true);
+                }
+                setIsFlowMode(nextState);
+                console.log('[FlowMode] UI state updated successfully');
+            } catch (err) {
+                console.error('[FlowMode] Failed to update UI state:', err);
+            }
+
+            // 3. Fullscreen Handshake
+            try {
+                if ((window as any).electron?.toggleFullScreen) {
+                    await (window as any).electron.toggleFullScreen();
+                }
+            } catch (e) {
+                console.warn('[FlowMode] Fullscreen toggle failed:', e);
+            }
+
+            // 4. Focus Editor
+            setTimeout(() => {
+                if (editorRef.current) {
+                    editorRef.current.focus();
+                }
+            }, 500);
+
+            // 5. Curtain Up (End Transition)
+            setTimeout(() => {
+                setIsFlowSwitching(false);
+            }, 400); // Wait for sidebar/layout transition to finish (0.3s)
+        }, 100);
+
+    }, [isFlowMode]);
+
+    // Cleanup Flow Mode on Unmount
+    useEffect(() => {
+        return () => {
+            document.body.classList.remove('flow-mode-active');
+        };
+    }, []);
+
+    // Handle ESC key in Flow Mode (Capture Phase to override Lexical)
+    useEffect(() => {
+        if (!isFlowMode) return;
+
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                e.stopPropagation();
+
+                if (isSidePanelOpen) {
+                    setIsSidePanelOpen(false);
+                } else {
+                    // Trigger exit
+                    toggleFlowMode();
+                }
+            }
+        };
+
+        window.addEventListener('keydown', handleKeyDown, true);
+        return () => window.removeEventListener('keydown', handleKeyDown, true);
+    }, [isFlowMode, isSidePanelOpen, toggleFlowMode]);
+
+    // Clear search highlights
+    const clearSearchHighlights = () => {
+        if ('highlights' in CSS) {
+            (CSS as any).highlights.delete('search-results');
+        }
+    };
 
     const handleTabChange = (tab: ActivityTab) => {
         if (tab === 'settings') {
@@ -69,7 +163,6 @@ export default function Editor({ novelId, onBack }: EditorProps) {
     // Editor State
     const [title, setTitle] = useState('');
     const [content, setContent] = useState(''); // Stores JSON string or plain text
-    const [activeSearchKeyword, setActiveSearchKeyword] = useState<string>(''); // Current search keyword for highlighting
 
     // Lexical Instance
     const editorRef = useRef<LexicalEditor | null>(null);
@@ -81,6 +174,62 @@ export default function Editor({ novelId, onBack }: EditorProps) {
             if (found) setNovel(found);
         });
     }, [novelId]);
+
+    // Load Recent Files
+    useEffect(() => {
+        if (!novelId) return;
+        try {
+            const stored = localStorage.getItem(`recent_files_${novelId}`);
+            if (stored) {
+                setRecentFiles(JSON.parse(stored));
+            } else {
+                setRecentFiles([]);
+            }
+        } catch (e) {
+            console.error('Failed to load recent files');
+        }
+    }, [novelId]);
+
+    // Update Recent Files Helper
+    const addToRecentFiles = useCallback((chapter: Chapter) => {
+        setRecentFiles(prev => {
+            // Remove existing if present
+            const filtered = prev.filter(f => f.id !== chapter.id);
+            const newFile: RecentFile = {
+                id: chapter.id,
+                title: chapter.title,
+                timestamp: Date.now()
+            };
+            // Add to top, limit to 25
+            const updated = [newFile, ...filtered].slice(0, 25);
+            localStorage.setItem(`recent_files_${novelId}`, JSON.stringify(updated));
+            return updated;
+        });
+    }, [novelId]);
+
+    const handleDeleteRecent = (id: string) => {
+        setRecentFiles(prev => {
+            const updated = prev.filter(f => f.id !== id);
+            localStorage.setItem(`recent_files_${novelId}`, JSON.stringify(updated));
+            return updated;
+        });
+    };
+
+    // Sync isFlowMode with manual fullscreen exit (ESC/F11 via Electron Events)
+    useEffect(() => {
+        if (!(window as any).electron?.onFullScreenChange) return;
+
+        const unsubscribe = (window as any).electron.onFullScreenChange((isFullScreen: boolean) => {
+            if (!isFullScreen && isFlowMode) {
+                // User exited fullscreen (e.g., via ESC)
+                document.body.classList.remove('flow-mode-active');
+                setIsFlowMode(false);
+                setIsSidePanelOpen(true);
+            }
+        });
+
+        return () => unsubscribe();
+    }, [isFlowMode]);
 
     // Load Volumes
     const loadVolumes = useCallback(async () => {
@@ -128,6 +277,7 @@ export default function Editor({ novelId, onBack }: EditorProps) {
                 setTitle(chapter.title);
                 setContent(chapter.content);
                 localStorage.setItem(`last_chapter_${novelId}`, chapterId);
+                addToRecentFiles(chapter); // Add to recent files on selection
             }
         } catch (error) {
             console.error('Failed to load chapter:', error);
@@ -203,12 +353,15 @@ export default function Editor({ novelId, onBack }: EditorProps) {
         const currentRef = chapterRef.current;
         if (!currentRef) return;
 
+        let chapterUpdated = false;
+
         // Save Content
         if (contentRef.current !== currentRef.content) {
             await window.db.saveChapter({
                 chapterId: currentRef.id,
                 content: contentRef.current
             });
+            chapterUpdated = true;
         }
 
         // Save Title
@@ -217,15 +370,21 @@ export default function Editor({ novelId, onBack }: EditorProps) {
                 chapterId: currentRef.id,
                 title: titleRef.current
             });
-            loadVolumes();
+            loadVolumes(); // Reload volumes to reflect title change in sidebar
+            chapterUpdated = true;
         }
 
-        setCurrentChapter(prev => prev ? ({
-            ...prev,
-            content: contentRef.current,
-            title: titleRef.current
-        }) : null);
-    }, [loadVolumes]);
+        // Update currentChapter state and recent files if anything changed
+        if (chapterUpdated) {
+            const updatedChapter = {
+                ...currentRef,
+                content: contentRef.current,
+                title: titleRef.current
+            };
+            setCurrentChapter(updatedChapter);
+            addToRecentFiles(updatedChapter);
+        }
+    }, [loadVolumes, addToRecentFiles]);
 
     // Auto-Save Effect
     useEffect(() => {
@@ -254,7 +413,7 @@ export default function Editor({ novelId, onBack }: EditorProps) {
     }, [saveChanges]);
 
     // Shortcuts
-    const { shortcuts } = useShortcuts();
+    const { shortcuts, isMatch } = useShortcuts();
 
     // Global Search Shortcut (Ctrl+Shift+F)
     useEffect(() => {
@@ -299,29 +458,22 @@ export default function Editor({ novelId, onBack }: EditorProps) {
     };
 
     const handleCreateGlobalIdea = () => {
-        setGlobalIdeaContent('');
         setIsGlobalIdeaModalOpen(true);
     };
 
     useEffect(() => {
-        if (!isGlobalIdeaModalOpen) return;
-        const handleKeyDown = (e: KeyboardEvent) => {
-            if (e.key === 'Escape') {
-                e.stopPropagation();
-                setIsGlobalIdeaModalOpen(false);
+        const handleGlobalKeyDown = (e: KeyboardEvent) => {
+            if (isMatch(e, 'create_idea')) {
+                e.preventDefault();
+                handleCreateGlobalIdea();
             }
         };
-        window.addEventListener('keydown', handleKeyDown, { capture: true });
-        return () => window.removeEventListener('keydown', handleKeyDown, { capture: true });
-    }, [isGlobalIdeaModalOpen]);
 
-    const submitGlobalIdea = async () => {
-        if (!globalIdeaContent.trim()) {
-            return;
-        }
+        window.addEventListener('keydown', handleGlobalKeyDown);
+        return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+    }, [isMatch, handleCreateGlobalIdea]);
 
-        const content = globalIdeaContent;
-        setGlobalIdeaContent(''); // Clear content first
+    const submitGlobalIdea = async (content: string) => {
         setIsGlobalIdeaModalOpen(false);
 
         const newIdea: Idea = {
@@ -394,7 +546,7 @@ export default function Editor({ novelId, onBack }: EditorProps) {
     };
 
     const [pendingJumpIdea, setPendingJumpIdea] = useState<Idea | null>(null);
-    const [pendingSearchJump, setPendingSearchJump] = useState<{ chapterId: string; keyword: string } | null>(null);
+    const [pendingSearchJump, setPendingSearchJump] = useState<{ chapterId: string; keyword: string; context?: string } | null>(null);
 
     useEffect(() => {
         if (pendingJumpIdea && currentChapter?.id === pendingJumpIdea.chapterId) {
@@ -411,30 +563,27 @@ export default function Editor({ novelId, onBack }: EditorProps) {
     useEffect(() => {
         if (pendingSearchJump && currentChapter?.id === pendingSearchJump.chapterId) {
             setTimeout(() => {
-                highlightKeyword(pendingSearchJump.keyword);
+                highlightKeyword(pendingSearchJump.keyword, pendingSearchJump.context);
                 setPendingSearchJump(null);
             }, 300);
         }
     }, [pendingSearchJump, currentChapter]);
 
-    const handleJumpToChapter = (chapterId: string, keyword: string) => {
+    const handleJumpToChapter = (chapterId: string, keyword: string, context?: string) => {
         if (currentChapter?.id === chapterId) {
             // Same chapter, just highlight
-            highlightKeyword(keyword);
+            highlightKeyword(keyword, context);
         } else {
             // Switch chapter first, then highlight
             handleSelectChapter(chapterId).then(() => {
-                setPendingSearchJump({ chapterId, keyword });
+                setPendingSearchJump({ chapterId, keyword, context });
             });
         }
     };
 
-    const highlightKeyword = (keyword: string) => {
+    const highlightKeyword = (keyword: string, context?: string) => {
         const editor = editorRef.current;
         if (!editor) return;
-
-        // Store keyword for persistent highlighting
-        setActiveSearchKeyword(keyword);
 
         const editorRoot = editor.getRootElement();
         if (!editorRoot) return;
@@ -446,7 +595,10 @@ export default function Editor({ novelId, onBack }: EditorProps) {
 
         const ranges: Range[] = [];
         const lowerKeyword = keyword.toLowerCase();
-        let firstMatch = true;
+
+        // Prepare context for matching (simplified)
+        const lowerContext = context ? context.toLowerCase().replace(/\s+/g, '') : null;
+        let scrollTargetRange: Range | null = null;
 
         // Use TreeWalker to find text nodes
         const treeWalker = document.createTreeWalker(
@@ -457,7 +609,8 @@ export default function Editor({ novelId, onBack }: EditorProps) {
 
         let currentNode;
         while ((currentNode = treeWalker.nextNode())) {
-            const textContent = currentNode.textContent || '';
+            const textNode = currentNode as Text;
+            const textContent = textNode.textContent || '';
             const lowerText = textContent.toLowerCase();
             let startPos = 0;
 
@@ -466,23 +619,45 @@ export default function Editor({ novelId, onBack }: EditorProps) {
                 if (index === -1) break;
 
                 const range = new Range();
-                range.setStart(currentNode, index);
-                range.setEnd(currentNode, index + keyword.length);
+                range.setStart(textNode, index);
+                range.setEnd(textNode, index + keyword.length);
                 ranges.push(range);
 
-                // Scroll to first match
-                if (firstMatch) {
-                    const rect = range.getBoundingClientRect();
-                    if (rect.top) {
-                        (currentNode.parentElement as HTMLElement)?.scrollIntoView({
-                            behavior: 'smooth',
-                            block: 'center'
-                        });
+                // Context Matching Logic
+                if (lowerContext && !scrollTargetRange) {
+                    // Get surrounding text from the node (heuristic)
+                    // We grab a window around the match
+                    const windowStart = Math.max(0, index - 10);
+                    const windowEnd = Math.min(textNode.length, index + keyword.length + 10);
+                    const surrounding = lowerText.substring(windowStart, windowEnd).replace(/\s+/g, '');
+
+                    if (lowerContext.includes(surrounding)) {
+                        scrollTargetRange = range;
                     }
-                    firstMatch = false;
                 }
 
                 startPos = index + keyword.length;
+            }
+        }
+
+        // Fallback: if context matched nothing (e.g. split nodes), use first match
+        if (!scrollTargetRange && ranges.length > 0) {
+            scrollTargetRange = ranges[0];
+        }
+
+        // Scroll to target
+        if (scrollTargetRange) {
+            const rect = scrollTargetRange.getBoundingClientRect();
+            // Only scroll if valid rect
+            if (rect.top || rect.bottom) {
+                const container = (scrollTargetRange.startContainer.parentElement as HTMLElement);
+                if (container) {
+                    container.scrollIntoView({
+                        behavior: 'smooth',
+                        block: 'center'
+                    });
+                    // Optional: Flash visual cue?
+                }
             }
         }
 
@@ -493,13 +668,6 @@ export default function Editor({ novelId, onBack }: EditorProps) {
         }
     };
 
-    // Clear search highlights
-    const clearSearchHighlights = () => {
-        setActiveSearchKeyword('');
-        if ('highlights' in CSS) {
-            (CSS as any).highlights.delete('search-results');
-        }
-    };
 
     const executeJump = (idea: Idea) => {
         const editor = editorRef.current;
@@ -606,14 +774,22 @@ export default function Editor({ novelId, onBack }: EditorProps) {
             <AnimatePresence mode='wait'>
                 {isSidePanelOpen && (
                     <motion.div
-                        initial={{ width: 0, opacity: 0 }}
-                        animate={{ width: 256, opacity: 1 }}
-                        exit={{ width: 0, opacity: 0 }}
-                        transition={{ duration: 0.2 }}
-                        className={`flex-shrink-0 h-full flex flex-col border-r ${preferences.theme === 'dark' ? 'border-white/5 bg-[#0F0F13]' : 'border-gray-200 bg-gray-50'}`}
+                        id="sidebar-root"
+                        initial={{ x: -100, opacity: 0 }}
+                        animate={{ x: 0, opacity: 1 }}
+                        exit={{ x: -100, opacity: 0 }}
+                        transition={{ duration: 0.2, ease: "circOut" }}
+                        className={clsx(
+                            "h-full flex flex-col border-r w-64", // Fixed width
+                            isFlowMode ? "absolute left-12 z-40 shadow-2xl" : "flex-shrink-0 relative transition-all duration-300",
+                            preferences.theme === 'dark' ? 'border-white/5 bg-[#0F0F13]' : 'border-gray-200 bg-gray-50',
+                            isSidePanelOpen && "sidebar-open"
+                        )}
                     >
-                        {/* Dynamic Content based on Active Tab */}
-                        {activeTab === 'explorer' && (
+                        {/* Dynamic Content based on Active Tab - Implemented with Keep-Alive for heavy components */}
+
+                        {/* Explorer (Keep Alive) */}
+                        <div className={clsx("flex-1 h-full flex flex-col min-h-0", activeTab !== 'explorer' && "hidden")}>
                             <Sidebar
                                 volumes={volumes}
                                 currentChapterId={currentChapter?.id || null}
@@ -626,8 +802,48 @@ export default function Editor({ novelId, onBack }: EditorProps) {
                                 theme={preferences.theme}
                                 lastCreatedVolumeId={lastCreatedVolumeId}
                             />
-                        )}
+                        </div>
 
+                        {/* Idea (Keep Alive) */}
+                        <div className={clsx("flex-1 h-full flex flex-col min-h-0", activeTab !== 'idea' && "hidden")}>
+                            <UnifiedSearchWorkbench
+                                ideas={ideas}
+                                novelId={novelId}
+                                onJump={handleJumpToIdea}
+                                onUpdateIdea={handleUpdateIdea}
+                                onDeleteIdea={handleDeleteIdea}
+                                onToggleStar={handleToggleStar}
+                                onCreateIdea={handleCreateGlobalIdea}
+                                theme={preferences.theme}
+                                onClose={() => setIsSidePanelOpen(false)}
+                                shakingIdeaId={shakingIdeaId}
+                                highlightedIdeaId={highlightedIdeaId}
+                            />
+                        </div>
+
+                        {/* Search (Keep Alive) */}
+                        <div className={clsx("flex-1 h-full flex flex-col min-h-0", activeTab !== 'search' && "hidden")}>
+                            <SearchSidebar
+                                theme={preferences.theme}
+                                novelId={novelId}
+                                onClose={() => {
+                                    clearSearchHighlights();
+                                    setIsSidePanelOpen(false);
+                                }}
+                                onJumpToChapter={handleJumpToChapter}
+                                onJumpToIdea={(ideaId) => {
+                                    const idea = ideas.find(i => i.id === ideaId);
+                                    if (idea) handleJumpToIdea(idea);
+                                }}
+                                onSearchChange={(keyword) => {
+                                    if (!keyword.trim()) {
+                                        clearSearchHighlights();
+                                    }
+                                }}
+                            />
+                        </div>
+
+                        {/* Placeholders (Conditional) */}
                         {activeTab === 'outline' && (
                             <div className="flex-1 flex flex-col items-center justify-center p-4 text-neutral-500 text-sm text-center">
                                 <Info className="w-8 h-8 mb-4 opacity-50" />
@@ -649,43 +865,6 @@ export default function Editor({ novelId, onBack }: EditorProps) {
                                 <p>{t('sidebar.map')} {t('common.loading')}</p>
                             </div>
                         )}
-
-                        {activeTab === 'idea' && (
-                            <UnifiedSearchWorkbench
-                                ideas={ideas}
-                                novelId={novelId}
-                                onJump={handleJumpToIdea}
-                                onUpdateIdea={handleUpdateIdea}
-                                onDeleteIdea={handleDeleteIdea}
-                                onToggleStar={handleToggleStar}
-                                onCreateIdea={handleCreateGlobalIdea}
-                                theme={preferences.theme}
-                                onClose={() => setIsSidePanelOpen(false)}
-                                shakingIdeaId={shakingIdeaId}
-                                highlightedIdeaId={highlightedIdeaId}
-                            />
-                        )}
-
-                        {activeTab === 'search' && (
-                            <SearchSidebar
-                                theme={preferences.theme}
-                                novelId={novelId}
-                                onClose={() => {
-                                    clearSearchHighlights();
-                                    setIsSidePanelOpen(false);
-                                }}
-                                onJumpToChapter={handleJumpToChapter}
-                                onJumpToIdea={(ideaId) => {
-                                    const idea = ideas.find(i => i.id === ideaId);
-                                    if (idea) handleJumpToIdea(idea);
-                                }}
-                                onSearchChange={(keyword) => {
-                                    if (!keyword.trim()) {
-                                        clearSearchHighlights();
-                                    }
-                                }}
-                            />
-                        )}
                     </motion.div>
                 )}
             </AnimatePresence>
@@ -694,7 +873,13 @@ export default function Editor({ novelId, onBack }: EditorProps) {
             <div className={`flex-1 flex flex-col h-full relative transition-all ${preferences.theme === 'dark' ? 'bg-[#0a0a0f]' : 'bg-gray-50'}`}>
 
                 {/* Header */}
-                <div className={`flex items-center justify-between p-4 border-b z-30 ${preferences.theme === 'dark' ? 'border-white/5 bg-[#0a0a0f] text-neutral-400' : 'border-gray-200 bg-white text-neutral-600'}`}>
+                <div className={clsx(
+                    "flex items-center justify-between border-b z-30 top-nav transition-all duration-300 ease-in-out",
+                    preferences.theme === 'dark' ? 'border-white/5 bg-[#0a0a0f] text-neutral-400' : 'border-gray-200 bg-white text-neutral-600',
+                    isFlowMode
+                        ? "h-0 p-0 border-b-0 opacity-0 pointer-events-none"
+                        : "h-[70px] p-4" // Explicit height to allow smooth transition
+                )}>
                     <div className="flex items-center gap-2">
                         <button onClick={onBack} className={`p-2 rounded-full transition-colors ${preferences.theme === 'dark' ? 'hover:bg-white/10 hover:text-white' : 'hover:bg-black/5 hover:text-black'}`}>
                             <ArrowLeft className="w-5 h-5" />
@@ -714,6 +899,11 @@ export default function Editor({ novelId, onBack }: EditorProps) {
                     )}
 
                     <div className="flex items-center gap-2">
+                        <FlowModeButton
+                            isActive={isFlowMode}
+                            onClick={toggleFlowMode}
+                            className="mr-1"
+                        />
                         <button
                             onClick={() => setIsSettingsOpen(true)}
                             className={`p-2 rounded-full transition-colors ${preferences.theme === 'dark' ? 'hover:bg-white/10 hover:text-white' : 'hover:bg-black/5 hover:text-black'}`}
@@ -733,7 +923,10 @@ export default function Editor({ novelId, onBack }: EditorProps) {
 
                 {/* Editor Area - Now fully handled by LexicalChapterEditor including Toolbar */}
                 {currentChapter ? (
-                    <div className={`flex-1 min-h-0 ${preferences.theme === 'dark' ? 'bg-neutral-900' : 'bg-white'}`}>
+                    <div className={clsx(
+                        "flex-1 min-h-0 editor-shell layout-transition",
+                        preferences.theme === 'dark' ? 'bg-[#0a0a0f]' : 'bg-white'
+                    )}>
                         <LexicalChapterEditor
                             key={currentChapter.id}
                             namespace={currentChapter.id}
@@ -763,6 +956,9 @@ export default function Editor({ novelId, onBack }: EditorProps) {
                             }
                             onAddIdea={handleAddIdea}
                             onIdeaClick={handleIdeaClick}
+                            recentFiles={recentFiles}
+                            onDeleteRecent={handleDeleteRecent}
+                            onRecentFileSelect={handleSelectChapter}
                         />
                     </div>
                 ) : (
@@ -795,50 +991,41 @@ export default function Editor({ novelId, onBack }: EditorProps) {
             }
 
             {/* Global Idea Modal */}
-            <AnimatePresence>
-                {isGlobalIdeaModalOpen && (
-                    <div
-                        className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm"
-                        onClick={() => setIsGlobalIdeaModalOpen(false)}
-                    >
-                        <motion.div
-                            initial={{ opacity: 0, scale: 0.95 }}
-                            animate={{ opacity: 1, scale: 1 }}
-                            exit={{ opacity: 0, scale: 0.95 }}
-                            className={`w-full max-w-md p-6 rounded-xl shadow-2xl ${preferences.theme === 'dark' ? 'bg-[#1a1a1f] border border-white/10' : 'bg-white'}`}
-                            onClick={(e) => e.stopPropagation()}
-                        >
-                            <h3 className={`text-lg font-bold mb-4 ${preferences.theme === 'dark' ? 'text-white' : 'text-neutral-800'}`}>
-                                {t('idea.create')}
-                            </h3>
-                            <textarea
-                                value={globalIdeaContent}
-                                onChange={(e) => setGlobalIdeaContent(e.target.value)}
-                                className={`w-full h-32 p-3 rounded-lg resize-none outline-none mb-4 ${preferences.theme === 'dark' ? 'bg-black/20 text-white placeholder-white/20' : 'bg-gray-50 text-neutral-800 placeholder-gray-400'}`}
-                                placeholder={t('idea.placeholder')}
-                                autoFocus
-                            />
-                            <div className="flex justify-end gap-2">
-                                <button
-                                    type="button"
-                                    onClick={() => setIsGlobalIdeaModalOpen(false)}
-                                    className={`px-4 py-2 rounded-lg text-sm ${preferences.theme === 'dark' ? 'hover:bg-white/5 text-neutral-400' : 'hover:bg-gray-100 text-neutral-600'}`}
-                                >
-                                    {t('common.cancel')}
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={submitGlobalIdea}
-                                    disabled={!globalIdeaContent.trim()}
-                                    className="px-4 py-2 rounded-lg text-sm bg-purple-600 hover:bg-purple-500 text-white font-medium disabled:opacity-50 disabled:cursor-not-allowed"
-                                >
-                                    {t('common.confirm')}
-                                </button>
-                            </div>
-                        </motion.div>
+            <GlobalIdeaModal
+                isOpen={isGlobalIdeaModalOpen}
+                onClose={() => setIsGlobalIdeaModalOpen(false)}
+                onSave={submitGlobalIdea}
+                theme={preferences.theme}
+            />
+
+            {/* --- Flow Mode Specific Overlays --- */}
+            <div className={clsx("flow-curtain", isFlowSwitching && "active")} />
+            <div className={clsx("flow-vignette", isFlowEntering && "active")} />
+
+            {/* Hover Trigger for Exit Hint */}
+            {isFlowMode && (
+                <>
+                    <div className="flow-top-trigger" />
+                    <div className="flow-exit-hint" onClick={toggleFlowMode}>
+                        {t('common.exitFlow', '按 ESC 退出心流模式')}
                     </div>
-                )}
-            </AnimatePresence>
+                </>
+            )}
+
+            <div
+                className={clsx("flow-sidebar-backdrop", isFlowMode && isSidePanelOpen && "active")}
+                onClick={() => setIsSidePanelOpen(false)}
+            />
+
+            <div
+                className="flow-edge-trigger"
+                onClick={() => setIsSidePanelOpen(true)}
+                title="呼出侧边栏"
+            >
+                <ChevronRight className="w-5 h-5 trigger-icon" />
+            </div>
+
+
         </motion.div>
     );
 }

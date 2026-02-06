@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Idea } from '../../types';
 import { Lightbulb, FileText, ArrowUpRight, Star, Trash2 } from 'lucide-react';
 import TagManager from './TagManager';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 interface SearchResultsListProps {
     results: {
@@ -25,6 +25,22 @@ export default function SearchResultsList({ results, onJump, onUpdateIdea, onDel
     const { t } = useTranslation();
     const isDark = theme === 'dark';
     const scrollRefs = useRef<Record<string, HTMLDivElement | null>>({});
+
+    const [editingId, setEditingId] = useState<string | null>(null);
+    const [editContent, setEditContent] = useState('');
+
+    const startEdit = (idea: Idea) => {
+        setEditingId(idea.id);
+        setEditContent(idea.content);
+    };
+
+    const saveEdit = (id: string) => {
+        if (!editingId) return;
+
+        // Find idea to compare? Or just update if changed
+        onUpdateIdea(id, { content: editContent });
+        setEditingId(null);
+    };
 
     const hasNoResults = results.ideas.length === 0 && results.chapters.length === 0 && results.novels.length === 0;
 
@@ -83,7 +99,7 @@ export default function SearchResultsList({ results, onJump, onUpdateIdea, onDel
                                 shakingIdeaId === idea.id ? shakeStyle :
                                     highlightedIdeaId === idea.id ? flashStyle : undefined
                             }
-                            onClick={() => onJump(idea, 'idea')}
+                            onClick={() => startEdit(idea)}
                         >
                             {/* Starred Indicator: Corner Ribbon (v3 - Narrower) */}
                             {idea.isStarred && (
@@ -99,9 +115,30 @@ export default function SearchResultsList({ results, onJump, onUpdateIdea, onDel
                                 </div>
                             )}
 
-                            <div className={clsx("text-sm font-medium mb-1 line-clamp-2 pr-8 relative z-10", isDark ? "text-neutral-200" : "text-neutral-800")}>
-                                {idea.content}
-                            </div>
+                            {editingId === idea.id ? (
+                                <textarea
+                                    value={editContent}
+                                    onChange={(e) => setEditContent(e.target.value)}
+                                    // Stop propagation to prevent container click issues (though container click sets edit again, no big deal)
+                                    onClick={(e) => e.stopPropagation()}
+                                    onBlur={() => saveEdit(idea.id)}
+                                    onKeyDown={(e) => {
+                                        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                                            saveEdit(idea.id);
+                                        }
+                                    }}
+                                    autoFocus
+                                    className={clsx(
+                                        "w-full bg-transparent border-none outline-none resize-none text-sm font-medium mb-1",
+                                        isDark ? "text-neutral-200" : "text-neutral-800"
+                                    )}
+                                    rows={3}
+                                />
+                            ) : (
+                                <div className={clsx("text-sm font-medium mb-1 line-clamp-2 pr-8 relative z-10", isDark ? "text-neutral-200" : "text-neutral-800")}>
+                                    {idea.content}
+                                </div>
+                            )}
 
                             {idea.quote && (
                                 <div className={clsx(

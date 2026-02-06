@@ -95,3 +95,297 @@
   color: white;
   /* Active match should be very visible */
 }
+
+/* --- Flow Mode (心流模式) Styles --- */
+
+@keyframes flow-gradient {
+  0% {
+    background-position: 0% 50%;
+  }
+
+  50% {
+    background-position: 100% 50%;
+  }
+
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+@keyframes flow-conic {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.flow-btn-container {
+  position: relative;
+  padding: 2px;
+  border-radius: 9999px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+  cursor: pointer;
+  border: none;
+  background: transparent;
+}
+
+.flow-btn-container:hover {
+  transform: scale(1.05);
+  filter: brightness(1.2);
+}
+
+.flow-btn-bg {
+  position: absolute;
+  inset: -150%;
+  background: conic-gradient(from 180deg at 50% 50%,
+      #ff4500, #ff8c00, #ffd700, #32cd32, #00ced1, #1e90ff, #9370db, #ff4500);
+  animation: flow-conic 3s linear infinite;
+  filter: blur(4px);
+  opacity: 0.8;
+  pointer-events: none;
+}
+
+.flow-btn-content {
+  position: relative;
+  z-index: 1;
+  background: #0f172a;
+  color: white;
+  padding: 4px 14px;
+  border-radius: 9999px;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.15em;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  text-shadow: 0 0 8px rgba(255, 255, 255, 0.3);
+}
+
+.dark .flow-btn-content {
+  background: #1e1e2e;
+}
+
+/* Vignette Effect for Transition */
+@keyframes vignette-pulse {
+  0% {
+    opacity: 0;
+  }
+
+  20% {
+    opacity: 1;
+  }
+
+  80% {
+    opacity: 1;
+  }
+
+  100% {
+    opacity: 0;
+  }
+}
+
+.flow-vignette {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9999;
+  background: radial-gradient(circle, transparent 40%, rgba(0, 0, 0, 0.6) 100%);
+  opacity: 0;
+}
+
+.flow-vignette.active {
+  animation: vignette-pulse 1.5s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+/* Global Transition Rules */
+.layout-transition {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Curtain Effect for Smooth Transition */
+.flow-curtain {
+  position: fixed;
+  inset: 0;
+  z-index: 10005;
+  background: #ffffff;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.4s ease-out;
+}
+
+.dark .flow-curtain {
+  background: #000000;
+}
+
+.flow-curtain.active {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* Sidebar Overlay in Flow Mode */
+body.flow-mode-active #sidebar-root {
+  /* When closed, hide physically */
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-50px);
+}
+
+body.flow-mode-active #sidebar-root.sidebar-open {
+  position: fixed;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  z-index: 10002;
+  /* Higher than content */
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateX(0);
+  background: #ffffff;
+  /* Default Light BG */
+  box-shadow: 20px 0 50px rgba(0, 0, 0, 0.3);
+}
+
+.dark body.flow-mode-active #sidebar-root.sidebar-open {
+  background: #0F0F13;
+  /* Default Dark BG */
+}
+
+/* Backdrop for Sidebar */
+.flow-sidebar-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.2);
+  /* backdrop-filter: blur(2px); Removed for performance */
+  z-index: 10001;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s;
+}
+
+.flow-sidebar-backdrop.active {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+body.flow-mode-active .top-nav,
+body.flow-mode-active .search-bar-container {
+  opacity: 0;
+  transform: translateY(-40px);
+  pointer-events: none;
+  /* filter: blur(5px); Removed for performance */
+}
+
+/* Top Exit Hint */
+.flow-exit-hint {
+  position: fixed;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%) translateY(-100%);
+  z-index: 10000;
+  padding: 8px 16px;
+  background: rgba(0, 0, 0, 0.6);
+  color: white;
+  border-bottom-left-radius: 8px;
+  border-bottom-right-radius: 8px;
+  font-size: 12px;
+  cursor: pointer;
+  /* backdrop-filter: blur(4px); Removed for performance */
+  /* Initial Entry Animation */
+  animation: hint-intro 4s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+  pointer-events: auto;
+  transition: transform 0.3s;
+}
+
+@keyframes hint-intro {
+  0% {
+    transform: translateX(-50%) translateY(-100%);
+  }
+
+  10% {
+    transform: translateX(-50%) translateY(0);
+  }
+
+  90% {
+    transform: translateX(-50%) translateY(0);
+  }
+
+  100% {
+    transform: translateX(-50%) translateY(-100%);
+  }
+}
+
+/* Show hint when hovering the trigger zone or the hint itself */
+.flow-top-trigger:hover~.flow-exit-hint,
+.flow-exit-hint:hover {
+  transform: translateX(-50%) translateY(0) !important;
+}
+
+.flow-top-trigger {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 10px;
+  z-index: 10006;
+  /* Above curtain? No, hint is 10000. Curtain is 10005. Trigger should be high. */
+}
+
+/* Adjust Editor Toolbar in Flow Mode to avoid clash */
+body.flow-mode-active .editor-toolbar-container {
+  padding-left: 20px;
+  /* Add breathing room from the activity bar */
+  transition: padding 0.3s;
+}
+
+/* Adjusting the specific toolbar ID if known, or generic class */
+/* Based on screenshot, seems like toolbar is top-aligned. */
+
+/* Zen Editor Focus */
+body.flow-mode-active .editor-shell {
+  transform: scale(1.03);
+  padding: 40px 0;
+}
+
+/* Edge Trigger */
+.flow-edge-trigger {
+  position: fixed;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 8px;
+  z-index: 10000;
+  background: transparent;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.3s;
+}
+
+body.flow-mode-active .flow-edge-trigger {
+  display: flex;
+}
+
+.flow-edge-trigger:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.flow-edge-trigger:hover .trigger-icon {
+  opacity: 0.8;
+  transform: translateX(0);
+}
+
+.trigger-icon {
+  opacity: 0;
+  transform: translateX(-10px);
+  transition: all 0.3s;
+  color: white;
+}

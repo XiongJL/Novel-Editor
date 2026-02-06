@@ -25,7 +25,9 @@
     "selectChapter": "Select a Chapter",
     "editing": "Editing",
     "save": "Save (Ctrl+S)",
-    "settings": "Novel Settings"
+    "settings": "Novel Settings",
+    "flowMode": "Flow Mode",
+    "inFlow": "In Flow"
   },
   "sidebar": {
     "explorer": "Explorer",
@@ -47,7 +49,7 @@
         "novel": "Novels"
     },
     "noResults": "No results found",
-    "placeholder": "Search chapters and ideas...",
+    "placeholder": "Search all...",
     "filter": {
         "allNovels": "All Novels",
         "allChapters": "All Chapters",
@@ -55,6 +57,7 @@
     },
     "chapters": "Chapters",
     "ideas": "Ideas",
+    "volumes": "Volumes",
     "loadMore": "Load more",
     "hint": "Enter keywords to search",
     "untitled": "Untitled",
@@ -95,7 +98,9 @@
     "mobileMode": "Mobile Preview",
     "fontSerif": "Serif",
     "fontSans": "Sans",
-    "fontKaiti": "Kaiti"
+    "fontKaiti": "Kaiti",
+    "copy": "Copy All",
+    "copied": "Copied"
   },
   "settings": {
     "title": "Settings",
@@ -126,8 +131,32 @@
         "save": "Save",
         "undo": "Undo",
         "redo": "Redo",
-        "toggle_sidebar": "Toggle Sidebar"
+        "toggle_sidebar": "Toggle Sidebar",
+        "enter_focus": "Enter Focus Mode",
+        "create_idea": "Create Idea"
       }
     }
+  },
+  "backup": {
+    "title": "Backup & Restore",
+    "exportTitle": "Export Data (.nebak)",
+    "exportDesc": "Create a full backup of all novels, chapters, characters, and ideas.",
+    "encryptOption": "Encrypt with password",
+    "passwordPlaceholder": "Enter encryption password...",
+    "exportBtn": "Export Backup",
+    "exportSuccess": "Backup exported successfully!",
+    "exportFailed": "Export failed.",
+    "importTitle": "Restore from Backup",
+    "importDesc": "Supports cross-device restoration. WARNING: This will wipe current data and restore state from backup. An auto-backup is created safely before restoring.",
+    "importBtn": "Select Backup File to Restore...",
+    "importSuccess": "Restore successful, reloading...",
+    "importFailed": "Restore failed",
+    "enterPassword": "This backup is encrypted. Enter password:",
+    "passwordRequiredDesc": "This backup is encrypted. Please enter the password to restore.",
+    "passwordInvalid": "Invalid password",
+    "autoTitle": "Recent Auto-Backups",
+    "autoDesc": "Snapshots taken automatically before recent dangerous operations.",
+    "confirmRestoreAuto": "Are you sure to rollback to this snapshot? Current data will be lost.",
+    "restoreBtn": "Rollback"
   }
 }

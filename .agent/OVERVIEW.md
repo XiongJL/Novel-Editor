@@ -48,6 +48,7 @@ This document provides a high-level summary of the Novel Editor project to help 
     *   Text alignment
     *   First-line indent (2em for Chinese text)
     *   One-click auto-format
+    *   **Recent Files**: Dropdown with last 25 edited chapters (access from toolbar)
 *   **Auto Format Plugin**:
     *   Removes extra spaces
     *   Converts punctuation based on language setting (Chinese ↔ English)
@@ -62,6 +63,10 @@ This document provides a high-level summary of the Novel Editor project to help 
     *   Jump to idea location in editor
     *   Star/unstar ideas
     *   Underline highlighting for marked text
+*   **Word Count**:
+    *   Real-time statistics (CJK optimized)
+    *   Unobtrusive UI (bottom-right, auto-fading)
+    *   Performance optimized (1.5s debounce)
 *   **Global Search** (FTS5):
     *   Full-text search across chapters and ideas
     *   Real-time keyword highlighting on jump
@@ -81,7 +86,8 @@ This document provides a high-level summary of the Novel Editor project to help 
     *   Mobile view preview with iPhone frame.
     *   One-click formatting with language-aware punctuation.
     *   All toolbar items support i18n.
-    *   **Global search with FTS5 indexing complete.**
+    *   **Word Count & Recent Files UI complete.**
+    *   **Global search with FTS5 indexing complete (Context-aware jumping fixed).**
 *   **Critical Notes**:
     *   `packages/core` MUST be built (`pnpm build`) for Electron to load it.
     *   Old `EditorToolbar.tsx` component is deprecated (replaced by Lexical `ToolbarPlugin`).

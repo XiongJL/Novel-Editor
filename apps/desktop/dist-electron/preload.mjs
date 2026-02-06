@@ -22,7 +22,21 @@ electron.contextBridge.exposeInMainWorld("db", {
   rebuildSearchIndex: (novelId) => electron.ipcRenderer.invoke("db:rebuild-search-index", novelId),
   checkIndexStatus: (novelId) => electron.ipcRenderer.invoke("db:check-index-status", novelId)
 });
+electron.contextBridge.exposeInMainWorld("electron", {
+  toggleFullScreen: () => electron.ipcRenderer.invoke("app:toggle-fullscreen"),
+  onFullScreenChange: (callback) => {
+    const listener = (_event, state) => callback(state);
+    electron.ipcRenderer.on("app:fullscreen-change", listener);
+    return () => electron.ipcRenderer.removeListener("app:fullscreen-change", listener);
+  }
+});
 electron.contextBridge.exposeInMainWorld("sync", {
   pull: () => electron.ipcRenderer.invoke("sync:pull"),
   push: () => electron.ipcRenderer.invoke("sync:push")
+});
+electron.contextBridge.exposeInMainWorld("backup", {
+  export: (password) => electron.ipcRenderer.invoke("backup:export", password),
+  import: (filePath, password) => electron.ipcRenderer.invoke("backup:import", { filePath, password }),
+  getAutoBackups: () => electron.ipcRenderer.invoke("backup:get-auto"),
+  restoreAutoBackup: (filename) => electron.ipcRenderer.invoke("backup:restore-auto", filename)
 });

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog } from 'electron'
 import { initDb, db } from '@novel-editor/core'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
@@ -60,6 +60,10 @@ function createWindow() {
 
     // Register DevTools toggle shortcuts (F12 or Ctrl+Shift+I)
     win.webContents.on('before-input-event', (event, input) => {
+        if (input.key === 'F11') {
+            win?.setFullScreen(!win.isFullScreen());
+            event.preventDefault();
+        }
         if (input.key === 'F12' || (input.control && input.shift && input.key.toLowerCase() === 'i')) {
             if (win?.webContents.isDevToolsOpened()) {
                 win.webContents.closeDevTools()
@@ -78,9 +82,26 @@ function createWindow() {
         // win.loadFile('dist/index.html')
         win.loadFile(path.join(RENDERER_DIST, 'index.html'))
     }
+
+    // Monitor for fullscreen changes to sync renderer state
+    win.on('enter-full-screen', () => {
+        win?.webContents.send('app:fullscreen-change', true);
+    });
+    win.on('leave-full-screen', () => {
+        win?.webContents.send('app:fullscreen-change', false);
+    });
 }
 
 // --- IPC Handlers ---
+ipcMain.handle('app:toggle-fullscreen', () => {
+    if (win) {
+        const isFullScreen = win.isFullScreen();
+        win.setFullScreen(!isFullScreen);
+        return !isFullScreen;
+    }
+    return false;
+});
+
 ipcMain.handle('db:get-novels', async () => {
     console.log('[Main] Received db:get-novels');
     try {
@@ -164,15 +185,21 @@ ipcMain.handle('db:create-volume', async (_, { novelId, title }: { novelId: stri
 
 ipcMain.handle('db:create-chapter', async (_, { volumeId, title, order }: { volumeId: string, title: string, order: number }) => {
     try {
-        return await db.chapter.create({
+        const chapter = await db.chapter.create({
             data: {
                 volumeId,
                 title,
                 order,
                 content: '',
                 wordCount: 0
-            }
+            },
+            include: { volume: { select: { novelId: true } } }
         });
+
+        // Update search index
+        await searchIndex.indexChapter({ ...chapter, novelId: chapter.volume.novelId });
+
+        return chapter;
     } catch (e) {
         console.error('[Main] db:create-chapter failed:', e);
         throw e;
@@ -190,10 +217,27 @@ ipcMain.handle('db:get-chapter', async (_, chapterId: string) => {
 
 ipcMain.handle('db:rename-volume', async (_, { volumeId, title }: { volumeId: string, title: string }) => {
     try {
-        return await db.volume.update({
+        const updated = await db.volume.update({
             where: { id: volumeId },
             data: { title }
         });
+
+        // Trigger index update for all chapters in this volume
+        const chapters = await db.chapter.findMany({
+            where: { volumeId },
+            include: { volume: { select: { novelId: true, title: true, order: true } } }
+        });
+
+        for (const chapter of chapters) {
+            await searchIndex.indexChapter({
+                ...chapter,
+                novelId: chapter.volume.novelId,
+                volumeTitle: chapter.volume.title,
+                volumeOrder: chapter.volume.order
+            });
+        }
+
+        return updated;
     } catch (e) {
         console.error('[Main] db:rename-volume failed:', e);
         throw e;
@@ -202,10 +246,21 @@ ipcMain.handle('db:rename-volume', async (_, { volumeId, title }: { volumeId: st
 
 ipcMain.handle('db:rename-chapter', async (_, { chapterId, title }: { chapterId: string, title: string }) => {
     try {
-        return await db.chapter.update({
+        const updated = await db.chapter.update({
             where: { id: chapterId },
             data: { title }
         });
+
+        // Update search index
+        const chapterData = await db.chapter.findUnique({
+            where: { id: chapterId },
+            select: { id: true, title: true, content: true, volumeId: true, order: true, volume: { select: { novelId: true } } }
+        });
+        if (chapterData && chapterData.volume) {
+            await searchIndex.indexChapter({ ...chapterData, novelId: chapterData.volume.novelId });
+        }
+
+        return updated;
     } catch (e) {
         console.error('[Main] db:rename-chapter failed:', e);
         throw e;
@@ -286,7 +341,7 @@ ipcMain.handle('db:save-chapter', async (_, { chapterId, content }: { chapterId:
         // 3. Update Search Index
         const chapterData = await db.chapter.findUnique({
             where: { id: chapterId },
-            select: { id: true, title: true, content: true, volumeId: true }
+            select: { id: true, title: true, content: true, volumeId: true, order: true }
         });
         if (chapterData) {
             await searchIndex.indexChapter({ ...chapterData, novelId });
@@ -463,6 +518,67 @@ ipcMain.handle('sync:pull', async () => {
         return await syncManager.pull();
     } catch (e) {
         console.error('[Main] sync:pull failed:', e);
+        throw e;
+    }
+});
+
+// --- Backup IPC ---
+import { backupService } from './services/BackupService';
+
+ipcMain.handle('backup:export', async (_, password?: string) => {
+    try {
+        return await backupService.exportData(undefined, password);
+    } catch (e) {
+        console.error('[Main] backup:export failed:', e);
+        throw e;
+    }
+});
+
+ipcMain.handle('backup:import', async (_, { filePath, password }: { filePath?: string, password?: string }) => {
+    try {
+        if (!filePath) {
+            const result = await dialog.showOpenDialog({
+                title: 'Import Backup',
+                filters: [{ name: 'Novel Editor Backup', extensions: ['nebak'] }],
+                properties: ['openFile']
+            });
+            if (result.canceled || result.filePaths.length === 0) return { success: false, code: 'CANCELLED' };
+            filePath = result.filePaths[0];
+        }
+        await backupService.importData(filePath, password);
+        return { success: true };
+    } catch (e: any) {
+        console.error('[Main] backup:import failed:', e);
+        // Extract error code if possible.
+        // BackupService throws "PASSWORD_REQUIRED" or "PASSWORD_INVALID"
+        const msg = e.message || e.toString();
+
+        if (msg.includes('PASSWORD_REQUIRED')) {
+            return { success: false, code: 'PASSWORD_REQUIRED', filePath };
+        }
+        if (msg.includes('PASSWORD_INVALID')) {
+            return { success: false, code: 'PASSWORD_INVALID', filePath };
+        }
+
+        return { success: false, message: msg };
+    }
+});
+
+ipcMain.handle('backup:get-auto', async () => {
+    try {
+        return await backupService.getAutoBackups();
+    } catch (e) {
+        console.error('[Main] backup:get-auto failed:', e);
+        throw e;
+    }
+});
+
+ipcMain.handle('backup:restore-auto', async (_, filename: string) => {
+    try {
+        await backupService.restoreAutoBackup(filename);
+        return true;
+    } catch (e) {
+        console.error('[Main] backup:restore-auto failed:', e);
         throw e;
     }
 });

@@ -4,7 +4,11 @@ import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { clsx } from 'clsx';
 import { formatShortcut, useShortcuts, KeyBinding, ShortcutAction } from '../hooks/useShortcuts';
+
 import { useEditorPreferences } from '../hooks/useEditorPreferences';
+import { BackupRestorePanel } from './Settings/BackupRestorePanel';
+import { Database } from 'lucide-react';
+
 
 interface SettingsModalProps {
     isOpen: boolean;
@@ -18,7 +22,7 @@ interface SettingsModalProps {
     // currently we share the modal for both, but some tabs might be hidden
 }
 
-type TabId = 'general' | 'novel' | 'shortcuts';
+type TabId = 'general' | 'novel' | 'shortcuts' | 'backup';
 
 export default function SettingsModal({ isOpen, onClose, novelContext }: SettingsModalProps) {
     const { t, i18n } = useTranslation();
@@ -101,6 +105,7 @@ export default function SettingsModal({ isOpen, onClose, novelContext }: Setting
     const tabs: { id: TabId; label: string; icon: LucideIcon }[] = [
         { id: 'general', label: t('settings.general.title'), icon: SettingsIcon },
         { id: 'shortcuts', label: t('settings.shortcuts.title'), icon: Keyboard },
+        { id: 'backup', label: t('backup.title'), icon: Database },
     ];
 
     if (novelContext) {
@@ -286,6 +291,10 @@ export default function SettingsModal({ isOpen, onClose, novelContext }: Setting
                                     ))}
                                 </div>
                             </div>
+                        )}
+
+                        {activeTab === 'backup' && (
+                            <BackupRestorePanel />
                         )}
 
                         {activeTab === 'novel' && novelContext && (

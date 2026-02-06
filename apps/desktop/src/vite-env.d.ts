@@ -38,6 +38,11 @@ interface SearchResult {
     snippet: string
     preview?: string // Longer text for tooltip
     keyword: string
+    matchType: 'content' | 'title' | 'volume'
+    chapterOrder?: number
+    volumeId?: string
+    volumeTitle?: string
+    volumeOrder?: number
 }
 
 interface Idea {
@@ -91,4 +96,10 @@ interface Window {
     ipcRenderer: import('electron').IpcRenderer
     db: DBAPI
     sync: SyncAPI
+    backup: {
+        export: (password?: string) => Promise<string>;
+        import: (filePath?: string, password?: string) => Promise<{ success: boolean; code?: string; message?: string; filePath?: string }>;
+        getAutoBackups: () => Promise<Array<{ filename: string; createdAt: number; size: number }>>;
+        restoreAutoBackup: (filename: string) => Promise<void>;
+    }
 }

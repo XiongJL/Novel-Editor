@@ -18,8 +18,10 @@ import AutoFormatPlugin from './plugins/AutoFormatPlugin';
 import FloatingTextFormatToolbarPlugin from './plugins/FloatingTextFormatToolbarPlugin';
 import IdeaInteractionPlugin from './plugins/IdeaInteractionPlugin';
 import EditorSearchToolbar from './ui/EditorSearchToolbar';
+import WordCountPlugin from './plugins/WordCountPlugin';
 import { EditorPreferences } from '../../hooks/useEditorPreferences';
 import { ShortcutMap } from '../../hooks/useShortcuts';
+import { RecentFile } from '../../components/RecentFilesDropdown';
 
 // Wrapper to handle initial content properly
 function InitialStatePlugin({ content }: { content: string }) {
@@ -127,6 +129,9 @@ interface LexicalChapterEditorProps {
     language?: string; // 'zh' | 'en'
     onAddIdea: (id: string, quote: string, cursor: string, note: string) => void;
     onIdeaClick?: (ideaId: string) => void;
+    recentFiles?: RecentFile[];
+    onDeleteRecent?: (id: string) => void;
+    onRecentFileSelect?: (id: string) => void;
 }
 
 export default function LexicalChapterEditor({
@@ -145,7 +150,10 @@ export default function LexicalChapterEditor({
     headerContent,
     language = 'zh',
     onAddIdea,
-    onIdeaClick
+    onIdeaClick,
+    recentFiles,
+    onDeleteRecent,
+    onRecentFileSelect
 }: LexicalChapterEditorProps) {
 
     const initialConfig = {
@@ -192,7 +200,13 @@ export default function LexicalChapterEditor({
         <LexicalComposer initialConfig={initialConfig}>
             <div className={`relative h-full flex flex-col ${isDark ? 'bg-neutral-900 text-neutral-200' : 'bg-white text-neutral-900'}`}>
                 {/* Full Width Toolbar */}
-                <ToolbarPlugin preferences={preferences} onUpdatePreference={onUpdatePreference} />
+                <ToolbarPlugin
+                    preferences={preferences}
+                    onUpdatePreference={onUpdatePreference}
+                    recentFiles={recentFiles}
+                    onDeleteRecent={onDeleteRecent}
+                    onRecentFileSelect={onRecentFileSelect}
+                />
 
                 {/* Scrollable Content Area */}
                 <div className="relative flex-1 overflow-y-auto py-8">
@@ -222,6 +236,8 @@ export default function LexicalChapterEditor({
                 <OnChangePlugin onChange={(editorState) => onChange(editorState)} />
                 <InitialStatePlugin content={initialContent} />
                 {editorRef && <EditorRefPlugin editorRef={editorRef} />}
+
+                <WordCountPlugin isDark={isDark} />
 
                 {/* Advanced Feature Plugins */}
                 <StylePlugin
