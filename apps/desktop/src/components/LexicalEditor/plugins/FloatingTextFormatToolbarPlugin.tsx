@@ -12,7 +12,7 @@ import {
 import { $wrapSelectionInMarkNode } from '@lexical/mark';
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext';
 import { mergeRegister } from '@lexical/utils';
-import { Bold, Italic, Underline, Strikethrough, Lightbulb, X, Check } from 'lucide-react';
+import { Bold, Italic, Underline, Strikethrough, Lightbulb, X, Check, FileText } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useEditorPreferences } from '../../../hooks/useEditorPreferences';
 
@@ -216,6 +216,36 @@ const FloatingToolbar = ({
                         title={t('idea.create')}
                     >
                         <Lightbulb className="w-4 h-4 text-inherit" />
+                    </button>
+
+                    <button
+                        onClick={() => {
+                            const selection = window.getSelection();
+                            const text = selection?.toString() || '';
+                            // Dispatch event to open global modal
+                            window.dispatchEvent(new CustomEvent('open-plot-point-modal', {
+                                detail: {
+                                    isCreateMode: true,
+                                    initialData: {
+                                        description: text,
+                                        // We don't have novelId/chapterId here easily without prop drilling.
+                                        // But Editor.tsx knows novelId.
+                                        // context? We can stick the chapterId into `initialData` if we knew it to pre-select.
+                                        // The user is in the editor, so it IS the current chapter usually.
+                                        // Editor.tsx will merge `novelId`.
+                                        // But Editor.tsx also knows `currentChapter.id`.
+                                        // So we can let Editor.tsx fill `chapterId` if it's missing?
+                                        // Actually `Editor.tsx` logic I wrote: `initialData: { ...initialData, novelId }`.
+                                        // I should also inject `chapterId: currentChapter?.id` in Editor.tsx logic.
+                                        // So here just pass description.
+                                    }
+                                }
+                            }));
+                        }}
+                        className={`p-2 rounded hover:opacity-80 ${isDark ? 'text-purple-400 hover:bg-purple-400/10' : 'text-purple-600 hover:bg-purple-600/10'}`}
+                        title={t('plot.addPoint')}
+                    >
+                        <FileText className="w-4 h-4 text-inherit" />
                     </button>
                 </>
             ) : (

@@ -5,7 +5,40 @@
     "confirm": "Confirm",
     "delete": "Delete",
     "loading": "Loading...",
-    "search": "Search"
+    "search": "Search",
+    "create": "Create",
+    "title": "Title",
+        "chapterPrefix": "Chapter ",
+        "chapterSuffix": "",
+        "volumePrefix": "Volume ",
+        "volumeSuffix": "",
+        "chapter": "Chapter",
+    "description": "Description",
+    "confirmDelete": "Are you sure you want to delete this?"
+  },
+  "plot": {
+    "plotLine": "Plot Line",
+    "namePlaceholder": "Plot Line Name",
+    "noLines": "No plot lines yet",
+    "points": "points",
+    "addPoint": "Add Point",
+    "pointNamePlaceholder": "Plot Point Title",
+    "defaultTitle": "Plot Point Title",
+    "editPoint": "Edit Plot Point",
+    "selectChapter": "Not associated...",
+    "type": "Type",
+    "status": "Status",
+    "descriptionPlaceholder": "Add details, context, or notes...",
+    "types": {
+      "foreshadowing": "Foreshadowing",
+      "mystery": "Mystery",
+      "promise": "Promise",
+      "event": "Event"
+    },
+    "statuses": {
+      "active": "Active",
+      "resolved": "Resolved"
+    }
   },
   "home": {
     "greeting": "Good Evening, Writer",

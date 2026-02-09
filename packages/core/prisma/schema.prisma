@@ -24,6 +24,8 @@ model Novel {
   characters Character[]
   ideas      Idea[]
   tags       Tag[]
+  plotLines  PlotLine[]
+  plotPoints PlotPoint[]
 }
 
 model Volume {
@@ -56,6 +58,7 @@ model Chapter {
   deleted     Boolean  @default(false)
   
   ideas Idea[]
+  anchors PlotPointAnchor[]
 }
 
 model SyncState {
@@ -106,4 +109,58 @@ model Tag {
   ideas   Idea[]
 
   @@unique([name, novelId])
+}
+
+model PlotLine {
+  id          String   @id @default(cuid())
+  novelId     String
+  novel       Novel    @relation(fields: [novelId], references: [id], onDelete: Cascade)
+  name        String
+  description String?
+  color       String   // Hex color code
+  
+  points      PlotPoint[]
+  
+  sortOrder   Float    @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model PlotPoint {
+  id          String   @id @default(cuid())
+  novelId     String
+  novel       Novel    @relation(fields: [novelId], references: [id], onDelete: Cascade)
+  
+  plotLineId  String
+  plotLine    PlotLine @relation(fields: [plotLineId], references: [id], onDelete: Cascade)
+  
+  title       String
+  description String?
+  type        String   // 'foreshadowing' | 'mystery' | 'promise' | 'event'
+  status      String   // 'active' | 'resolved'
+  
+  order       Float    @default(0)
+  
+  anchors     PlotPointAnchor[]
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model PlotPointAnchor {
+  id          String   @id @default(cuid())
+  plotPointId String
+  plotPoint   PlotPoint @relation(fields: [plotPointId], references: [id], onDelete: Cascade)
+  
+  chapterId   String
+  chapter     Chapter   @relation(fields: [chapterId], references: [id], onDelete: Cascade)
+  
+  type        String    // 'setup' | 'payoff'
+  
+  lexicalKey  String?   // Key of the node in Lexical
+  offset      Int?      // Character offset
+  length      Int?      // Length of selection
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 }

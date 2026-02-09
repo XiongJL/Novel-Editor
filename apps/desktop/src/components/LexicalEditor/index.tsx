@@ -9,6 +9,7 @@ import { EditorState, LexicalEditor, $createParagraphNode, $createTextNode, $get
 import { useEffect, useRef } from 'react';
 import theme from './theme';
 import { IdeaMarkNode } from './nodes/IdeaMarkNode';
+import { PlotAnchorNode } from './nodes/PlotAnchorNode'; // [NEW]
 
 // Plugins
 import ToolbarPlugin from './plugins/ToolbarPlugin';
@@ -17,6 +18,7 @@ import ShortcutsPlugin from './plugins/ShortcutsPlugin';
 import AutoFormatPlugin from './plugins/AutoFormatPlugin';
 import FloatingTextFormatToolbarPlugin from './plugins/FloatingTextFormatToolbarPlugin';
 import IdeaInteractionPlugin from './plugins/IdeaInteractionPlugin';
+import PlotContextMenuPlugin, { PlotContextMenuData } from './plugins/PlotContextMenuPlugin'; // [NEW]
 import EditorSearchToolbar from './ui/EditorSearchToolbar';
 import WordCountPlugin from './plugins/WordCountPlugin';
 import { EditorPreferences } from '../../hooks/useEditorPreferences';
@@ -132,6 +134,7 @@ interface LexicalChapterEditorProps {
     recentFiles?: RecentFile[];
     onDeleteRecent?: (id: string) => void;
     onRecentFileSelect?: (id: string) => void;
+    onPlotContextMenu?: (data: PlotContextMenuData) => void; // [NEW]
 }
 
 export default function LexicalChapterEditor({
@@ -153,7 +156,8 @@ export default function LexicalChapterEditor({
     onIdeaClick,
     recentFiles,
     onDeleteRecent,
-    onRecentFileSelect
+    onRecentFileSelect,
+    onPlotContextMenu // [NEW]
 }: LexicalChapterEditorProps) {
 
     const initialConfig = {
@@ -161,7 +165,7 @@ export default function LexicalChapterEditor({
         theme,
         onError: (error: Error) => console.error(error),
         editable: !readOnly,
-        nodes: [IdeaMarkNode]
+        nodes: [IdeaMarkNode, PlotAnchorNode] // [MODIFIED]
     };
 
     const isMobile = preferences.maxWidth === 'mobile';
@@ -251,6 +255,7 @@ export default function LexicalChapterEditor({
 
                 <FloatingTextFormatToolbarPlugin onAddIdea={onAddIdea} />
                 <IdeaInteractionPlugin onIdeaClick={onIdeaClick} />
+                {onPlotContextMenu && <PlotContextMenuPlugin onOpenMenu={onPlotContextMenu} />}
                 <EditorSearchToolbar />
             </div>
         </LexicalComposer>

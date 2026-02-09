@@ -14,3 +14,17 @@
     - [x] **Frontend Update**: 更新 `BackupRestorePanel.tsx` 适配新的返回值，修复密码弹窗逻辑。
     - [x] **Type Definition**: 更新 `vite-env.d.ts` 类型定义。
 - [ ] 云同步功能开发
+- [ ] **故事结构管理系统 (Story Structure System)**
+    - [x] **Phase 1: 后端核心 (Backend Core)**
+        - [x] Schema Update: 添加 PlotLine, PlotPoint, Anchor 表
+        - [x] IPC Handlers: 实现大纲与情节要点的 CRUD
+    - [x] **Phase 2: 前端数据层 (Frontend Data)**
+        - [x] Types & Hooks: `usePlotSystem` 状态管理
+    - [/] **Phase 3: 工作台 UI (Workbench UI)**
+        - [x] Sidebar Integration: 侧边栏集成
+        - [x] Plot Line Manager: 情节线管理器
+        - [ ] Narrative Matrix View: 叙事矩阵视图 (Deferred)
+    - [x] **Phase 4: 编辑器集成 (Editor Integration)**
+        - [x] Lexical Node: `PlotAnchorNode`
+        - [x] Context Menu: `PlotContextMenuPlugin` & UI
+        - [x] Editor State Integration

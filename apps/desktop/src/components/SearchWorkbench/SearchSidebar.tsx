@@ -238,7 +238,7 @@ export default function SearchSidebar({
         return { volumes: sortedVolumes, ideas };
     }, [results]);
 
-    const totalChaptersFound = groupedResults.volumes.reduce((acc, vol: any) => acc + vol.sortedChapterList.length, 0);
+    const totalChaptersFound: number = groupedResults.volumes.reduce((acc: number, vol: any) => acc + vol.sortedChapterList.length, 0);
 
     // Handle result click
     const handleResultClick = (result: SearchResult) => {
@@ -369,7 +369,7 @@ export default function SearchSidebar({
                                 collapsedChapterGroup && "-rotate-90"
                             )} />
                             <FileText className="w-3.5 h-3.5" />
-                            <span>{t('search.chapters')} ({totalChaptersFound})</span>
+                            <span>{t('search.chapters', 'Chapters')} ({totalChaptersFound})</span>
                         </div>
 
                         {!collapsedChapterGroup && (

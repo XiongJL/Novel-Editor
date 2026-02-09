@@ -383,9 +383,65 @@ body.flow-mode-active .flow-edge-trigger {
   transform: translateX(0);
 }
 
-.trigger-icon {
-  opacity: 0;
-  transform: translateX(-10px);
-  transition: all 0.3s;
-  color: white;
+/* Global Scrollbar Reset & Styling */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Default state: nearly invisible */
+::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0);
+  border-radius: 10px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+  transition: background 0.4s ease;
+}
+
+/* Show when hovering the scrollable container OR the thumb itself */
+*:hover::-webkit-scrollbar-thumb,
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.15);
+  background-clip: content-box;
+}
+
+/* Extra prominence when hovering the thumb directly */
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.3) !important;
+}
+
+/* Dark Mode: Stealth Look */
+.dark ::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0);
+}
+
+.dark *:hover::-webkit-scrollbar-thumb,
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: rgba(163, 163, 163, 0.4);
+  /* Closer to font color but translucent for induction */
+}
+
+.dark ::-webkit-scrollbar-thumb:hover,
+.dark ::-webkit-scrollbar-thumb:active {
+  background: rgb(163, 163, 163) !important;
+  /* Solid specified color on direct interaction */
+}
+
+/* For Firefox (Standard) */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+  transition: scrollbar-color 0.4s ease;
+}
+
+*:hover {
+  scrollbar-color: rgba(0, 0, 0, 0.15) transparent;
+}
+
+.dark *:hover {
+  scrollbar-color: rgb(163, 163, 163) transparent;
 }

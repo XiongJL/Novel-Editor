@@ -58,8 +58,12 @@
     *   `id`, `novelId`, `name`, `age`, `bio`, `tags` (JSON), `avatarUrl`.
 6.  **Scene (场景表)** - *Future*
     *   `id`, `novelId`, `name`, `description`, `location`, `imageUrl`.
-7.  **Outline (大纲表)** - *Future*
-    *   `id`, `novelId`, `title`, `content`, `type` (主线/支线).
+7.  **PlotLine (情节线表)** - **New**
+    *   `id`, `novelId`, `name`, `description`, `color`, `sortOrder`, `updatedAt`, `deleted`.
+8.  **PlotPoint (情节点表)** - **New**
+    *   `id`, `novelId`, `plotLineId`, `title`, `description`, `type`, `status`, `order`, `updatedAt`, `deleted`.
+9.  **PlotPointAnchor (情节锚点表)** - **New**
+    *   `id`, `plotPointId`, `chapterId`, `type`, `lexicalKey`, `offset`, `length`, `updatedAt`.
 
 ## 3. 同步协议 API (Sync Protocol API)
 
@@ -82,7 +86,9 @@
           "changes": {
             "novels": [ { "id": "uuid", "title": "...", "updatedAt": 1700000100000 }, ... ],
             "chapters": [ { "id": "uuid", "title": "...", "content": "...", "updatedAt": ... } ],
-            "deletedIds": { "novels": [], "chapters": [] }
+            "plotLines": [ ... ],
+            "plotPoints": [ ... ],
+            "deletedIds": { "novels": [], "chapters": [], "plotLines": [] }
           }
         }
         ```

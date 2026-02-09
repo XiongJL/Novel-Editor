@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Clock, Trash2, FileText, ChevronDown } from 'lucide-react';
+import { Clock, Trash2, FileText } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { clsx } from 'clsx';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -8,6 +8,10 @@ export interface RecentFile {
     id: string; // Chapter ID
     title: string;
     timestamp: number;
+    initialData?: {
+        novelId: string;
+        chapterId?: string;
+    };
 }
 
 interface RecentFilesDropdownProps {

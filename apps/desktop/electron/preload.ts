@@ -25,6 +25,22 @@ contextBridge.exposeInMainWorld('db', {
         ipcRenderer.invoke('db:search', params),
     rebuildSearchIndex: (novelId: string) => ipcRenderer.invoke('db:rebuild-search-index', novelId),
     checkIndexStatus: (novelId: string) => ipcRenderer.invoke('db:check-index-status', novelId),
+
+    // Story Structure
+    getPlotLines: (novelId: string) => ipcRenderer.invoke('db:get-plot-lines', novelId),
+    createPlotLine: (data: { novelId: string; name: string; color: string }) => ipcRenderer.invoke('db:create-plot-line', data),
+    updatePlotLine: (id: string, data: any) => ipcRenderer.invoke('db:update-plot-line', { id, data }),
+    deletePlotLine: (id: string) => ipcRenderer.invoke('db:delete-plot-line', id),
+
+    createPlotPoint: (data: any) => ipcRenderer.invoke('db:create-plot-point', data),
+    updatePlotPoint: (id: string, data: any) => ipcRenderer.invoke('db:update-plot-point', { id, data }),
+    deletePlotPoint: (id: string) => ipcRenderer.invoke('db:delete-plot-point', id),
+
+    createPlotPointAnchor: (data: any) => ipcRenderer.invoke('db:create-plot-point-anchor', data),
+    deletePlotPointAnchor: (id: string) => ipcRenderer.invoke('db:delete-plot-point-anchor', id),
+
+    reorderPlotLines: (novelId: string, lineIds: string[]) => ipcRenderer.invoke('db:reorder-plot-lines', { novelId, lineIds }),
+    reorderPlotPoints: (plotLineId: string, pointIds: string[]) => ipcRenderer.invoke('db:reorder-plot-points', { plotLineId, pointIds }),
 })
 
 contextBridge.exposeInMainWorld('electron', {

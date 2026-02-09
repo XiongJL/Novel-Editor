@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowLeft, Save, PanelLeftClose, PanelLeftOpen, Settings, Info, ChevronRight } from 'lucide-react';
+import { ArrowLeft, Save, PanelLeftClose, PanelLeftOpen, Settings, Info, ChevronRight, LayoutGrid, FileText } from 'lucide-react';
+import NarrativeMatrix from '../components/StoryWorkbench/NarrativeMatrix';
 import Sidebar from '../components/Sidebar';
 import ActivityBar, { ActivityTab } from '../components/ActivityBar';
 import SettingsModal from '../components/SettingsModal';
@@ -9,17 +10,25 @@ import { useEditorPreferences } from '../hooks/useEditorPreferences';
 import { useShortcuts } from '../hooks/useShortcuts';
 import { clsx } from 'clsx';
 import LexicalChapterEditor from '../components/LexicalEditor';
-import { LexicalEditor, $getRoot } from 'lexical';
-import { $isMarkNode, $unwrapMarkNode } from '@lexical/mark';
+import { LexicalEditor, $getRoot, $getSelection, $isRangeSelection, $getNodeByKey, $isTextNode, $createRangeSelection, $setSelection } from 'lexical';
+import { $isMarkNode, $unwrapMarkNode, $wrapSelectionInMarkNode } from '@lexical/mark';
 import { $isIdeaMarkNode } from '../components/LexicalEditor/nodes/IdeaMarkNode';
 import UnifiedSearchWorkbench from '../components/SearchWorkbench/UnifiedSearchWorkbench';
 import SearchSidebar from '../components/SearchWorkbench/SearchSidebar';
 import { FlowModeButton } from '../components/FlowModeButton';
 import { GlobalIdeaModal } from '../components/GlobalIdeaModal';
 import { RecentFile } from '../components/RecentFilesDropdown';
-import { Idea } from '../types';
-// TODO: Add filter state for chapter-only, search text, date range
-// const filteredIdeas = ideas;
+import PlotSidebar from '../components/StoryWorkbench/PlotSidebar';
+import PlotContextMenu from '../components/StoryWorkbench/PlotContextMenu';
+import PlotAnchorModal from '../components/StoryWorkbench/PlotAnchorModal';
+import { PlotContextMenuData } from '../components/LexicalEditor/plugins/PlotContextMenuPlugin';
+import { $isPlotAnchorNode } from '../components/LexicalEditor/nodes/PlotAnchorNode';
+import { usePlotSystem } from '../hooks/usePlotSystem';
+import { PlotPointModal } from '../components/StoryWorkbench/PlotPointModal';
+import { Idea, Novel, Volume, Chapter } from '../types';
+
+// Global variable to track active chapter metadata to avoid closure staleness
+let activeChapterMetadata: { id: string; title: string } | null = null;
 
 interface EditorProps {
     novelId: string;
@@ -29,47 +38,72 @@ interface EditorProps {
 export default function Editor({ novelId, onBack }: EditorProps) {
     const { t, i18n } = useTranslation();
     const { preferences, updatePreference } = useEditorPreferences();
-    console.log('Editor rendering, novelId:', novelId);
+    const { shortcuts, isMatch } = useShortcuts();
 
-    // Data State
+    const [viewMode, setViewMode] = useState<'editor' | 'matrix'>('editor');
+
+    // --- 1. Core Data State ---
+    const [novel, setNovel] = useState<Novel | null>(null);
     const [volumes, setVolumes] = useState<Volume[]>([]);
     const [currentChapter, setCurrentChapter] = useState<Chapter | null>(null);
-    const [novel, setNovel] = useState<Novel | null>(null);
+    const [title, setTitle] = useState('');
+    const [content, setContent] = useState('');
     const [isLoading, setIsLoading] = useState(false);
-
-    // Idea State
+    const [recentFiles, setRecentFiles] = useState<RecentFile[]>([]);
     const [ideas, setIdeas] = useState<Idea[]>([]);
 
-    const [shakingIdeaId, setShakingIdeaId] = useState<string | null>(null);
-    const [highlightedIdeaId, setHighlightedIdeaId] = useState<string | null>(null);
+    // --- 2. Story / Plot System ---
+    const { addAnchor, removeAnchor, createPlotPoint, updatePlotPoint, plotLines } = usePlotSystem(novelId);
+    const [plotContextMenuData, setPlotContextMenuData] = useState<PlotContextMenuData | null>(null);
+    const [isPlotAnchorModalOpen, setIsPlotAnchorModalOpen] = useState(false);
+    const [pendingAnchorSelection, setPendingAnchorSelection] = useState<PlotContextMenuData | null>(null);
 
-    // UI State
+    // --- 3. UI Control State ---
     const [activeTab, setActiveTab] = useState<ActivityTab>('explorer');
     const [isSidePanelOpen, setIsSidePanelOpen] = useState(true);
-
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
     const [isGlobalIdeaModalOpen, setIsGlobalIdeaModalOpen] = useState(false);
-    const [recentFiles, setRecentFiles] = useState<RecentFile[]>([]);
+    const [lastCreatedVolumeId, setLastCreatedVolumeId] = useState<string | null>(null);
 
+    // --- 4. Flow Mode State ---
     const [isFlowMode, setIsFlowMode] = useState(false);
     const [isFlowEntering, setIsFlowEntering] = useState(false);
     const [isFlowSwitching, setIsFlowSwitching] = useState(false);
 
+    // --- 5. Jump & Temporary State ---
+    const [shakingIdeaId, setShakingIdeaId] = useState<string | null>(null);
+    const [highlightedIdeaId, setHighlightedIdeaId] = useState<string | null>(null);
+    const [pendingJumpIdea, setPendingJumpIdea] = useState<Idea | null>(null);
+    const [pendingSearchJump, setPendingSearchJump] = useState<{ chapterId: string; keyword: string; context?: string } | null>(null);
+
+    // --- 6. Refs ---
+    const editorRef = useRef<LexicalEditor | null>(null);
+    const contentRef = useRef(content);
+    const titleRef = useRef(title);
+    const chapterRef = useRef(currentChapter);
+
+    useEffect(() => {
+        contentRef.current = content;
+        titleRef.current = title;
+        chapterRef.current = currentChapter;
+
+        // Sync global metadata whenever currentChapter changes
+        if (currentChapter) {
+            activeChapterMetadata = { id: currentChapter.id, title: currentChapter.title };
+            console.log('[Editor] Updated activeChapterMetadata:', activeChapterMetadata);
+        }
+    }, [content, title, currentChapter]);
+
+    // --- 7. UI Actions ---
     const toggleFlowMode = useCallback(async () => {
-        // 1. Curtain Down (Start Transition)
         setIsFlowSwitching(true);
-
         const nextState = !isFlowMode;
-        console.log('[FlowMode] Toggling state to:', nextState);
 
-        // Allow curtain to fade in before shifting layout
         setTimeout(async () => {
-            // 2. Layout & Class Sync
             try {
                 if (nextState) {
                     document.body.classList.add('flow-mode-active');
                     setIsSidePanelOpen(false);
-                    // Trigger entering animation (vignette)
                     setIsFlowEntering(true);
                     setTimeout(() => setIsFlowEntering(false), 1500);
                 } else {
@@ -77,65 +111,26 @@ export default function Editor({ novelId, onBack }: EditorProps) {
                     setIsSidePanelOpen(true);
                 }
                 setIsFlowMode(nextState);
-                console.log('[FlowMode] UI state updated successfully');
             } catch (err) {
-                console.error('[FlowMode] Failed to update UI state:', err);
+                console.error('FlowMode toggle error:', err);
             }
 
-            // 3. Fullscreen Handshake
             try {
                 if ((window as any).electron?.toggleFullScreen) {
                     await (window as any).electron.toggleFullScreen();
                 }
-            } catch (e) {
-                console.warn('[FlowMode] Fullscreen toggle failed:', e);
-            }
+            } catch (e) { }
 
-            // 4. Focus Editor
             setTimeout(() => {
-                if (editorRef.current) {
-                    editorRef.current.focus();
-                }
+                if (editorRef.current) editorRef.current.focus();
             }, 500);
 
-            // 5. Curtain Up (End Transition)
             setTimeout(() => {
                 setIsFlowSwitching(false);
-            }, 400); // Wait for sidebar/layout transition to finish (0.3s)
+            }, 400);
         }, 100);
-
     }, [isFlowMode]);
 
-    // Cleanup Flow Mode on Unmount
-    useEffect(() => {
-        return () => {
-            document.body.classList.remove('flow-mode-active');
-        };
-    }, []);
-
-    // Handle ESC key in Flow Mode (Capture Phase to override Lexical)
-    useEffect(() => {
-        if (!isFlowMode) return;
-
-        const handleKeyDown = (e: KeyboardEvent) => {
-            if (e.key === 'Escape') {
-                e.preventDefault();
-                e.stopPropagation();
-
-                if (isSidePanelOpen) {
-                    setIsSidePanelOpen(false);
-                } else {
-                    // Trigger exit
-                    toggleFlowMode();
-                }
-            }
-        };
-
-        window.addEventListener('keydown', handleKeyDown, true);
-        return () => window.removeEventListener('keydown', handleKeyDown, true);
-    }, [isFlowMode, isSidePanelOpen, toggleFlowMode]);
-
-    // Clear search highlights
     const clearSearchHighlights = () => {
         if ('highlights' in CSS) {
             (CSS as any).highlights.delete('search-results');
@@ -147,25 +142,14 @@ export default function Editor({ novelId, onBack }: EditorProps) {
             setIsSettingsOpen(true);
             return;
         }
-
         if (activeTab === tab) {
             setIsSidePanelOpen(!isSidePanelOpen);
         } else {
-            // Clear search highlights when leaving search tab
-            if (activeTab === 'search') {
-                clearSearchHighlights();
-            }
+            if (activeTab === 'search') clearSearchHighlights();
             setActiveTab(tab);
             setIsSidePanelOpen(true);
         }
     };
-
-    // Editor State
-    const [title, setTitle] = useState('');
-    const [content, setContent] = useState(''); // Stores JSON string or plain text
-
-    // Lexical Instance
-    const editorRef = useRef<LexicalEditor | null>(null);
 
     // Load Novel Details
     useEffect(() => {
@@ -198,14 +182,18 @@ export default function Editor({ novelId, onBack }: EditorProps) {
             const newFile: RecentFile = {
                 id: chapter.id,
                 title: chapter.title,
-                timestamp: Date.now()
+                timestamp: Date.now(),
+                initialData: {
+                    novelId,
+                    chapterId: currentChapter?.id // Auto-fill current chapter
+                }
             };
             // Add to top, limit to 25
             const updated = [newFile, ...filtered].slice(0, 25);
             localStorage.setItem(`recent_files_${novelId}`, JSON.stringify(updated));
             return updated;
         });
-    }, [novelId]);
+    }, [novelId, currentChapter]);
 
     const handleDeleteRecent = (id: string) => {
         setRecentFiles(prev => {
@@ -253,6 +241,11 @@ export default function Editor({ novelId, onBack }: EditorProps) {
                 }
 
                 if (targetChapterId) {
+                    // Pre-set global metadata if we have the info in volumes, though handleSelectChapter will also update it
+                    const targetChapter = data.flatMap(v => v.chapters).find(c => c.id === targetChapterId);
+                    if (targetChapter) {
+                        activeChapterMetadata = { id: targetChapterId, title: targetChapter.title };
+                    }
                     handleSelectChapter(targetChapterId);
                 }
             }
@@ -274,6 +267,7 @@ export default function Editor({ novelId, onBack }: EditorProps) {
             const chapter = await window.db.getChapter(chapterId);
             if (chapter) {
                 setCurrentChapter(chapter);
+                activeChapterMetadata = { id: chapter.id, title: chapter.title }; // Update Global Metadata
                 setTitle(chapter.title);
                 setContent(chapter.content);
                 localStorage.setItem(`last_chapter_${novelId}`, chapterId);
@@ -284,6 +278,134 @@ export default function Editor({ novelId, onBack }: EditorProps) {
         } finally {
             setIsLoading(false);
         }
+    };
+
+    // Plot Interaction Handlers
+    const handlePlotContextMenu = useCallback((data: PlotContextMenuData) => {
+        setPlotContextMenuData(data);
+    }, []);
+
+    const handleAddAnchorClick = () => {
+        if (plotContextMenuData?.text) {
+            setPendingAnchorSelection(plotContextMenuData);
+            setIsPlotAnchorModalOpen(true);
+        }
+        setPlotContextMenuData(null);
+    };
+
+    const handleRemoveAnchor = async () => {
+        if (!plotContextMenuData?.anchorId) return;
+        const anchorId = plotContextMenuData.anchorId;
+
+        try {
+            // Find which point has this anchor
+            const allLines = await window.db.getPlotLines(novelId);
+            let targetPointId: string | null = null;
+            for (const line of allLines) {
+                for (const point of line.points || []) {
+                    if (point.anchors?.some(a => a.id === anchorId)) {
+                        targetPointId = point.id;
+                        break;
+                    }
+                }
+                if (targetPointId) break;
+            }
+
+            if (targetPointId) {
+                await removeAnchor(anchorId, targetPointId);
+            } else {
+                // Just try delete anyway in case local state is out of sync
+                await window.db.deletePlotPointAnchor(anchorId);
+            }
+
+            // Remove from Editor
+            const editor = editorRef.current;
+            if (editor) {
+                editor.update(() => {
+                    const root = $getRoot();
+                    root.getAllTextNodes().forEach(textNode => {
+                        const parent = textNode.getParent();
+                        if ($isPlotAnchorNode(parent) && parent.hasID(anchorId)) {
+                            parent.deleteID(anchorId);
+                            if (parent.getIDs().length === 0) {
+                                $unwrapMarkNode(parent);
+                            }
+                        }
+                    });
+                });
+            }
+        } catch (e) {
+            console.error('Failed to remove anchor:', e);
+        }
+        setPlotContextMenuData(null);
+    };
+
+    const handleSubmitAnchor = async (plotPointId: string, type: 'setup' | 'payoff') => {
+        if (!currentChapter || !pendingAnchorSelection) return;
+
+        try {
+            // Create DB Entry
+            const newAnchor = await addAnchor({
+                plotPointId,
+                chapterId: currentChapter.id,
+                type,
+                lexicalKey: pendingAnchorSelection.nodeKey,
+                offset: pendingAnchorSelection.offset,
+                length: pendingAnchorSelection.length,
+            });
+
+            if (newAnchor) {
+                applyPlotAnchor(newAnchor.id);
+            }
+
+            setIsPlotAnchorModalOpen(false);
+            setPendingAnchorSelection(null);
+        } catch (e) {
+            console.error('Create anchor failed:', e);
+        }
+    };
+
+    // Helper to Apply Anchor
+    const applyPlotAnchor = (anchorId: string) => {
+        const editor = editorRef.current;
+        if (!editor) return;
+
+        editor.focus();
+        editor.update(() => {
+            const selection = $getSelection();
+            if ($isRangeSelection(selection)) {
+                $wrapSelectionInMarkNode(selection as any, selection.isCollapsed(), anchorId);
+            }
+        });
+    };
+
+    const applyPlotAnchorFromData = (anchorId: string, data: PlotContextMenuData) => {
+        const editor = editorRef.current;
+        if (!editor) return;
+
+        editor.update(() => {
+            // Need to import $createRangeSelection, $getNodeByKey, $setSelection if not available?
+            // They are likely available globally or imported from lexical.
+            // Check imports later. Assuming they are imported or I should check.
+            // If not imported, this will fail. $getNodeByKey is standard.
+
+            // To be safe, I'll assume they are imported or add them.
+            // Editor.tsx usually imports everything from lexical.
+
+            if (!data.nodeKey || data.offset === undefined || data.length === undefined) return;
+            const { nodeKey, offset, length } = data;
+            const node = $getNodeByKey(nodeKey);
+            if (node && $isTextNode(node)) {
+                const selection = $createRangeSelection();
+                selection.anchor.set(nodeKey, offset, 'text');
+                selection.focus.set(nodeKey, offset + length, 'text');
+                $setSelection(selection);
+
+                if ($isRangeSelection(selection)) {
+                    $wrapSelectionInMarkNode(selection as any, false, anchorId);
+                }
+            }
+        });
     };
 
     // Create Chapter
@@ -300,8 +422,6 @@ export default function Editor({ novelId, onBack }: EditorProps) {
             console.error('Failed to create chapter:', error);
         }
     };
-
-    const [lastCreatedVolumeId, setLastCreatedVolumeId] = useState<string | null>(null);
 
     // Create Volume
     const handleCreateVolume = async () => {
@@ -336,17 +456,6 @@ export default function Editor({ novelId, onBack }: EditorProps) {
             console.error('Failed to rename chapter:', error);
         }
     };
-
-    // Refs for latest state
-    const contentRef = useRef(content);
-    const titleRef = useRef(title);
-    const chapterRef = useRef(currentChapter);
-
-    useEffect(() => {
-        contentRef.current = content;
-        titleRef.current = title;
-        chapterRef.current = currentChapter;
-    }, [content, title, currentChapter]);
 
     // Save Logic
     const saveChanges = useCallback(async () => {
@@ -412,9 +521,6 @@ export default function Editor({ novelId, onBack }: EditorProps) {
         };
     }, [saveChanges]);
 
-    // Shortcuts
-    const { shortcuts, isMatch } = useShortcuts();
-
     // Global Search Shortcut (Ctrl+Shift+F)
     useEffect(() => {
         const handleGlobalKeyDown = (e: KeyboardEvent) => {
@@ -473,23 +579,7 @@ export default function Editor({ novelId, onBack }: EditorProps) {
         return () => window.removeEventListener('keydown', handleGlobalKeyDown);
     }, [isMatch, handleCreateGlobalIdea]);
 
-    const submitGlobalIdea = async (content: string) => {
-        setIsGlobalIdeaModalOpen(false);
 
-        const newIdea: Idea = {
-            id: crypto.randomUUID(),
-            novelId,
-            content,
-            timestamp: Date.now(),
-            isStarred: false
-        };
-        setIdeas(prev => [newIdea, ...prev]);
-        try {
-            await window.db.createIdea(newIdea);
-        } catch (e) {
-            console.error('Failed to save idea:', e);
-        }
-    };
 
     const handleDeleteIdea = async (id: string) => {
         setIdeas(prev => prev.filter(i => i.id !== id));
@@ -544,9 +634,6 @@ export default function Editor({ novelId, onBack }: EditorProps) {
         // Same chapter navigation
         executeJump(idea);
     };
-
-    const [pendingJumpIdea, setPendingJumpIdea] = useState<Idea | null>(null);
-    const [pendingSearchJump, setPendingSearchJump] = useState<{ chapterId: string; keyword: string; context?: string } | null>(null);
 
     useEffect(() => {
         if (pendingJumpIdea && currentChapter?.id === pendingJumpIdea.chapterId) {
@@ -756,6 +843,145 @@ export default function Editor({ novelId, onBack }: EditorProps) {
         });
     };
 
+    // --- 8. Global Plot Point Modal Logic ---
+    const [isPlotPointModalOpen, setIsPlotPointModalOpen] = useState(false);
+    const [editingPlotPoint, setEditingPlotPoint] = useState<any>(null); // Resolve type if possible or stick to any for now
+    const [plotPointCreateData, setPlotPointCreateData] = useState<any>(null);
+    const [isPlotPointCreateMode, setIsPlotPointCreateMode] = useState(false);
+
+    useEffect(() => {
+        const handleOpenModal = (e: CustomEvent) => {
+            const { isCreateMode, pointId, initialData } = e.detail;
+            setIsPlotPointCreateMode(isCreateMode);
+
+            if (isCreateMode) {
+                // Enhance initialData with chapter context if missing
+                let data = initialData || {};
+                // Force use global metadata if chapterId is missing
+                if (!data.chapterId) {
+                    const active = activeChapterMetadata;
+                    if (active) {
+                        data = { ...data, chapterId: active.id, title: data.title || active.title };
+                        console.log('[Editor] handleOpenModal: Auto-filled chapter from global metadata:', active);
+                    }
+                }
+                setPlotPointCreateData(data);
+                setEditingPlotPoint(null);
+            } else {
+                if (pointId) {
+                    // Find point from loaded plotLines (from usePlotSystem)
+                    let found = null;
+                    for (const line of plotLines) {
+                        const p = line.points?.find((pt: any) => pt.id === pointId);
+                        if (p) {
+                            found = p;
+                            break;
+                        }
+                    }
+                    setEditingPlotPoint(found);
+                }
+            }
+            setIsPlotPointModalOpen(true);
+        };
+
+        window.addEventListener('open-plot-point-modal', handleOpenModal as EventListener);
+        return () => window.removeEventListener('open-plot-point-modal', handleOpenModal as EventListener);
+    }, [plotLines]);
+
+    const handleCreatePointFromSelection = () => {
+        if (plotContextMenuData?.text) {
+            setPendingAnchorSelection(plotContextMenuData);
+
+            // Use global metadata if available (to avoid stale closure), otherwise fallback to currentChapter state
+            let chapter: any = activeChapterMetadata || currentChapter;
+            console.log('Creating point from selection, Chapter (Global/State):', activeChapterMetadata, currentChapter);
+
+            // Fallback: If no current chapter, try to find from localStorage
+            if (!chapter) {
+                // Try recent files first
+                if (recentFiles.length > 0) {
+                    const recentId = recentFiles[0].id;
+                    console.log('Using recent file as fallback:', recentId);
+                    for (const v of volumes) {
+                        const found = v.chapters.find(c => c.id === recentId);
+                        if (found) {
+                            chapter = found;
+                            break;
+                        }
+                    }
+                }
+
+                if (!chapter) {
+                    const lastChapterId = localStorage.getItem(`last_chapter_${novelId}`);
+                    if (lastChapterId) {
+                        // Try to find in volumes
+                        for (const v of volumes) {
+                            const found = v.chapters.find(c => c.id === lastChapterId);
+                            if (found) {
+                                chapter = found;
+                                console.log('Found fallback chapter from localStorage:', chapter);
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Open Modal in Create Mode
+            setIsPlotPointCreateMode(true);
+            setPlotPointCreateData({
+                description: plotContextMenuData.text, // Use selection as default description
+                chapterId: chapter?.id,
+                title: chapter?.title // Default title is chapter title
+            });
+            setEditingPlotPoint(null);
+            setIsPlotPointModalOpen(true);
+        }
+        setPlotContextMenuData(null);
+    };
+
+    const handleCreatePlotPoint = async (data: any, initialChapterId?: string) => {
+        try {
+            const newPoint = await createPlotPoint(data);
+            // Logic to handle anchor creation if pending selection exists
+            const targetChapterId = initialChapterId || (pendingAnchorSelection && currentChapter?.id);
+
+            // Only anchor to selection if the target chapter matches the current chapter where selection was made
+            // Otherwise we might anchor to wrong text in different chapter or create invalid anchor
+            const shouldAnchorToSelection = pendingAnchorSelection && currentChapter?.id && targetChapterId === currentChapter.id;
+
+            if (newPoint && shouldAnchorToSelection && pendingAnchorSelection) {
+                await addAnchor({
+                    plotPointId: newPoint.id,
+                    chapterId: targetChapterId!,
+                    type: 'setup',
+                    lexicalKey: pendingAnchorSelection.nodeKey,
+                    offset: pendingAnchorSelection.offset,
+                    length: pendingAnchorSelection.length
+                });
+                applyPlotAnchorFromData(newPoint.id, pendingAnchorSelection);
+                setPendingAnchorSelection(null);
+            } else if (newPoint && targetChapterId) {
+                // Fallback for manual creation or if chapter changed (just associate with chapter)
+                await addAnchor({
+                    plotPointId: newPoint.id,
+                    chapterId: targetChapterId,
+                    type: 'setup'
+                });
+            }
+        } catch (e) {
+            console.error("Failed to create plot point", e);
+        }
+    };
+
+    const handleSavePlotPoint = async (id: string, data: any) => {
+        try {
+            await updatePlotPoint(id, data);
+        } catch (e) {
+            console.error("Failed to update plot point", e);
+        }
+    };
+
     return (
         <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
@@ -844,13 +1070,14 @@ export default function Editor({ novelId, onBack }: EditorProps) {
                         </div>
 
                         {/* Placeholders (Conditional) */}
-                        {activeTab === 'outline' && (
-                            <div className="flex-1 flex flex-col items-center justify-center p-4 text-neutral-500 text-sm text-center">
-                                <Info className="w-8 h-8 mb-4 opacity-50" />
-                                <p>{t('sidebar.outline')} {t('common.loading')}</p>
-                                <p className="text-xs mt-2 opacity-50">Feature coming soon</p>
-                            </div>
-                        )}
+                        {/* Plot Sidebar (Keep Alive) */}
+                        <div className={clsx("flex-1 h-full flex flex-col min-h-0", activeTab !== 'outline' && "hidden")}>
+                            <PlotSidebar
+                                novelId={novelId}
+                                theme={preferences.theme}
+                                onClose={() => setIsSidePanelOpen(false)}
+                            />
+                        </div>
 
                         {activeTab === 'characters' && (
                             <div className="flex-1 flex flex-col items-center justify-center p-4 text-neutral-500 text-sm text-center">
@@ -870,17 +1097,21 @@ export default function Editor({ novelId, onBack }: EditorProps) {
             </AnimatePresence>
 
             {/* Main Content */}
-            <div className={`flex-1 flex flex-col h-full relative transition-all ${preferences.theme === 'dark' ? 'bg-[#0a0a0f]' : 'bg-gray-50'}`}>
+            <div className={`flex-1 flex flex-col h-full relative transition-all min-w-0 overflow-hidden ${preferences.theme === 'dark' ? 'bg-[#0a0a0f]' : 'bg-gray-50'}`}>
 
                 {/* Header */}
-                <div className={clsx(
-                    "flex items-center justify-between border-b z-30 top-nav transition-all duration-300 ease-in-out",
-                    preferences.theme === 'dark' ? 'border-white/5 bg-[#0a0a0f] text-neutral-400' : 'border-gray-200 bg-white text-neutral-600',
-                    isFlowMode
-                        ? "h-0 p-0 border-b-0 opacity-0 pointer-events-none"
-                        : "h-[70px] p-4" // Explicit height to allow smooth transition
-                )}>
-                    <div className="flex items-center gap-2">
+                {/* Header */}
+                {/* Header - Robust 3-Column Layout */}
+                <div
+                    className={clsx(
+                        "flex items-center justify-between relative border-b",
+                        preferences.theme === 'dark' ? 'border-white/5 bg-[#0a0a0f] text-neutral-400' : 'border-gray-200 bg-white text-neutral-600',
+                        "h-[70px] px-4 shrink-0"
+                    )}
+                    style={{ zIndex: 40 }}
+                >
+                    {/* Left: Navigation (Width fixed to ensure center alignment) */}
+                    <div className="flex items-center gap-2 w-[180px] shrink-0">
                         <button onClick={onBack} className={`p-2 rounded-full transition-colors ${preferences.theme === 'dark' ? 'hover:bg-white/10 hover:text-white' : 'hover:bg-black/5 hover:text-black'}`}>
                             <ArrowLeft className="w-5 h-5" />
                         </button>
@@ -889,16 +1120,38 @@ export default function Editor({ novelId, onBack }: EditorProps) {
                         </button>
                     </div>
 
-                    {/* Title in Center (If loaded) */}
-                    {currentChapter && (
-                        <div className="flex-1 px-8 flex justify-center">
-                            <span className={`text-xs font-mono uppercase tracking-widest hidden md:block ${preferences.theme === 'dark' ? 'text-neutral-600' : 'text-neutral-400'}`}>
-                                {isLoading ? t('common.loading') : (currentChapter ? t('editor.editing') : t('editor.selectChapter'))}
+                    {/* Center: Title & View Switcher (Flex-1 to take available space) */}
+                    <div className="flex-1 flex justify-center items-center gap-4 min-w-0">
+                        {currentChapter && (
+                            <span className={clsx("text-xs font-mono uppercase tracking-widest hidden lg:block whitespace-nowrap overflow-hidden text-ellipsis max-w-[200px]", preferences.theme === 'dark' ? 'text-neutral-600' : 'text-neutral-400')}>
+                                {isLoading ? t('common.loading') : t('editor.editing')}
                             </span>
-                        </div>
-                    )}
+                        )}
 
-                    <div className="flex items-center gap-2">
+                        {/* View Mode Toggle */}
+                        <div className={clsx(
+                            "flex items-center p-1 rounded-full border shadow-sm shrink-0",
+                            preferences.theme === 'dark' ? "border-white/20 bg-black/40" : "border-gray-300 bg-white"
+                        )}>
+                            <button
+                                onClick={() => setViewMode('editor')}
+                                className={clsx("p-2 rounded-full transition-all flex items-center gap-2", viewMode === 'editor' ? (preferences.theme === 'dark' ? "bg-white/20 text-white" : "bg-gray-200 text-black") : "opacity-60 hover:opacity-100")}
+                                title={t('editor.mode.editor', 'Editor Mode')}
+                            >
+                                <FileText className="w-4 h-4" />
+                            </button>
+                            <button
+                                onClick={() => setViewMode('matrix')}
+                                className={clsx("p-2 rounded-full transition-all flex items-center gap-2", viewMode === 'matrix' ? (preferences.theme === 'dark' ? "bg-white/20 text-white" : "bg-gray-200 text-black") : "opacity-60 hover:opacity-100")}
+                                title={t('editor.mode.matrix', 'Matrix Mode')}
+                            >
+                                <LayoutGrid className="w-4 h-4" />
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* Right: Actions (Width fixed to match left) */}
+                    <div className="flex items-center gap-2 justify-end w-[180px] shrink-0">
                         <FlowModeButton
                             isActive={isFlowMode}
                             onClick={toggleFlowMode}
@@ -921,53 +1174,82 @@ export default function Editor({ novelId, onBack }: EditorProps) {
                     </div>
                 </div>
 
-                {/* Editor Area - Now fully handled by LexicalChapterEditor including Toolbar */}
-                {currentChapter ? (
-                    <div className={clsx(
-                        "flex-1 min-h-0 editor-shell layout-transition",
-                        preferences.theme === 'dark' ? 'bg-[#0a0a0f]' : 'bg-white'
-                    )}>
-                        <LexicalChapterEditor
-                            key={currentChapter.id}
-                            namespace={currentChapter.id}
-                            initialContent={currentChapter.content}
-                            onChange={(editorState) => {
-                                editorState.read(() => {
-                                    const jsonString = JSON.stringify(editorState.toJSON());
-                                    setContent(jsonString);
-                                });
-                            }}
-                            className={getEditorContentClass()}
-                            editorRef={editorRef}
-                            preferences={preferences}
-                            onUpdatePreference={updatePreference}
-                            shortcuts={shortcuts}
-                            onSave={saveChanges}
-                            onCreateIdea={handleCreateGlobalIdea}
-                            language={i18n.language}
-                            headerContent={
-                                <input
-                                    type="text"
-                                    value={title}
-                                    onChange={(e) => setTitle(e.target.value)}
-                                    placeholder={t('editor.chapterTitle')}
-                                    className={`w-full bg-transparent text-3xl font-bold outline-none text-center font-serif mb-4 ${preferences.theme === 'dark' ? 'text-neutral-100 placeholder-neutral-600' : 'text-neutral-900 placeholder-neutral-300'}`}
-                                />
-                            }
-                            onAddIdea={handleAddIdea}
-                            onIdeaClick={handleIdeaClick}
-                            recentFiles={recentFiles}
-                            onDeleteRecent={handleDeleteRecent}
-                            onRecentFileSelect={handleSelectChapter}
-                        />
-                    </div>
+                {/* Editor Area or Matrix */}
+                {viewMode === 'matrix' ? (
+                    <NarrativeMatrix novelId={novelId} theme={preferences.theme} activeChapterId={currentChapter?.id} volumes={volumes} formatting={novel?.formatting} />
                 ) : (
-                    <div className="flex-1 flex items-center justify-center text-neutral-600 flex-col gap-4">
-                        <div className="w-16 h-16 rounded-full bg-white/5 flex items-center justify-center">
-                            <ArrowLeft className="w-6 h-6 opacity-50" />
+                    currentChapter ? (
+                        <div className={clsx(
+                            "flex-1 min-h-0 editor-shell layout-transition",
+                            preferences.theme === 'dark' ? 'bg-[#0a0a0f]' : 'bg-white'
+                        )}>
+                            <LexicalChapterEditor
+                                key={currentChapter.id}
+                                namespace={currentChapter.id}
+                                initialContent={currentChapter.content}
+                                onChange={(editorState) => {
+                                    editorState.read(() => {
+                                        const jsonString = JSON.stringify(editorState.toJSON());
+                                        setContent(jsonString);
+                                    });
+                                }}
+                                className={getEditorContentClass()}
+                                editorRef={editorRef}
+                                preferences={preferences}
+                                onUpdatePreference={updatePreference}
+                                shortcuts={shortcuts}
+                                onSave={saveChanges}
+                                onCreateIdea={handleCreateGlobalIdea}
+                                language={i18n.language}
+                                headerContent={
+                                    <input
+                                        type="text"
+                                        value={title}
+                                        onChange={(e) => setTitle(e.target.value)}
+                                        placeholder={t('editor.chapterTitle')}
+                                        className={`w-full bg-transparent text-3xl font-bold outline-none text-center font-serif mb-4 ${preferences.theme === 'dark' ? 'text-neutral-100 placeholder-neutral-600' : 'text-neutral-900 placeholder-neutral-300'}`}
+                                    />
+                                }
+                                onAddIdea={handleAddIdea}
+                                onIdeaClick={handleIdeaClick}
+                                recentFiles={recentFiles}
+                                onDeleteRecent={handleDeleteRecent}
+                                onRecentFileSelect={handleSelectChapter}
+                                onPlotContextMenu={handlePlotContextMenu} // [NEW]
+                            />
+                            {/* Floating Elements */}
+                            {plotContextMenuData && (
+                                <PlotContextMenu
+                                    data={plotContextMenuData}
+                                    onClose={() => setPlotContextMenuData(null)}
+                                    onAddAnchor={handleAddAnchorClick}
+                                    onRemoveAnchor={handleRemoveAnchor}
+                                    onViewDetails={() => {
+                                        // Open sidebar to specific point?
+                                        console.log('View details for anchor:', plotContextMenuData.anchorId);
+                                        setPlotContextMenuData(null);
+                                    }}
+                                    onCreatePoint={handleCreatePointFromSelection}
+                                    theme={preferences.theme}
+                                />
+                            )}
+
+                            <PlotAnchorModal
+                                novelId={novelId}
+                                isOpen={isPlotAnchorModalOpen}
+                                onClose={() => setIsPlotAnchorModalOpen(false)}
+                                onSubmit={handleSubmitAnchor}
+                                theme={preferences.theme}
+                            />
                         </div>
-                        <p>{t('editor.selectChapter')}</p>
-                    </div>
+                    ) : (
+                        <div className="flex-1 flex items-center justify-center text-neutral-600 flex-col gap-4">
+                            <div className="w-16 h-16 rounded-full bg-white/5 flex items-center justify-center">
+                                <ArrowLeft className="w-6 h-6 opacity-50" />
+                            </div>
+                            <p>{t('editor.selectChapter')}</p>
+                        </div>
+                    )
                 )}
 
             </div>
@@ -994,7 +1276,7 @@ export default function Editor({ novelId, onBack }: EditorProps) {
             <GlobalIdeaModal
                 isOpen={isGlobalIdeaModalOpen}
                 onClose={() => setIsGlobalIdeaModalOpen(false)}
-                onSave={submitGlobalIdea}
+                onSave={async () => { }}
                 theme={preferences.theme}
             />
 
@@ -1025,6 +1307,20 @@ export default function Editor({ novelId, onBack }: EditorProps) {
                 <ChevronRight className="w-5 h-5 trigger-icon" />
             </div>
 
+            <PlotPointModal
+                isOpen={isPlotPointModalOpen}
+                onClose={() => setIsPlotPointModalOpen(false)}
+                point={editingPlotPoint}
+                isCreateMode={isPlotPointCreateMode}
+                initialData={plotPointCreateData}
+                novelId={novelId}
+                theme={preferences.theme}
+                onSave={handleSavePlotPoint}
+                onCreate={handleCreatePlotPoint}
+                onAddAnchor={addAnchor}
+                onRemoveAnchor={removeAnchor}
+                formatting={novel?.formatting}
+            />
 
         </motion.div>
     );

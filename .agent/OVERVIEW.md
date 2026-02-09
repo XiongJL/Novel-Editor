@@ -2,7 +2,7 @@
 
 This document provides a high-level summary of the Novel Editor project to help AI agents quickly establish context.
 
-**Last Updated**: 2026-02-05
+**Last Updated**: 2026-02-09
 
 ## 1. Essentials
 *   **Project**: Novel Editor (Monorepo)
@@ -79,6 +79,10 @@ This document provides a high-level summary of the Novel Editor project to help 
     *   Regex and Case sensitivity support
     *   Real-time highlighting using CSS Highlight API
     *   Keyboard navigation (Enter/Shift+Enter) and ESC support
+*   **Story Structure Tools**:
+    *   **Plot Sidebar**: Manage plot lines and points.
+    *   **Narrative Matrix**: 2D grid view (Chapters vs Plot Lines) to track narrative flow globally.
+    *   **Text Anchors**: Link plot points directly to lexical editor locations with visual highlights.
 
 ## 5. Current Status & Known Issues
 *   **Status**: 
@@ -86,8 +90,9 @@ This document provides a high-level summary of the Novel Editor project to help 
     *   Mobile view preview with iPhone frame.
     *   One-click formatting with language-aware punctuation.
     *   All toolbar items support i18n.
-    *   **Word Count & Recent Files UI complete.**
+    *   **Recent Files UI complete.**
     *   **Global search with FTS5 indexing complete (Context-aware jumping fixed).**
+    *   **Narrative Matrix view implemented (Transpose & Layout Fixes integrated).**
 *   **Critical Notes**:
     *   `packages/core` MUST be built (`pnpm build`) for Electron to load it.
     *   Old `EditorToolbar.tsx` component is deprecated (replaced by Lexical `ToolbarPlugin`).

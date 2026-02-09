@@ -5,7 +5,50 @@
     "confirm": "确认",
     "delete": "删除",
     "loading": "加载中...",
-    "search": "搜索"
+    "search": "搜索",
+    "create": "创建",
+    "title": "标题",
+        "chapterPrefix": "第",
+        "chapterSuffix": "章",
+        "volumePrefix": "第",
+        "volumeSuffix": "卷",
+        "chapter": "章节",
+        "plotLine": "情节线",
+    "description": "描述",
+    "confirmDelete": "确定要删除吗？",
+    "chapters": "章节",
+    "plotLines": "情节线"
+  },
+  "matrix": {
+    "title": "叙事矩阵",
+    "viewStandard": "标准视图",
+    "viewTranspose": "转置视图",
+    "noChapters": "暂无章节。请先创建章节以查看矩阵。"
+  },
+  "plot": {
+    "plotLine": "所属情节线",
+    "namePlaceholder": "情节线名称",
+    "noLines": "暂无情节线",
+    "points": "个情节要点",
+    "addPoint": "添加要点",
+    "pointNamePlaceholder": "情节要点标题",
+    "defaultTitle": "情节要点标题",
+    "editPoint": "编辑情节要点",
+    "selectChapter": "尚未关联章节...",
+    "type": "类型",
+    "status": "状态",
+    "descriptionPlaceholder": "添加详情、背景或笔记...",
+    "types": {
+      "foreshadowing": "伏笔",
+      "mystery": "悬念",
+      "promise": "承诺",
+      "event": "事件"
+    },
+    "statuses": {
+      "active": "进行中",
+      "resolved": "已完成"
+    },
+    "saveSuccess": "保存成功"
   },
   "home": {
     "greeting": "晚上好，作家",
@@ -29,7 +72,11 @@
     "flowMode": "心流模式",
     "inFlow": "心流中",
     "newIdea": "记录灵感",
-    "ideaPlaceholder": "写下你的想法..."
+    "ideaPlaceholder": "写下你的想法...",
+    "mode": {
+      "editor": "编辑模式",
+      "matrix": "矩阵模式"
+    }
   },
   "sidebar": {
     "explorer": "目录",

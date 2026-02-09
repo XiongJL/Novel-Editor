@@ -20,7 +20,19 @@ electron.contextBridge.exposeInMainWorld("db", {
   // Search
   search: (params) => electron.ipcRenderer.invoke("db:search", params),
   rebuildSearchIndex: (novelId) => electron.ipcRenderer.invoke("db:rebuild-search-index", novelId),
-  checkIndexStatus: (novelId) => electron.ipcRenderer.invoke("db:check-index-status", novelId)
+  checkIndexStatus: (novelId) => electron.ipcRenderer.invoke("db:check-index-status", novelId),
+  // Story Structure
+  getPlotLines: (novelId) => electron.ipcRenderer.invoke("db:get-plot-lines", novelId),
+  createPlotLine: (data) => electron.ipcRenderer.invoke("db:create-plot-line", data),
+  updatePlotLine: (id, data) => electron.ipcRenderer.invoke("db:update-plot-line", { id, data }),
+  deletePlotLine: (id) => electron.ipcRenderer.invoke("db:delete-plot-line", id),
+  createPlotPoint: (data) => electron.ipcRenderer.invoke("db:create-plot-point", data),
+  updatePlotPoint: (id, data) => electron.ipcRenderer.invoke("db:update-plot-point", { id, data }),
+  deletePlotPoint: (id) => electron.ipcRenderer.invoke("db:delete-plot-point", id),
+  createPlotPointAnchor: (data) => electron.ipcRenderer.invoke("db:create-plot-point-anchor", data),
+  deletePlotPointAnchor: (id) => electron.ipcRenderer.invoke("db:delete-plot-point-anchor", id),
+  reorderPlotLines: (novelId, lineIds) => electron.ipcRenderer.invoke("db:reorder-plot-lines", { novelId, lineIds }),
+  reorderPlotPoints: (plotLineId, pointIds) => electron.ipcRenderer.invoke("db:reorder-plot-points", { plotLineId, pointIds })
 });
 electron.contextBridge.exposeInMainWorld("electron", {
   toggleFullScreen: () => electron.ipcRenderer.invoke("app:toggle-fullscreen"),

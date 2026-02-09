@@ -48,6 +48,24 @@
     - [x] 自动备份 (Auto Backup): 恢复前自动快照，自动轮替保留最新3份
     - [x] 数据恢复 (Restore): 事务性恢复 (Atomicity)，清空旧数据后写入新数据
     - [x] 备份设置面板 (Settings UI): 集成于设置模态框，支持密码保护
+- [x] **架构重构与稳定性修复 (Architecture Refactoring & Stability)**
+    - [x] **Editor.tsx 重构**: 修复重复组件定义，合并状态管理，恢复丢失的 UI 逻辑
+    - [x] **Story Structure Backend**: 修复 `PlotLine` Prisma Client 同步问题，增强 IPC 错误处理
+- [ ] **剧情大纲交互增强 (Story Structure Enhancements)**
+    - [ ] **Phase 4: 基础交互与排序 (Interactions & Sorting)**
+        - [ ] 安装 `@dnd-kit`
+        - [ ] 后端实现 `reorderPlotLines/Points`
+        - [ ] 前端实现拖拽排序 UI
+        - [ ] 优化“要点创建”为快速输入模式
+    - [ ] **Phase 5: 深度编辑与矩阵视图 (Matrix & Details)**
+        - [ ] 实现 `PlotPointModal` (编辑标题、描述、类型、状态)
+        - [ ] 实现 `NarrativeMatrix` (表格视图、筛选器)
+    - [ ] **Phase 6: 锚点与编辑器集成 (Anchors & Editor)**
+        - [ ] 实现 `AnchorPlugin` (Lexical 高亮)
+        - [ ] 实现右键菜单 "Add to Plot"
+        - [ ] 实现锚点跳转与数据联动
+    - [ ] **Phase 7: 可视化时间轴 (Timeline Visualization)**
+        - [ ] 实现 `PlotTimeline` 组件 (轨道视图)
 - [ ] 云同步功能开发
     - [ ] `SyncService.java` 代码审查
     - [ ] 增量同步逻辑完善

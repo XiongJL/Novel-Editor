@@ -1,7 +1,5 @@
 /// <reference types="vite/client" />
 
-
-
 interface DBAPI {
     getNovels: () => Promise<Novel[]>
     createNovel: (title: string) => Promise<Novel>
@@ -27,6 +25,60 @@ interface DBAPI {
         indexedIdeas: number
         totalIdeas: number
     }>
+
+    // Story Structure
+    getPlotLines: (novelId: string) => Promise<PlotLine[]>
+    createPlotLine: (data: { novelId: string; name: string; color: string }) => Promise<PlotLine>
+    updatePlotLine: (id: string, data: Partial<PlotLine>) => Promise<PlotLine>
+    deletePlotLine: (id: string) => Promise<void>
+
+    createPlotPoint: (data: Partial<PlotPoint>) => Promise<PlotPoint>
+    updatePlotPoint: (id: string, data: Partial<PlotPoint>) => Promise<PlotPoint>
+    deletePlotPoint: (id: string) => Promise<void>
+
+    createPlotPointAnchor: (data: Partial<PlotPointAnchor>) => Promise<PlotPointAnchor>
+    deletePlotPointAnchor: (id: string) => Promise<void>
+
+    reorderPlotLines: (novelId: string, lineIds: string[]) => Promise<{ success: boolean }>
+    reorderPlotPoints: (plotLineId: string, pointIds: string[]) => Promise<{ success: boolean }>
+}
+
+interface PlotLine {
+    id: string;
+    novelId: string;
+    name: string;
+    description?: string | null;
+    color: string;
+    sortOrder: number;
+    points?: PlotPoint[];
+    createdAt: string | Date;
+    updatedAt: string | Date;
+}
+
+interface PlotPoint {
+    id: string;
+    novelId: string;
+    plotLineId: string;
+    title: string;
+    description?: string | null;
+    type: string;
+    status: string;
+    order: number;
+    anchors?: PlotPointAnchor[];
+    createdAt: string | Date;
+    updatedAt: string | Date;
+}
+
+interface PlotPointAnchor {
+    id: string;
+    plotPointId: string;
+    chapterId: string;
+    type: string;
+    lexicalKey?: string | null;
+    offset?: number | null;
+    length?: number | null;
+    createdAt: string | Date;
+    updatedAt: string | Date;
 }
 
 interface SearchResult {
@@ -36,7 +88,7 @@ interface SearchResult {
     novelId: string
     title: string
     snippet: string
-    preview?: string // Longer text for tooltip
+    preview?: string
     keyword: string
     matchType: 'content' | 'title' | 'volume'
     chapterOrder?: number
@@ -61,17 +113,13 @@ interface Novel {
     title: string
     description?: string | null
     coverUrl?: string | null
-    createdAt: Date
-    updatedAt: Date
-    wordCount?: number
-    formatting?: string
-}
-
-interface Volume {
-    id: string
-    title: string
-    order: number
-    chapters: ChapterMetadata[]
+    createdAt: string | Date
+    updatedAt: string | Date
+    version: number
+    deleted: boolean
+    wordCount: number
+    formatting: string
+    volumes?: Volume[]
 }
 
 interface ChapterMetadata {
@@ -79,11 +127,28 @@ interface ChapterMetadata {
     title: string
     order: number
     wordCount: number
-    updatedAt: Date
+    updatedAt: string | Date
+}
+
+interface Volume {
+    id: string
+    title: string
+    order: number
+    novelId: string
+    version: number
+    deleted: boolean
+    createdAt: string | Date
+    updatedAt: string | Date
+    chapters: ChapterMetadata[]
 }
 
 interface Chapter extends ChapterMetadata {
     content: string
+    volumeId: string
+    createdAt: string | Date
+    version: number
+    deleted: boolean
+    anchors?: PlotPointAnchor[]
 }
 
 interface SyncAPI {
@@ -92,7 +157,6 @@ interface SyncAPI {
 }
 
 interface Window {
-    // expose in the `electron/preload.ts`
     ipcRenderer: import('electron').IpcRenderer
     db: DBAPI
     sync: SyncAPI

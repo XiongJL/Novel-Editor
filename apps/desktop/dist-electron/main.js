@@ -3728,6 +3728,130 @@ ipcMain.handle("db:get-all-tags", async (_, novelId) => {
     throw e;
   }
 });
+ipcMain.handle("db:get-plot-lines", async (_, novelId) => {
+  try {
+    return await db.plotLine.findMany({
+      where: { novelId },
+      include: {
+        points: {
+          include: { anchors: true }
+        }
+      },
+      orderBy: { sortOrder: "asc" }
+    });
+  } catch (e) {
+    console.error("[Main] db:get-plot-lines failed:", e);
+    throw e;
+  }
+});
+ipcMain.handle("db:create-plot-line", async (_, data) => {
+  try {
+    const maxOrder = await db.plotLine.aggregate({
+      where: { novelId: data.novelId },
+      _max: { sortOrder: true }
+    });
+    const order = (maxOrder._max.sortOrder || 0) + 1;
+    return await db.plotLine.create({
+      data: { ...data, sortOrder: order }
+    });
+  } catch (e) {
+    console.error("[Main] db:create-plot-line failed. Data:", data, "Error:", e);
+    throw e;
+  }
+});
+ipcMain.handle("db:update-plot-line", async (_, data) => {
+  try {
+    return await db.plotLine.update({
+      where: { id: data.id },
+      data: data.data
+    });
+  } catch (e) {
+    console.error("[Main] db:update-plot-line failed. ID:", data.id, "Error:", e);
+    throw e;
+  }
+});
+ipcMain.handle("db:delete-plot-line", async (_, id) => {
+  try {
+    return await db.plotLine.delete({ where: { id } });
+  } catch (e) {
+    console.error("[Main] db:delete-plot-line failed. ID:", id, "Error:", e);
+    throw e;
+  }
+});
+ipcMain.handle("db:create-plot-point", async (_, data) => {
+  try {
+    return await db.plotPoint.create({ data });
+  } catch (e) {
+    console.error("[Main] db:create-plot-point failed. Data:", data, "Error:", e);
+    throw e;
+  }
+});
+ipcMain.handle("db:update-plot-point", async (_, data) => {
+  try {
+    return await db.plotPoint.update({
+      where: { id: data.id },
+      data: data.data
+    });
+  } catch (e) {
+    console.error("[Main] db:update-plot-point failed. ID:", data.id, "Error:", e);
+    throw e;
+  }
+});
+ipcMain.handle("db:delete-plot-point", async (_, id) => {
+  try {
+    return await db.plotPoint.delete({ where: { id } });
+  } catch (e) {
+    console.error("[Main] db:delete-plot-point failed. ID:", id, "Error:", e);
+    throw e;
+  }
+});
+ipcMain.handle("db:create-plot-point-anchor", async (_, data) => {
+  try {
+    return await db.plotPointAnchor.create({ data });
+  } catch (e) {
+    console.error("[Main] db:create-plot-point-anchor failed. Data:", data, "Error:", e);
+    throw e;
+  }
+});
+ipcMain.handle("db:delete-plot-point-anchor", async (_, id) => {
+  try {
+    return await db.plotPointAnchor.delete({ where: { id } });
+  } catch (e) {
+    console.error("[Main] db:delete-plot-point-anchor failed. ID:", id, "Error:", e);
+    throw e;
+  }
+});
+ipcMain.handle("db:reorder-plot-lines", async (_, { novelId, lineIds }) => {
+  try {
+    const updates = lineIds.map(
+      (id, index) => db.plotLine.update({
+        where: { id },
+        data: { sortOrder: index }
+      })
+    );
+    await db.$transaction(updates);
+    return { success: true };
+  } catch (e) {
+    console.error("[Main] db:reorder-plot-lines failed:", e);
+    throw e;
+  }
+});
+ipcMain.handle("db:reorder-plot-points", async (_, { plotLineId, pointIds }) => {
+  try {
+    const updates = pointIds.map(
+      (id, index) => db.plotPoint.update({
+        where: { id },
+        data: { sortOrder: index, plotLineId }
+        // Update plotLineId as well to support moving between lines if needed later
+      })
+    );
+    await db.$transaction(updates);
+    return { success: true };
+  } catch (e) {
+    console.error("[Main] db:reorder-plot-points failed:", e);
+    throw e;
+  }
+});
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {
     app.quit();
@@ -3758,25 +3882,39 @@ app.whenReady().then(async () => {
     const schemaPath = path$1.resolve(__dirname$1, "../../../packages/core/prisma/schema.prisma");
     console.log("[Main] Development mode detected (unpackaged). Checking schema at:", schemaPath);
     if (fs.existsSync(schemaPath)) {
-      console.log("[Main] Schema found. Attempting synchronous DB push to:", dbPath);
+      const dbFolder = path$1.dirname(dbPath);
+      if (!fs.existsSync(dbFolder)) {
+        fs.mkdirSync(dbFolder, { recursive: true });
+      }
+      console.log("[Main] Schema found.");
+      console.log("[Main] Cleaning up FTS tables before migration...");
+      initDb(dbUrl);
       try {
-        const prismaPath = path$1.resolve(__dirname$1, "../../../packages/core/node_modules/.bin/prisma.cmd");
-        const dbFolder = path$1.dirname(dbPath);
-        if (!fs.existsSync(dbFolder)) {
-          fs.mkdirSync(dbFolder, { recursive: true });
+        await db.$executeRawUnsafe("DROP TABLE IF EXISTS search_index;");
+        console.log("[Main] FTS tables dropped successfully.");
+      } catch (e) {
+        console.warn("[Main] Failed to drop FTS table (non-critical):", e);
+      }
+      await db.$disconnect();
+      console.log("[Main] Attempting synchronous DB push to:", dbPath);
+      const prismaPath = path$1.resolve(__dirname$1, "../../../packages/core/node_modules/.bin/prisma.cmd");
+      console.log("[Main] Using Prisma binary at:", prismaPath);
+      if (!fs.existsSync(prismaPath)) {
+        console.error("[Main] Prisma binary NOT found at:", prismaPath);
+      } else {
+        try {
+          const command = `"${prismaPath}" db push --schema="${schemaPath}" --accept-data-loss`;
+          console.log("[Main] Executing command:", command);
+          execSync(command, {
+            env: { ...process.env, DATABASE_URL: dbUrl },
+            cwd: path$1.resolve(__dirname$1, "../../../packages/core"),
+            stdio: "inherit",
+            windowsHide: true
+          });
+          console.log("[Main] DB Push completed successfully.");
+        } catch (error) {
+          console.error("[Main] DB Push failed. Details:", error);
         }
-        const command = `"${prismaPath}" db push --schema="${schemaPath}" --accept-data-loss`;
-        console.log("[Main] Executing migration command...");
-        execSync(command, {
-          env: { ...process.env, DATABASE_URL: dbUrl },
-          cwd: path$1.resolve(__dirname$1, "../../../packages/core"),
-          stdio: "inherit",
-          // Show output in console!
-          windowsHide: true
-        });
-        console.log("[Main] DB Push completed successfully.");
-      } catch (error) {
-        console.error("[Main] DB Push failed. Details:", error);
       }
     } else {
       console.warn("[Main] Schema file NOT found at:", schemaPath);

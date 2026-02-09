@@ -627,6 +627,146 @@ ipcMain.handle('db:get-all-tags', async (_, novelId?: string) => {
     }
 });
 
+// --- Story Structure System IPC ---
+
+// PlotLine
+ipcMain.handle('db:get-plot-lines', async (_, novelId: string) => {
+    try {
+        return await (db as any).plotLine.findMany({
+            where: { novelId },
+            include: {
+                points: {
+                    include: { anchors: true }
+                }
+            },
+            orderBy: { sortOrder: 'asc' }
+        });
+    } catch (e) {
+        console.error('[Main] db:get-plot-lines failed:', e);
+        throw e;
+    }
+});
+
+ipcMain.handle('db:create-plot-line', async (_, data: { novelId: string; name: string; color: string }) => {
+    try {
+        const maxOrder = await (db as any).plotLine.aggregate({
+            where: { novelId: data.novelId },
+            _max: { sortOrder: true }
+        });
+        const order = (maxOrder._max.sortOrder || 0) + 1;
+
+        return await (db as any).plotLine.create({
+            data: { ...data, sortOrder: order }
+        });
+    } catch (e) {
+        console.error('[Main] db:create-plot-line failed. Data:', data, 'Error:', e);
+        throw e;
+    }
+});
+
+ipcMain.handle('db:update-plot-line', async (_, data: { id: string; data: any }) => {
+    try {
+        return await (db as any).plotLine.update({
+            where: { id: data.id },
+            data: data.data
+        });
+    } catch (e) {
+        console.error('[Main] db:update-plot-line failed. ID:', data.id, 'Error:', e);
+        throw e;
+    }
+});
+
+ipcMain.handle('db:delete-plot-line', async (_, id: string) => {
+    try {
+        return await (db as any).plotLine.delete({ where: { id } });
+    } catch (e) {
+        console.error('[Main] db:delete-plot-line failed. ID:', id, 'Error:', e);
+        throw e;
+    }
+});
+
+// PlotPoint
+ipcMain.handle('db:create-plot-point', async (_, data: any) => {
+    try {
+        return await (db as any).plotPoint.create({ data });
+    } catch (e) {
+        console.error('[Main] db:create-plot-point failed. Data:', data, 'Error:', e);
+        throw e;
+    }
+});
+
+ipcMain.handle('db:update-plot-point', async (_, data: { id: string; data: any }) => {
+    try {
+        return await (db as any).plotPoint.update({
+            where: { id: data.id },
+            data: data.data
+        });
+    } catch (e) {
+        console.error('[Main] db:update-plot-point failed. ID:', data.id, 'Error:', e);
+        throw e;
+    }
+});
+
+ipcMain.handle('db:delete-plot-point', async (_, id: string) => {
+    try {
+        return await (db as any).plotPoint.delete({ where: { id } });
+    } catch (e) {
+        console.error('[Main] db:delete-plot-point failed. ID:', id, 'Error:', e);
+        throw e;
+    }
+});
+
+// PlotPointAnchor
+ipcMain.handle('db:create-plot-point-anchor', async (_, data: any) => {
+    try {
+        return await (db as any).plotPointAnchor.create({ data });
+    } catch (e) {
+        console.error('[Main] db:create-plot-point-anchor failed. Data:', data, 'Error:', e);
+        throw e;
+    }
+});
+
+ipcMain.handle('db:delete-plot-point-anchor', async (_, id: string) => {
+    try {
+        return await (db as any).plotPointAnchor.delete({ where: { id } });
+    } catch (e) {
+        console.error('[Main] db:delete-plot-point-anchor failed. ID:', id, 'Error:', e);
+        throw e;
+    }
+});
+
+ipcMain.handle('db:reorder-plot-lines', async (_, { novelId, lineIds }: { novelId: string; lineIds: string[] }) => {
+    try {
+        const updates = lineIds.map((id, index) =>
+            (db as any).plotLine.update({
+                where: { id },
+                data: { sortOrder: index }
+            })
+        );
+        await (db as any).$transaction(updates);
+        return { success: true };
+    } catch (e) {
+        console.error('[Main] db:reorder-plot-lines failed:', e);
+        throw e;
+    }
+});
+
+ipcMain.handle('db:reorder-plot-points', async (_, { plotLineId, pointIds }: { plotLineId: string; pointIds: string[] }) => {
+    try {
+        const updates = pointIds.map((id, index) =>
+            (db as any).plotPoint.update({
+                where: { id },
+                data: { sortOrder: index, plotLineId } // Update plotLineId as well to support moving between lines if needed later
+            })
+        );
+        await (db as any).$transaction(updates);
+        return { success: true };
+    } catch (e) {
+        console.error('[Main] db:reorder-plot-points failed:', e);
+        throw e;
+    }
+});
+
 // --- App Lifecycle ---
 
 app.on('window-all-closed', () => {
@@ -676,36 +816,56 @@ app.whenReady().then(async () => {
         console.log('[Main] Development mode detected (unpackaged). Checking schema at:', schemaPath);
 
         if (fs.existsSync(schemaPath)) {
-            console.log('[Main] Schema found. Attempting synchronous DB push to:', dbPath);
+            const dbFolder = path.dirname(dbPath);
+            if (!fs.existsSync(dbFolder)) {
+                fs.mkdirSync(dbFolder, { recursive: true });
+            }
+
+            console.log('[Main] Schema found.');
+
+            // FIX: Drop FTS table before migration to prevent Prisma "no such table" errors on shadow tables
+            console.log('[Main] Cleaning up FTS tables before migration...');
+            initDb(dbUrl); // Initialize client
             try {
-                const prismaPath = path.resolve(__dirname, '../../../packages/core/node_modules/.bin/prisma.cmd');
-                // Ensure db folder exists
-                const dbFolder = path.dirname(dbPath);
-                if (!fs.existsSync(dbFolder)) {
-                    fs.mkdirSync(dbFolder, { recursive: true });
+                // Use unsafe raw query to drop the virtual table. This also drops shadow tables like search_index_config.
+                await db.$executeRawUnsafe('DROP TABLE IF EXISTS search_index;');
+                console.log('[Main] FTS tables dropped successfully.');
+            } catch (e) {
+                console.warn('[Main] Failed to drop FTS table (non-critical):', e);
+            }
+            // CRITICAL: Disconnect to release SQLite lock before running Prisma CLI
+            await (db as any).$disconnect();
+
+            console.log('[Main] Attempting synchronous DB push to:', dbPath);
+
+            // Resolve Prisma Binary
+            const prismaPath = path.resolve(__dirname, '../../../packages/core/node_modules/.bin/prisma.cmd');
+            console.log('[Main] Using Prisma binary at:', prismaPath);
+
+            if (!fs.existsSync(prismaPath)) {
+                console.error('[Main] Prisma binary NOT found at:', prismaPath);
+            } else {
+                try {
+                    const command = `"${prismaPath}" db push --schema="${schemaPath}" --accept-data-loss`;
+                    console.log('[Main] Executing command:', command);
+
+                    execSync(command, {
+                        env: { ...process.env, DATABASE_URL: dbUrl },
+                        cwd: path.resolve(__dirname, '../../../packages/core'),
+                        stdio: 'inherit',
+                        windowsHide: true
+                    });
+                    console.log('[Main] DB Push completed successfully.');
+                } catch (error) {
+                    console.error('[Main] DB Push failed. Details:', error);
                 }
-
-                // Add --skip-generate to speed it up, assuming we generated client separately or don't need it specifically for main process right now (renderer uses pre-generated)
-                // Actually we might need generate if main process imports types. But usually db push generates.
-                const command = `"${prismaPath}" db push --schema="${schemaPath}" --accept-data-loss`;
-
-                console.log('[Main] Executing migration command...');
-                execSync(command, {
-                    env: { ...process.env, DATABASE_URL: dbUrl },
-                    cwd: path.resolve(__dirname, '../../../packages/core'),
-                    stdio: 'inherit', // Show output in console!
-                    windowsHide: true
-                });
-                console.log('[Main] DB Push completed successfully.');
-            } catch (error) {
-                console.error('[Main] DB Push failed. Details:', error);
             }
         } else {
             console.warn('[Main] Schema file NOT found at:', schemaPath);
         }
     }
 
-    // 4. Initialize Core Database
+    // 4. Initialize Core Database (Re-connect/Use instance)
     initDb(dbUrl);
 
     // 5. Initialize Search Index
