@@ -51,21 +51,34 @@
 - [x] **架构重构与稳定性修复 (Architecture Refactoring & Stability)**
     - [x] **Editor.tsx 重构**: 修复重复组件定义，合并状态管理，恢复丢失的 UI 逻辑
     - [x] **Story Structure Backend**: 修复 `PlotLine` Prisma Client 同步问题，增强 IPC 错误处理
-- [ ] **剧情大纲交互增强 (Story Structure Enhancements)**
-    - [ ] **Phase 4: 基础交互与排序 (Interactions & Sorting)**
-        - [ ] 安装 `@dnd-kit`
-        - [ ] 后端实现 `reorderPlotLines/Points`
-        - [ ] 前端实现拖拽排序 UI
-        - [ ] 优化“要点创建”为快速输入模式
-    - [ ] **Phase 5: 深度编辑与矩阵视图 (Matrix & Details)**
-        - [ ] 实现 `PlotPointModal` (编辑标题、描述、类型、状态)
-        - [ ] 实现 `NarrativeMatrix` (表格视图、筛选器)
-    - [ ] **Phase 6: 锚点与编辑器集成 (Anchors & Editor)**
-        - [ ] 实现 `AnchorPlugin` (Lexical 高亮)
-        - [ ] 实现右键菜单 "Add to Plot"
-        - [ ] 实现锚点跳转与数据联动
+- [x] **剧情大纲交互增强 (Story Structure Enhancements)**
+    - [x] **Phase 4: 基础交互与排序 (Interactions & Sorting)**
+        - [x] 安装 `@dnd-kit`
+        - [x] 后端实现 `reorderPlotLines/Points`
+        - [x] 前端实现拖拽排序 UI
+        - [x] 优化“要点创建”为快速输入模式
+    - [x] **Phase 5: 深度编辑与矩阵视图 (Matrix & Details)**
+        - [x] 实现 `PlotPointModal` (编辑标题、描述、类型、状态)
+        - [x] 实现 `NarrativeMatrix` (表格视图、筛选器)
+    - [x] **Phase 6: 锚点与编辑器集成 (Anchors & Editor)**
+        - [x] 实现 `AnchorPlugin` (Lexical 高亮)
+        - [x] 实现右键菜单 "Add to Plot"
+        - [x] 实现锚点跳转与数据联动
+            - [x] **Phase 6.5: 锚点跳转优化 (Anchor Jump Improvement)**
+                - [x] 实现 `handleJumpToPlotPoint` (bi-directional sync)
+                - [x] 更新 `PlotSidebar` / `PlotPointItem` 添加跳转按钮
+                - [x] 实现无锚点时的抖动反馈 (Shake Animation)
     - [ ] **Phase 7: 可视化时间轴 (Timeline Visualization)**
         - [ ] 实现 `PlotTimeline` 组件 (轨道视图)
+    - [x] **Phase 8: 角色系统增强 (Character System)**
+        - [x] **@Mentions**: 在剧情要点与矩阵视图中实现快捷选取与高亮
+        - [x] **角色卡片**: 实现点击 Mention 弹出详情档案卡
+        - [x] **交互优化**: 采用全透明 Textarea 方案解决文本重叠，实现 Click-outside 自动关闭
+    - [x] **Phase 9: UI 样式大统一与交互安全 (UI Unification)**
+        - [x] **按钮迁移**: 统一将删除按钮移至模态框页脚左侧
+        - [x] **确认拦截**: 全系统集成 `ConfirmModal` 二次确认机制
+        - [x] **视觉对齐**: 统一页脚按钮比例与 `text-xs` 字号
+        - [ ] 完善角色、物品功能
 - [ ] 云同步功能开发
     - [ ] `SyncService.java` 代码审查
     - [ ] 增量同步逻辑完善

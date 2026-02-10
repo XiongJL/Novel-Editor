@@ -9,7 +9,7 @@ import { EditorState, LexicalEditor, $createParagraphNode, $createTextNode, $get
 import { useEffect, useRef } from 'react';
 import theme from './theme';
 import { IdeaMarkNode } from './nodes/IdeaMarkNode';
-import { PlotAnchorNode } from './nodes/PlotAnchorNode'; // [NEW]
+import { PlotAnchorNode } from './nodes/PlotAnchorNode';
 
 // Plugins
 import ToolbarPlugin from './plugins/ToolbarPlugin';
@@ -18,7 +18,8 @@ import ShortcutsPlugin from './plugins/ShortcutsPlugin';
 import AutoFormatPlugin from './plugins/AutoFormatPlugin';
 import FloatingTextFormatToolbarPlugin from './plugins/FloatingTextFormatToolbarPlugin';
 import IdeaInteractionPlugin from './plugins/IdeaInteractionPlugin';
-import PlotContextMenuPlugin, { PlotContextMenuData } from './plugins/PlotContextMenuPlugin'; // [NEW]
+import PlotAnchorInteractionPlugin from './plugins/PlotAnchorInteractionPlugin'; // [NEW]
+import PlotContextMenuPlugin, { PlotContextMenuData } from './plugins/PlotContextMenuPlugin';
 import EditorSearchToolbar from './ui/EditorSearchToolbar';
 import WordCountPlugin from './plugins/WordCountPlugin';
 import { EditorPreferences } from '../../hooks/useEditorPreferences';
@@ -134,7 +135,9 @@ interface LexicalChapterEditorProps {
     recentFiles?: RecentFile[];
     onDeleteRecent?: (id: string) => void;
     onRecentFileSelect?: (id: string) => void;
-    onPlotContextMenu?: (data: PlotContextMenuData) => void; // [NEW]
+    onPlotContextMenu?: (data: PlotContextMenuData) => void;
+    onPlotAnchorClick?: (anchorId: string) => void;
+    novelId?: string;
 }
 
 export default function LexicalChapterEditor({
@@ -157,7 +160,8 @@ export default function LexicalChapterEditor({
     recentFiles,
     onDeleteRecent,
     onRecentFileSelect,
-    onPlotContextMenu // [NEW]
+    onPlotContextMenu,
+    onPlotAnchorClick
 }: LexicalChapterEditorProps) {
 
     const initialConfig = {
@@ -165,7 +169,7 @@ export default function LexicalChapterEditor({
         theme,
         onError: (error: Error) => console.error(error),
         editable: !readOnly,
-        nodes: [IdeaMarkNode, PlotAnchorNode] // [MODIFIED]
+        nodes: [IdeaMarkNode, PlotAnchorNode]
     };
 
     const isMobile = preferences.maxWidth === 'mobile';
@@ -255,6 +259,12 @@ export default function LexicalChapterEditor({
 
                 <FloatingTextFormatToolbarPlugin onAddIdea={onAddIdea} />
                 <IdeaInteractionPlugin onIdeaClick={onIdeaClick} />
+                {onPlotAnchorClick && (
+                    <>
+                        {console.log('[LexicalChapterEditor] Rendering PlotAnchorInteractionPlugin')}
+                        <PlotAnchorInteractionPlugin onAnchorClick={onPlotAnchorClick} />
+                    </>
+                )}
                 {onPlotContextMenu && <PlotContextMenuPlugin onOpenMenu={onPlotContextMenu} />}
                 <EditorSearchToolbar />
             </div>

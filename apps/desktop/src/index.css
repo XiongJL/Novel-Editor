@@ -52,6 +52,150 @@
   :is(.dark .idea-mark:hover) {
     background-color: rgba(250, 204, 21, 0.2);
   }
+
+  /* Plot Anchor Styles */
+  .plot-anchor {
+    border-bottom: 2px solid #818cf8;
+    /* indigo-400 */
+    background-color: transparent;
+    cursor: pointer;
+    transition: all 0.2s;
+    color: inherit;
+  }
+
+  .plot-anchor:hover {
+    background-color: rgba(129, 140, 248, 0.15);
+  }
+
+  :is(.dark .plot-anchor) {
+    border-bottom-color: #a5b4fc;
+    /* indigo-300 */
+  }
+
+  :is(.dark .plot-anchor:hover) {
+    background-color: rgba(165, 180, 252, 0.15);
+  }
+
+  /* Mention Capsule Styles */
+  /* Mention Capsule Styles - Light Reminder Look */
+  .mention-capsule {
+    display: inline;
+    vertical-align: baseline;
+  }
+
+  .mention-capsule-inner {
+    display: inline-flex;
+    align-items: center;
+    gap: 0;
+    padding: 0 1px;
+    border-radius: 0;
+    font-size: inherit;
+    font-weight: 500;
+    cursor: pointer;
+    vertical-align: baseline;
+    user-select: none;
+    border-bottom: 1.5px dotted;
+    background-color: transparent !important;
+    border-top: none !important;
+    border-left: none !important;
+    border-right: none !important;
+  }
+
+  .mention-character {
+    color: #6366f1;
+    border-bottom-color: rgba(99, 102, 241, 0.5);
+  }
+
+  .mention-character:hover {
+    background-color: rgba(99, 102, 241, 0.1) !important;
+  }
+
+  .mention-item {
+    color: #10b981;
+    border-bottom-color: rgba(16, 185, 129, 0.5);
+  }
+
+  .mention-item:hover {
+    background-color: rgba(16, 185, 129, 0.1) !important;
+  }
+
+  :is(.dark .mention-character) {
+    color: #a5b4fc;
+    border-bottom-color: rgba(129, 140, 248, 0.5);
+  }
+
+  :is(.dark .mention-item) {
+    color: #6ee7b7;
+    border-bottom-color: rgba(52, 211, 153, 0.5);
+  }
+
+  /* Hide icon for lighter look */
+  .mention-icon {
+    display: none;
+  }
+
+  .mention-text {
+    font-weight: 500;
+  }
+
+  /* Mention Dropdown Menu */
+  .mention-menu {
+    background: white;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
+    min-width: 200px;
+    max-width: 300px;
+    max-height: 240px;
+    overflow-y: auto;
+    padding: 4px;
+  }
+
+  .dark .mention-menu {
+    background: #1e1e2e;
+    border-color: rgba(255, 255, 255, 0.1);
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+  }
+
+  .mention-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background 0.1s;
+    font-size: 13px;
+  }
+
+  .mention-menu-item:hover,
+  .mention-menu-item.selected {
+    background: #f3f4f6;
+  }
+
+  .dark .mention-menu-item:hover,
+  .dark .mention-menu-item.selected {
+    background: rgba(255, 255, 255, 0.08);
+  }
+
+  .mention-menu-icon {
+    font-size: 16px;
+    flex-shrink: 0;
+  }
+
+  .mention-menu-name {
+    font-weight: 500;
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .mention-menu-role {
+    font-size: 11px;
+    color: #9ca3af;
+    flex-shrink: 0;
+  }
 }
 
 @keyframes shake {

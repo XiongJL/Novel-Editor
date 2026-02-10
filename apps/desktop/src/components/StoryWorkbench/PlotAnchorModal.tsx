@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { clsx } from 'clsx';
+import clsx from 'clsx';
 import { usePlotSystem } from '../../hooks/usePlotSystem';
 import { X, ChevronRight, ChevronDown } from 'lucide-react';
 

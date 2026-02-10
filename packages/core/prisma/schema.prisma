@@ -22,6 +22,7 @@ model Novel {
 
   volumes    Volume[]
   characters Character[]
+  items      Item[]
   ideas      Idea[]
   tags       Tag[]
   plotLines  PlotLine[]
@@ -70,17 +71,49 @@ model SyncState {
 model Character {
   id          String  @id @default(cuid())
   name        String
-  age         String?
-  role        String? // 主角, 配角...
-  description String?
-  personality String?
-  appearance  String?
+  role        String? // 主角, 配角, 反派...
+  avatar      String? // Base64 or file path
+  description String? // 简介
+  profile     String  @default("{}") // JSON: 自定义属性 { "年龄": "18", "生日": "1月1日" }
+  sortOrder   Float   @default(0)
 
   novelId String
   novel   Novel  @relation(fields: [novelId], references: [id], onDelete: Cascade)
 
+  items     ItemOwnership[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+model Item {
+  id          String  @id @default(cuid())
+  name        String
+  type        String  @default("item") // 'item' | 'skill' | 'location'
+  icon        String? // emoji or icon name
+  description String?
+  profile     String  @default("{}") // JSON: 自定义属性
+
+  novelId     String
+  novel       Novel   @relation(fields: [novelId], references: [id], onDelete: Cascade)
+
+  sortOrder   Float   @default(0)
+  owners      ItemOwnership[]
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model ItemOwnership {
+  id          String    @id @default(cuid())
+  characterId String
+  character   Character @relation(fields: [characterId], references: [id], onDelete: Cascade)
+  itemId      String
+  item        Item      @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  note        String?   // 备注 (如 "已损坏")
+  createdAt   DateTime  @default(now())
+
+  @@unique([characterId, itemId])
 }
 
 model Idea {

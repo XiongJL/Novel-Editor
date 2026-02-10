@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { usePlotSystem } from '../../hooks/usePlotSystem';
-import { Plus, X } from 'lucide-react';
+import { Plus, X, Loader2 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { useTranslation } from 'react-i18next';
 import {
@@ -30,6 +30,9 @@ interface PlotSidebarProps {
     novelId: string;
     theme: 'dark' | 'light';
     onClose?: () => void;
+    highlightedPointId?: string | null;
+    onDeletePoint?: (id: string) => Promise<void>;
+    onJump?: (point: PlotPoint) => boolean;
 }
 
 const dropAnimation = {
@@ -42,18 +45,21 @@ const dropAnimation = {
     }),
 };
 
-export default function PlotSidebar({ novelId, theme, onClose }: PlotSidebarProps) {
+export default function PlotSidebar({ novelId, theme, onClose, highlightedPointId, onDeletePoint, onJump }: PlotSidebarProps) {
     const {
         plotLines,
         createPlotLine,
         updatePlotLine,
         deletePlotLine,
         createPlotPoint,
+        deletePlotPoint: internalDeletePlotPoint,
         reorderPlotLines,
         reorderPlotPoints,
         isLoading
     } = usePlotSystem(novelId);
 
+    // Use passed delete handler or internal one
+    const handleDeletePoint = onDeletePoint || internalDeletePlotPoint;
 
     const { t } = useTranslation();
     const isDark = theme === 'dark';
@@ -65,6 +71,20 @@ export default function PlotSidebar({ novelId, theme, onClose }: PlotSidebarProp
     const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
     const [activeId, setActiveId] = useState<string | null>(null);
     const [activeItem, setActiveItem] = useState<any>(null);
+
+    // Auto-expand and highlight
+    useEffect(() => {
+        if (highlightedPointId && plotLines.length > 0) {
+            const line = plotLines.find(l => l.points?.some(p => p.id === highlightedPointId));
+            if (line) {
+                setExpandedIds(prev => {
+                    const next = new Set(prev);
+                    next.add(line.id);
+                    return next;
+                });
+            }
+        }
+    }, [highlightedPointId, plotLines]);
 
 
     const sensors = useSensors(
@@ -132,16 +152,17 @@ export default function PlotSidebar({ novelId, theme, onClose }: PlotSidebarProp
 
             if (oldIndex !== -1 && newIndex !== -1) {
                 const newOrder = arrayMove(plotLines, oldIndex, newIndex);
-                reorderPlotLines(newOrder.map(l => l.id));
+                // Optimistically update or just call backend
+                await reorderPlotLines(newOrder.map(l => l.id));
             }
         } else if (activeType === 'PlotPoint') {
-            const activePoint = active.data.current?.point as PlotPoint;
+            const activePoint = active.data.current?.point;
             if (!activePoint) return;
 
             const oldLineId = activePoint.plotLineId;
             let newLineId = oldLineId;
 
-            // Determine destination line and index
+            // Determine destination line
             if (overData?.type === 'PlotLine') {
                 newLineId = over.id as string;
             } else if (overData?.type === 'PlotPoint') {
@@ -153,18 +174,18 @@ export default function PlotSidebar({ novelId, theme, onClose }: PlotSidebarProp
 
             if (!oldLine || !newLine) return;
 
-            // Case 1: Same Line Reorder
+            // Same Line Reorder
             if (oldLineId === newLineId) {
                 const oldIndex = oldLine.points?.findIndex(p => p.id === active.id) ?? -1;
                 const newIndex = newLine.points?.findIndex(p => p.id === over.id) ?? -1;
 
-                if (oldIndex !== -1 && (newIndex !== -1 || overData?.type === 'PlotLine')) {
+                if (oldIndex !== -1) {
                     const finalIndex = newIndex === -1 ? newLine.points!.length : newIndex;
                     const newPoints = arrayMove(oldLine.points!, oldIndex, finalIndex);
-                    reorderPlotPoints(newLineId, newPoints.map(p => p.id));
+                    await reorderPlotPoints(newLineId, newPoints.map(p => p.id));
                 }
             }
-            // Case 2: Cross Line Move
+            // Cross Line Move
             else {
                 const oldPoints = [...(oldLine.points || [])];
                 const newPoints = [...(newLine.points || [])];
@@ -178,10 +199,8 @@ export default function PlotSidebar({ novelId, theme, onClose }: PlotSidebarProp
 
                 newPoints.splice(finalIndex, 0, { ...movedPoint, plotLineId: newLineId });
 
-                // We need an IPC that supports moving between lines
-                // reorderPlotPoints(plotLineId, pointIds) currently updates plotLineId for all pointIds in main.ts L759
-                // So calling it for the destination line with the moved point ID should work.
-                reorderPlotPoints(newLineId, newPoints.map(p => p.id));
+                // Call IPC to move and reorder in destination line
+                await reorderPlotPoints(newLineId, newPoints.map(p => p.id));
             }
         }
     };
@@ -195,9 +214,12 @@ export default function PlotSidebar({ novelId, theme, onClose }: PlotSidebarProp
         <div className="flex flex-col h-full">
             {/* Header */}
             <div className={clsx("p-4 border-b flex items-center justify-between", isDark ? "border-white/5" : "border-gray-200")}>
-                <h2 className={clsx("text-sm font-medium uppercase tracking-wider", isDark ? "text-neutral-400" : "text-neutral-500")}>
-                    {t('sidebar.outline', 'Outline')}
-                </h2>
+                <div className="flex items-center gap-2 shrink min-w-0 mr-4">
+                    <h2 className={clsx("text-sm font-medium uppercase tracking-wider truncate", isDark ? "text-neutral-400" : "text-neutral-500")}>
+                        {t('sidebar.outline', 'Outline')}
+                    </h2>
+                    {isLoading && <Loader2 className="w-3.5 h-3.5 animate-spin opacity-40 shrink-0" />}
+                </div>
                 <div className="flex gap-2">
                     <button
                         onClick={() => setIsCreating(true)}
@@ -270,11 +292,7 @@ export default function PlotSidebar({ novelId, theme, onClose }: PlotSidebarProp
                                         expanded={expandedIds.has(line.id)}
                                         onToggleExpand={() => toggleExpand(line.id)}
                                         onUpdateName={(name) => updatePlotLine(line.id, { name })}
-                                        onDelete={() => {
-                                            if (confirm(t('common.confirmDelete', 'Are you sure?'))) {
-                                                deletePlotLine(line.id);
-                                            }
-                                        }}
+                                        onDelete={() => deletePlotLine(line.id)}
                                         onCreatePoint={(title) => createPlotPoint({
                                             plotLineId: line.id,
                                             title,
@@ -283,10 +301,14 @@ export default function PlotSidebar({ novelId, theme, onClose }: PlotSidebarProp
                                             status: 'active'
                                         })}
                                         onPointClick={handleEditPoint}
+                                        onPointDelete={handleDeletePoint}
+                                        onJump={onJump}
+                                        highlightedPointId={highlightedPointId}
                                     />
                                 ))}
                             </div>
                         </SortableContext>
+
 
                         <DragOverlay dropAnimation={dropAnimation}>
                             {activeId && activeItem ? (
@@ -301,6 +323,7 @@ export default function PlotSidebar({ novelId, theme, onClose }: PlotSidebarProp
                                             onDelete={() => { }}
                                             onCreatePoint={() => { }}
                                             onPointClick={() => { }}
+                                            onPointDelete={() => { }}
                                         />
                                     </div>
                                 ) : (

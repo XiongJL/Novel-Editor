@@ -3372,9 +3372,12 @@ ipcMain.handle("db:create-chapter", async (_, { volumeId, title, order }) => {
     throw e;
   }
 });
-ipcMain.handle("db:get-chapter", async (_, chapterId) => {
+ipcMain.handle("db:get-chapter", async (_, id) => {
   try {
-    return await db.chapter.findUnique({ where: { id: chapterId } });
+    return await db.chapter.findUnique({
+      where: { id },
+      include: { volume: { select: { novelId: true } } }
+    });
   } catch (e) {
     console.error("[Main] db:get-chapter failed:", e);
     throw e;
@@ -3734,7 +3737,8 @@ ipcMain.handle("db:get-plot-lines", async (_, novelId) => {
       where: { novelId },
       include: {
         points: {
-          include: { anchors: true }
+          include: { anchors: true },
+          orderBy: { order: "asc" }
         }
       },
       orderBy: { sortOrder: "asc" }
@@ -3780,7 +3784,15 @@ ipcMain.handle("db:delete-plot-line", async (_, id) => {
 });
 ipcMain.handle("db:create-plot-point", async (_, data) => {
   try {
-    return await db.plotPoint.create({ data });
+    const { plotLineId } = data;
+    const maxOrder = await db.plotPoint.aggregate({
+      where: { plotLineId },
+      _max: { order: true }
+    });
+    const order = (maxOrder._max.order || 0) + 1;
+    return await db.plotPoint.create({
+      data: { ...data, order }
+    });
   } catch (e) {
     console.error("[Main] db:create-plot-point failed. Data:", data, "Error:", e);
     throw e;
@@ -3821,7 +3833,7 @@ ipcMain.handle("db:delete-plot-point-anchor", async (_, id) => {
     throw e;
   }
 });
-ipcMain.handle("db:reorder-plot-lines", async (_, { novelId, lineIds }) => {
+ipcMain.handle("db:reorder-plot-lines", async (_, { lineIds }) => {
   try {
     const updates = lineIds.map(
       (id, index) => db.plotLine.update({
@@ -3841,14 +3853,151 @@ ipcMain.handle("db:reorder-plot-points", async (_, { plotLineId, pointIds }) => 
     const updates = pointIds.map(
       (id, index) => db.plotPoint.update({
         where: { id },
-        data: { sortOrder: index, plotLineId }
-        // Update plotLineId as well to support moving between lines if needed later
+        data: { order: index, plotLineId }
       })
     );
     await db.$transaction(updates);
     return { success: true };
   } catch (e) {
     console.error("[Main] db:reorder-plot-points failed:", e);
+    throw e;
+  }
+});
+ipcMain.handle("db:get-characters", async (_, novelId) => {
+  try {
+    return await db.character.findMany({
+      where: { novelId },
+      include: {
+        items: {
+          include: { item: true }
+        }
+      },
+      orderBy: { sortOrder: "asc" }
+    });
+  } catch (e) {
+    console.error("[Main] db:get-characters failed:", e);
+    throw e;
+  }
+});
+ipcMain.handle("db:get-character", async (_, id) => {
+  try {
+    return await db.character.findUnique({
+      where: { id },
+      include: {
+        items: {
+          include: { item: true }
+        }
+      }
+    });
+  } catch (e) {
+    console.error("[Main] db:get-character failed:", e);
+    throw e;
+  }
+});
+ipcMain.handle("db:create-character", async (_, data) => {
+  try {
+    const profileData = typeof data.profile === "object" ? JSON.stringify(data.profile) : data.profile;
+    return await db.character.create({
+      data: { ...data, profile: profileData }
+    });
+  } catch (e) {
+    console.error("[Main] db:create-character failed:", e);
+    throw e;
+  }
+});
+ipcMain.handle("db:update-character", async (_, { id, data }) => {
+  try {
+    const profileData = typeof data.profile === "object" ? JSON.stringify(data.profile) : data.profile;
+    return await db.character.update({
+      where: { id },
+      data: { ...data, profile: profileData }
+    });
+  } catch (e) {
+    console.error("[Main] db:update-character failed:", e);
+    throw e;
+  }
+});
+ipcMain.handle("db:delete-character", async (_, id) => {
+  try {
+    await db.character.delete({ where: { id } });
+  } catch (e) {
+    console.error("[Main] db:delete-character failed:", e);
+    throw e;
+  }
+});
+ipcMain.handle("db:get-items", async (_, novelId) => {
+  try {
+    return await db.item.findMany({
+      where: { novelId },
+      orderBy: { sortOrder: "asc" }
+    });
+  } catch (e) {
+    console.error("[Main] db:get-items failed:", e);
+    throw e;
+  }
+});
+ipcMain.handle("db:get-item", async (_, id) => {
+  try {
+    return await db.item.findUnique({ where: { id } });
+  } catch (e) {
+    console.error("[Main] db:get-item failed:", e);
+    throw e;
+  }
+});
+ipcMain.handle("db:create-item", async (_, data) => {
+  try {
+    const maxOrder = await db.item.aggregate({
+      where: { novelId: data.novelId },
+      _max: { sortOrder: true }
+    });
+    const sortOrder = (maxOrder._max.sortOrder || 0) + 1;
+    return await db.item.create({
+      data: { ...data, sortOrder }
+    });
+  } catch (e) {
+    console.error("[Main] db:create-item failed:", e);
+    throw e;
+  }
+});
+ipcMain.handle("db:update-item", async (_, { id, data }) => {
+  try {
+    return await db.item.update({
+      where: { id },
+      data: { ...data, updatedAt: /* @__PURE__ */ new Date() }
+    });
+  } catch (e) {
+    console.error("[Main] db:update-item failed:", e);
+    throw e;
+  }
+});
+ipcMain.handle("db:delete-item", async (_, id) => {
+  try {
+    return await db.item.delete({ where: { id } });
+  } catch (e) {
+    console.error("[Main] db:delete-item failed:", e);
+    throw e;
+  }
+});
+ipcMain.handle("db:get-mentionables", async (_, novelId) => {
+  try {
+    const [characters, items] = await Promise.all([
+      db.character.findMany({
+        where: { novelId },
+        select: { id: true, name: true, avatar: true, role: true },
+        orderBy: { name: "asc" }
+      }),
+      db.item.findMany({
+        where: { novelId },
+        select: { id: true, name: true, icon: true },
+        orderBy: { name: "asc" }
+      })
+    ]);
+    return [
+      ...characters.map((c) => ({ ...c, type: "character" })),
+      ...items.map((i) => ({ ...i, type: "item" }))
+    ];
+  } catch (e) {
+    console.error("[Main] db:get-mentionables failed:", e);
     throw e;
   }
 });
@@ -3905,15 +4054,21 @@ app.whenReady().then(async () => {
         try {
           const command = `"${prismaPath}" db push --schema="${schemaPath}" --accept-data-loss`;
           console.log("[Main] Executing command:", command);
-          execSync(command, {
+          const output = execSync(command, {
             env: { ...process.env, DATABASE_URL: dbUrl },
             cwd: path$1.resolve(__dirname$1, "../../../packages/core"),
-            stdio: "inherit",
+            stdio: "pipe",
+            // Avoid inherit to prevent encoding issues
             windowsHide: true
           });
+          console.log("[Main] DB Push output:", output.toString());
           console.log("[Main] DB Push completed successfully.");
         } catch (error) {
-          console.error("[Main] DB Push failed. Details:", error);
+          console.error("[Main] DB Push failed.");
+          if (error.stdout)
+            console.log("[Main] stdout:", error.stdout.toString());
+          if (error.stderr)
+            console.error("[Main] stderr:", error.stderr.toString());
         }
       }
     } else {

@@ -17,13 +17,23 @@
     "description": "描述",
     "confirmDelete": "确定要删除吗？",
     "chapters": "章节",
-    "plotLines": "情节线"
+    "plotLines": "情节线",
+    "showAll": "显示全部",
+    "hideAll": "隐藏全部"
   },
   "matrix": {
     "title": "叙事矩阵",
     "viewStandard": "标准视图",
     "viewTranspose": "转置视图",
-    "noChapters": "暂无章节。请先创建章节以查看矩阵。"
+    "noChapters": "暂无章节。请先创建章节以查看矩阵。",
+    "aggregatedChapters": "章节",
+    "emptyChapters": "{{count}} 个空章节",
+    "chapterRange": "第 {{start}}-{{end}} 章",
+    "recentOnly": "仅显示最近",
+    "showRecent": "显示最近章节",
+    "recentEdits": "最近编辑",
+    "allChapters": "所有章节",
+    "noRecent": "暂无最近编辑的章节。"
   },
   "plot": {
     "plotLine": "所属情节线",
@@ -48,7 +58,11 @@
       "active": "进行中",
       "resolved": "已完成"
     },
-    "saveSuccess": "保存成功"
+    "saveSuccess": "保存成功",
+    "deletePoint": "删除情节要点",
+    "confirmDeletePoint": "确定要删除这个情节要点吗？此操作不可撤销。",
+    "deleteLine": "删除情节线",
+    "confirmDeleteLine": "确定要删除这条情节线吗？这将同时删除其包含的所有情节要点。此操作不可撤销。"
   },
   "home": {
     "greeting": "晚上好，作家",
@@ -129,7 +143,10 @@
         "add": "添加标签",
         "searchOrCreate": "搜索或创建标签...",
         "create": "创建",
-        "noTags": "暂无标签"
+        "noTags": "暂无标签",
+        "search": "搜索标签...",
+        "filter": "标签",
+        "notFound": "未找到匹配标签"
     },
   "toolbar": {
     "undo": "撤销",
@@ -208,5 +225,47 @@
     "autoDesc": "最近3次危险操作（如恢复）前的自动快照。",
     "confirmRestoreAuto": "确定要回滚到此自动备份吗？当前数据将丢失。",
     "restoreBtn": "回滚"
+  },
+  "world": {
+    "title": "世界观",
+    "characters": "角色",
+    "items": "物品",
+    "newCharacter": "新角色",
+    "newItem": "新物品",
+    "addCharacter": "新建角色",
+    "addItem": "新建物品",
+    "noCharacters": "暂无角色",
+    "addCharacterHint": "点击上方 + 创建角色",
+    "noItems": "暂无物品",
+    "addItemHint": "点击上方 + 创建物品",
+    "noRole": "未设定",
+    "editCharacter": "编辑角色",
+    "charName": "名称",
+    "charNamePlaceholder": "角色名称",
+    "charRole": "角色定位",
+    "charRolePlaceholder": "主角 / 配角 / 反派...",
+    "charDesc": "简介",
+    "charDescPlaceholder": "角色背景、动机...",
+    "customAttrs": "自定义属性",
+    "addAttr": "添加",
+    "attrKey": "属性名",
+    "attrValue": "属性值",
+    "noAttrs": "暂无自定义属性，点击\"添加\"创建",
+    "confirmDeleteCharacter": "确定要删除这个角色吗？",
+    "confirmDeleteItem": "确定要删除这个物品吗？",
+    "itemTypes": {
+      "item": "物品",
+      "skill": "技能",
+      "location": "地点"
+    },
+    "dossier": {
+      "characterTitle": "角色档案",
+      "itemTitle": "物品详情",
+      "notes": "传记 / 笔记",
+      "noData": "暂无记录详情。",
+      "role": "身份角色",
+      "traits": "特征标签",
+      "verified": "已验证链接"
+    }
   }
 }

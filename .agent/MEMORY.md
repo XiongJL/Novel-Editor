@@ -3,8 +3,8 @@
 此文件用于记录跨会话的项目记忆、关键决策、已知问题和解决方案。每次会话结束或达成重要里程碑时，请考虑更新此文件。
 
 ## 📅 最新状态 (Latest Status)
-> 最近更新时间: 2026-02-09
-> 当前焦点: 叙事矩阵 (Narrative Matrix) 交互增强与 UI 稳定性修复。
+> 最近更新时间: 2026-02-11
+> 当前焦点: 提及系统稳定性增强 (Mention Stability) 与 全系统交互一致性 (UI Unification)。
 
 ## 🏛️ 关键架构决策 (Architecture Decisions)
 - **双数据库架构**: 桌面端使用 SQLite (离线优先)，服务端使用 MariaDB (云同步)。
@@ -12,19 +12,14 @@
 - **编辑器核心**: Meta Lexical (支持插件化、Markdown快捷键)。
 - **构建系统**: Electron + Vite + React (纯 ESM 模式)。
 - **文本标记方案**: 弃用自定义 `IdeaMarkNode`，迁移至官方 `@lexical/mark` 插件，利用 `MarkNode` 处理高亮与关联 ID。
-- **搜索跳转机制**: 为了实现精准跳转，`SearchSidebar` 传递 `snippet` 上下文给 `Editor`。`Editor` 使用 Context-aware 搜索，在多个相同关键词匹配中定位到被该上下文包围的特定匹配项。
-- **字数统计策略**: 为避免打字卡顿，字数统计插件 (`WordCountPlugin`) 使用了 1.5s 的防抖 (Debounce) 机制。仅计算非空白字符 (CJK场景适配)。
-- **功能侧边栏分离**: 弃用通用的 `UnifiedSearchWorkbench` 切换模式，将“灵感”拆分为独立的灵感工作台（Idea Sidebar），“搜索”使用独立的 `SearchSidebar`，以保持交互单一职责。
-- **代码类型规范**: 建立了 `src/types.ts` 集中管理核心接口，解决依赖循环。
-- **主题双向适配**: 核心 UI 动态切换类名适配 Light/Dark 模式。
-- **版本控制规范**: 强制排除 `release/`, `dist/` 等目录。
-- **备份系统**: 采用 .nebak 格式，强制自动备份，交互式密码输入。
-- **IPC 错误处理**: 在 `main.ts` 中严格捕获数据库异常并输出详细日志，禁用 `// @ts-ignore` 掩盖类型问题。
-- **叙事矩阵 (Narrative Matrix)**: 实现为“章节 x 情节线”的二维网格，支持跨章节查看伏笔/兑现点的全局分布。
-- **类型同步协议**: 强制要求 `src/types.ts` (前端内部类型) 与 `src/vite-env.d.ts` (IPC/全局定义) 保持同步，防止在重构过程中出现 assignment mismatch。
-- **布局稳定性 (Layout Stability)**: Editor 头部导航栏采用 **3-Column Flex** + **Z-Index 50** + **Relative** 定位策略，确保在 Matrix 等复杂子视图下始终可见。
+- **提及重叠解决方案 (Transparent Textarea)**: 针对 Mention 文本在输入框中与背景重叠模糊的问题，决定采取“全透明 Textarea”方案。通过将原生 textarea 的颜色设为透明并移除 border/padding 干扰，仅保留光标。文字渲染由底层的 Backdrop 层负责，确保与 Mention 高亮块完美对齐且无视觉重影。
+- **UI 统一交互规范 (Unified Modals)**: 全系统新模态框必须继承 `BaseModal`，且所有删除操作强制使用 `ConfirmModal` 替代 `confirm()`。页脚布局规范化：左侧放置删除按钮（如有），右侧放置取消与保存按钮。按钮统一使用 `text-xs`。
+- **档案卡自动关闭 (Click-outside)**: 实现了全局点击检测逻辑，确保 `EntityInfoCard` 在点击非活性区域时自动收起，提升了多层级浮窗下的操作流畅度。
 
 ## 🐛 踩坑与解决方案 (Troubleshooting Log)
+- **Modal Footer Desynchronization**: 
+    - **问题**: 在重构 `CharacterEditor.tsx` 页脚以适配删除按钮时，因 JSX 块合并错误导致页脚按钮丢失或语法错误。
+    - **解决**: 恢复了完整的页脚 Flex 布局，并确保 `ConfirmModal` 嵌套在 `BaseModal` 内部但处于 DOM 流之外。
 - **Header Visibility in Matrix View**: 
     - **问题**: 在 Matrix 视图下，Editor 头部导航栏被遮挡或消失。
     - **原因**: `absolute` 居中定位在复杂层级下失效，且 `top-nav` CSS 类可能触发了隐藏逻辑。
@@ -47,6 +42,7 @@
 - **Electron prompt()**: 使用自定义 React Modal 代替原生 prompt。
 - **Editor Corruption (文件损坏防御)**: 在对 `Editor.tsx` 等数千行的巨型文件执行复杂合并或多次 `replace` 操作时，若发现语法突然崩溃（如 state 重复或 export 丢失），应立即停止自动化修改，读取文件的分段内容手动拼合。
 - **Type Desynchronization (类型不同步)**: 在向 Prisma Schema 添加字段后，若仅运行 `db:push` 而未同步更新 `types.ts` 或 `vite-env.d.ts` 的接口，会导致 `tsc` 报出大量“属性缺失”或“类型不兼容”错误。必须确保三方同步。
+- **Editor Root Access**: 在 `Editor.tsx` 中，`editorRoot` 不是一个可以直接访问的状态变量。要获取编辑器根元素（用于 `querySelector` 等 DOM 操作），必须通过 `editorRef.current?.getRootElement()` 获取。
 
 ## 📝 长期待办 (Backlog)
 - [ ] 完善云同步的冲突解决策略 (CRDT 或 Last-Write-Wins)。

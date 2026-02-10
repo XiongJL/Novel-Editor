@@ -14,7 +14,23 @@
         "volumeSuffix": "",
         "chapter": "Chapter",
     "description": "Description",
-    "confirmDelete": "Are you sure you want to delete this?"
+    "confirmDelete": "Are you sure you want to delete this?",
+    "showAll": "Show All",
+    "hideAll": "Hide All"
+  },
+  "matrix": {
+    "title": "Narrative Matrix",
+    "viewStandard": "Standard View",
+    "viewTranspose": "Transposed View",
+    "noChapters": "No chapters found. Create chapters to see the matrix.",
+    "aggregatedChapters": "Chapters",
+    "emptyChapters": "{{count}} Empty",
+    "chapterRange": "CH {{start}}-{{end}}",
+    "recentOnly": "Recent Only",
+    "showRecent": "Show Recent",
+    "recentEdits": "Recent Edits",
+    "allChapters": "All Chapters",
+    "noRecent": "No recently edited chapters found."
   },
   "plot": {
     "plotLine": "Plot Line",
@@ -38,7 +54,11 @@
     "statuses": {
       "active": "Active",
       "resolved": "Resolved"
-    }
+    },
+    "deletePoint": "Delete Plot Point",
+    "confirmDeletePoint": "Are you sure you want to delete this plot point? This action cannot be undone.",
+    "deleteLine": "Delete Plot Line",
+    "confirmDeleteLine": "Are you sure you want to delete this plot line? This will also delete all its plot points. This action cannot be undone."
   },
   "home": {
     "greeting": "Good Evening, Writer",
@@ -112,7 +132,10 @@
     "add": "Add Tag",
     "searchOrCreate": "Search or create...",
     "create": "Create",
-    "noTags": "No tags yet"
+    "noTags": "No tags yet",
+    "search": "Search tags...",
+    "filter": "Tags",
+    "notFound": "No matching tags"
   },
   "toolbar": {
     "undo": "Undo",
@@ -191,5 +214,22 @@
     "autoDesc": "Snapshots taken automatically before recent dangerous operations.",
     "confirmRestoreAuto": "Are you sure to rollback to this snapshot? Current data will be lost.",
     "restoreBtn": "Rollback"
+  },
+  "world": {
+    "charRole": "Role",
+    "itemTypes": {
+      "item": "Item",
+      "skill": "Skill",
+      "location": "Location"
+    },
+    "dossier": {
+      "characterTitle": "Character Dossier",
+      "itemTitle": "Object Profile",
+      "notes": "Biography / Notes",
+      "noData": "No details recorded.",
+      "role": "Role",
+      "traits": "Traits",
+      "verified": "Verified Link"
+    }
   }
 }

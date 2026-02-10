@@ -9,15 +9,28 @@ interface TagManagerProps {
     onUpdate: (id: string, updates: Partial<Idea>) => void;
     theme: 'dark' | 'light';
     allTags?: string[];
+    isOpen?: boolean;
+    onToggle?: (isOpen: boolean) => void;
 }
 
-export default function TagManager({ idea, onUpdate, theme, allTags = [] }: TagManagerProps) {
+export default function TagManager({ idea, onUpdate, theme, allTags = [], isOpen: controlledIsOpen, onToggle }: TagManagerProps) {
     const { t } = useTranslation();
     const isDark = theme === 'dark';
-    const [isOpen, setIsOpen] = useState(false);
+    const [internalIsOpen, setInternalIsOpen] = useState(false);
     const [inputValue, setInputValue] = useState('');
     const containerRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLInputElement>(null);
+
+    const isControlled = controlledIsOpen !== undefined;
+    const isOpen = isControlled ? controlledIsOpen : internalIsOpen;
+
+    const handleToggle = (newState: boolean) => {
+        if (isControlled) {
+            onToggle?.(newState);
+        } else {
+            setInternalIsOpen(newState);
+        }
+    };
 
     const currentTags = idea.tags || [];
 
@@ -25,14 +38,14 @@ export default function TagManager({ idea, onUpdate, theme, allTags = [] }: TagM
     useEffect(() => {
         function handleClickOutside(event: MouseEvent) {
             if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
-                setIsOpen(false);
+                handleToggle(false);
             }
         }
         if (isOpen) {
             document.addEventListener("mousedown", handleClickOutside);
         }
         return () => document.removeEventListener("mousedown", handleClickOutside);
-    }, [isOpen]);
+    }, [isOpen, isControlled, onToggle]);
 
     // Auto focus input when opening
     useEffect(() => {
@@ -73,7 +86,7 @@ export default function TagManager({ idea, onUpdate, theme, allTags = [] }: TagM
                 handleCreateTag();
             }
         } else if (e.key === 'Escape') {
-            setIsOpen(false);
+            handleToggle(false);
         }
     };
 
@@ -107,7 +120,7 @@ export default function TagManager({ idea, onUpdate, theme, allTags = [] }: TagM
 
             {/* Add Button / Trigger */}
             <button
-                onClick={() => setIsOpen(!isOpen)}
+                onClick={() => handleToggle(!isOpen)}
                 className={clsx(
                     "flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full border border-dashed transition-colors",
                     isDark

@@ -6,6 +6,7 @@
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "vite",
+    "predev": "npm run copy-prisma",
     "copy-prisma": "node scripts/copy-prisma.js",
     "prebuild": "npm run copy-prisma",
     "build": "tsc && vite build && electron-builder",

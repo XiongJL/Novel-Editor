@@ -28,6 +28,7 @@ export default function SearchResultsList({ results, onJump, onUpdateIdea, onDel
 
     const [editingId, setEditingId] = useState<string | null>(null);
     const [editContent, setEditContent] = useState('');
+    const [activeTagDropdownId, setActiveTagDropdownId] = useState<string | null>(null);
 
     const startEdit = (idea: Idea) => {
         setEditingId(idea.id);
@@ -84,133 +85,142 @@ export default function SearchResultsList({ results, onJump, onUpdateIdea, onDel
                         <span>{t('sidebar.idea')} ({results.ideas.length})</span>
                     </div>
 
-                    {results.ideas.map(idea => (
-                        <div
-                            key={idea.id}
-                            ref={el => scrollRefs.current[idea.id] = el}
-                            className={clsx(
-                                "group relative mb-2 p-3 rounded-lg border transition-all cursor-pointer overflow-hidden",
-                                isDark
-                                    ? "bg-[#1a1a1f] border-white/5 hover:border-white/10"
-                                    : "bg-white border-gray-200 hover:border-gray-300",
-                                idea.isStarred && "pt-5" // Add extra top padding if starred to avoid ribbon overlap
-                            )}
-                            style={
-                                shakingIdeaId === idea.id ? shakeStyle :
-                                    highlightedIdeaId === idea.id ? flashStyle : undefined
-                            }
-                            onClick={() => startEdit(idea)}
-                        >
-                            {/* Starred Indicator: Corner Ribbon (v3 - Narrower) */}
-                            {idea.isStarred && (
-                                <div className="absolute top-0 left-0 w-10 h-10 pointer-events-none z-20 overflow-hidden">
-                                    <div className={clsx(
-                                        "absolute top-0 left-0 w-[160%] h-3.5 -rotate-45 -translate-x-[40%] translate-y-[20%] flex items-center justify-center shadow-md",
-                                        isDark
-                                            ? "bg-gradient-to-r from-amber-600 to-amber-500"
-                                            : "bg-gradient-to-r from-amber-500 to-amber-400"
-                                    )}>
-                                        <Star className="w-2 h-2 text-white fill-white" />
+                    {results.ideas.map(idea => {
+                        const isTagDropdownOpen = activeTagDropdownId === idea.id;
+                        return (
+                            <div
+                                key={idea.id}
+                                ref={el => scrollRefs.current[idea.id] = el}
+                                className={clsx(
+                                    "group relative mb-2 p-3 rounded-lg border transition-all cursor-pointer", // Removed overflow-hidden
+                                    isDark
+                                        ? "bg-[#1a1a1f] border-white/5 hover:border-white/10"
+                                        : "bg-white border-gray-200 hover:border-gray-300",
+                                    idea.isStarred && "pt-5", // Add extra top padding if starred to avoid ribbon overlap
+                                    isTagDropdownOpen ? "z-50" : "z-0" // Elevate z-index when dropdown is open
+                                )}
+                                style={
+                                    shakingIdeaId === idea.id ? shakeStyle :
+                                        highlightedIdeaId === idea.id ? flashStyle : undefined
+                                }
+                                onClick={() => startEdit(idea)}
+                            >
+                                {/* Starred Indicator: Corner Ribbon (v3 - Narrower) */}
+                                {idea.isStarred && (
+                                    <div className="absolute top-0 left-0 w-10 h-10 pointer-events-none z-20 overflow-hidden rounded-tl-lg">
+                                        <div className={clsx(
+                                            "absolute top-0 left-0 w-[160%] h-3.5 -rotate-45 -translate-x-[40%] translate-y-[20%] flex items-center justify-center shadow-md",
+                                            isDark
+                                                ? "bg-gradient-to-r from-amber-600 to-amber-500"
+                                                : "bg-gradient-to-r from-amber-500 to-amber-400"
+                                        )}>
+                                            <Star className="w-2 h-2 text-white fill-white" />
+                                        </div>
                                     </div>
-                                </div>
-                            )}
+                                )}
 
-                            {editingId === idea.id ? (
-                                <textarea
-                                    value={editContent}
-                                    onChange={(e) => setEditContent(e.target.value)}
-                                    // Stop propagation to prevent container click issues (though container click sets edit again, no big deal)
-                                    onClick={(e) => e.stopPropagation()}
-                                    onBlur={() => saveEdit(idea.id)}
-                                    onKeyDown={(e) => {
-                                        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-                                            saveEdit(idea.id);
-                                        }
-                                    }}
-                                    autoFocus
-                                    className={clsx(
-                                        "w-full bg-transparent border-none outline-none resize-none text-sm font-medium mb-1",
-                                        isDark ? "text-neutral-200" : "text-neutral-800"
-                                    )}
-                                    rows={3}
-                                />
-                            ) : (
-                                <div className={clsx("text-sm font-medium mb-1 line-clamp-2 pr-8 relative z-10", isDark ? "text-neutral-200" : "text-neutral-800")}>
-                                    {idea.content}
+                                {/* Jump Button (Relative Header) */}
+                                <div className="flex justify-end mb-1 -mt-2 -mr-2 relative z-20">
+                                    <button
+                                        className={clsx(
+                                            "p-1.5 rounded-md opacity-0 group-hover:opacity-100 transition-all",
+                                            isDark ? "text-neutral-400 hover:text-white hover:bg-white/10" : "text-neutral-400 hover:text-black hover:bg-black/5"
+                                        )}
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            onJump(idea, 'idea');
+                                        }}
+                                    >
+                                        <ArrowUpRight className="w-4 h-4" />
+                                    </button>
                                 </div>
-                            )}
 
-                            {idea.quote && (
-                                <div className={clsx(
-                                    "text-xs italic truncate mb-1 pl-2 border-l-2 relative z-10",
-                                    isDark ? "border-neutral-700 text-neutral-500" : "border-gray-300 text-gray-500"
-                                )}>
-                                    "{idea.quote}"
-                                </div>
-                            )}
-
-                            <div className="flex items-center gap-2 mb-2 flex-wrap justify-between mt-2 relative z-10">
-                                <div className="flex items-center gap-2">
-                                    <div className={clsx("text-[10px]", isDark ? "text-neutral-600" : "text-gray-400")}>
-                                        {new Date(idea.timestamp).toLocaleDateString()}
-                                    </div>
-                                    <TagManager
-                                        idea={idea}
-                                        onUpdate={onUpdateIdea}
-                                        theme={theme}
-                                        allTags={allTags}
+                                {editingId === idea.id ? (
+                                    <textarea
+                                        value={editContent}
+                                        onChange={(e) => setEditContent(e.target.value)}
+                                        // Stop propagation to prevent container click issues (though container click sets edit again, no big deal)
+                                        onClick={(e) => e.stopPropagation()}
+                                        onBlur={() => saveEdit(idea.id)}
+                                        onKeyDown={(e) => {
+                                            if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                                                saveEdit(idea.id);
+                                            }
+                                        }}
+                                        autoFocus
+                                        className={clsx(
+                                            "w-full bg-transparent border-none outline-none resize-none text-sm font-medium mb-1",
+                                            isDark ? "text-neutral-200" : "text-neutral-800"
+                                        )}
+                                        rows={3}
                                     />
-                                </div>
+                                ) : (
+                                    <div className={clsx("text-sm font-medium mb-1 line-clamp-2 relative z-10", isDark ? "text-neutral-200" : "text-neutral-800")}>
+                                        {idea.content}
+                                    </div>
+                                )}
 
-                                {/* Actions: Star & Delete */}
-                                <div className="flex items-center gap-1 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity">
-                                    {onToggleStar && (
-                                        <button
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                onToggleStar(idea.id, !idea.isStarred);
-                                            }}
-                                            className={clsx(
-                                                "p-1 rounded hover:bg-black/10 dark:hover:bg-white/10 transition-colors",
-                                                idea.isStarred ? "text-amber-500" : (isDark ? "text-neutral-500" : "text-gray-400")
-                                            )}
-                                            title={idea.isStarred ? "Unstar" : "Star"}
-                                        >
-                                            <Star className={clsx("w-3.5 h-3.5", idea.isStarred && "fill-amber-500")} />
-                                        </button>
-                                    )}
-                                    {onDeleteIdea && (
-                                        <button
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                onDeleteIdea(idea.id);
-                                            }}
-                                            className={clsx(
-                                                "p-1 rounded hover:bg-red-500/10 hover:text-red-500 transition-colors",
-                                                isDark ? "text-neutral-500" : "text-gray-400"
-                                            )}
-                                            title={t('common.delete')}
-                                        >
-                                            <Trash2 className="w-3.5 h-3.5" />
-                                        </button>
-                                    )}
+                                {idea.quote && (
+                                    <div className={clsx(
+                                        "text-xs italic truncate mb-1 pl-2 border-l-2 relative z-10",
+                                        isDark ? "border-neutral-700 text-neutral-500" : "border-gray-300 text-gray-500"
+                                    )}>
+                                        "{idea.quote}"
+                                    </div>
+                                )}
+
+                                <div className="flex items-center gap-2 mb-2 flex-wrap justify-between mt-2 relative z-10">
+                                    <div className="flex items-center gap-2">
+                                        <div className={clsx("text-[10px]", isDark ? "text-neutral-600" : "text-gray-400")}>
+                                            {new Date(idea.timestamp).toLocaleDateString()}
+                                        </div>
+                                        <TagManager
+                                            idea={idea}
+                                            onUpdate={onUpdateIdea}
+                                            theme={theme}
+                                            allTags={allTags}
+                                            isOpen={isTagDropdownOpen}
+                                            onToggle={(isOpen) => setActiveTagDropdownId(isOpen ? idea.id : null)}
+                                        />
+                                    </div>
+
+                                    {/* Actions: Star & Delete */}
+                                    <div className="flex items-center gap-1 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity">
+                                        {onToggleStar && (
+                                            <button
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    onToggleStar(idea.id, !idea.isStarred);
+                                                }}
+                                                className={clsx(
+                                                    "p-1 rounded hover:bg-black/10 dark:hover:bg-white/10 transition-colors",
+                                                    idea.isStarred ? "text-amber-500" : (isDark ? "text-neutral-500" : "text-gray-400")
+                                                )}
+                                                title={idea.isStarred ? "Unstar" : "Star"}
+                                            >
+                                                <Star className={clsx("w-3.5 h-3.5", idea.isStarred && "fill-amber-500")} />
+                                            </button>
+                                        )}
+                                        {onDeleteIdea && (
+                                            <button
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    onDeleteIdea(idea.id);
+                                                }}
+                                                className={clsx(
+                                                    "p-1 rounded hover:bg-red-500/10 hover:text-red-500 transition-colors",
+                                                    isDark ? "text-neutral-500" : "text-gray-400"
+                                                )}
+                                                title={t('common.delete')}
+                                            >
+                                                <Trash2 className="w-3.5 h-3.5" />
+                                            </button>
+                                        )}
+                                    </div>
                                 </div>
                             </div>
-
-                            <button
-                                className={clsx(
-                                    "absolute top-2 right-2 p-1 rounded opacity-0 group-hover:opacity-100 transition-all",
-                                    isDark ? "text-neutral-400 hover:text-white hover:bg-white/10" : "text-neutral-400 hover:text-black hover:bg-black/5"
-                                )}
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    onJump(idea, 'idea');
-                                }}
-                            >
-                                <ArrowUpRight className="w-3.5 h-3.5" />
-                            </button>
-                        </div>
-                    ))}
+                        );
+                    })}
                 </div>
             )}
 

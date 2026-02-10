@@ -49,15 +49,6 @@ export interface PlotPointAnchor {
     updatedAt: string | Date;
 }
 
-export interface Volume {
-    id: string;
-    novelId: string;
-    title: string;
-    order: number;
-    chapters: Chapter[];
-    createdAt: string | Date;
-    updatedAt: string | Date;
-}
 
 export interface Novel {
     id: string;
@@ -101,3 +92,48 @@ export interface Chapter extends ChapterMetadata {
     deleted: boolean;
     anchors?: PlotPointAnchor[];
 }
+
+export interface Character {
+    id: string;
+    novelId: string;
+    name: string;
+    role?: string | null;
+    avatar?: string | null;
+    description?: string | null;
+    profile: string; // JSON: 自定义属性
+    sortOrder: number;
+    items?: ItemOwnershipWithItem[];
+    createdAt: string | Date;
+    updatedAt: string | Date;
+}
+
+export interface Item {
+    id: string;
+    novelId: string;
+    name: string;
+    type: string; // 'item' | 'skill' | 'location'
+    icon?: string | null;
+    description?: string | null;
+    profile: string; // JSON
+    sortOrder: number;
+    createdAt: string | Date;
+    updatedAt: string | Date;
+}
+
+export interface ItemOwnershipWithItem {
+    id: string;
+    itemId: string;
+    characterId: string;
+    note?: string | null;
+    item: Item;
+}
+
+export interface MentionableItem {
+    id: string;
+    name: string;
+    type: 'character' | 'item';
+    avatar?: string | null;
+    icon?: string | null;
+    role?: string | null;
+}
+

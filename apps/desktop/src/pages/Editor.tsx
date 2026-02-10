@@ -18,10 +18,12 @@ import SearchSidebar from '../components/SearchWorkbench/SearchSidebar';
 import { FlowModeButton } from '../components/FlowModeButton';
 import { GlobalIdeaModal } from '../components/GlobalIdeaModal';
 import { RecentFile } from '../components/RecentFilesDropdown';
+import WorldWorkbench from '../components/WorldWorkbench/WorldWorkbench';
 import PlotSidebar from '../components/StoryWorkbench/PlotSidebar';
 import PlotContextMenu from '../components/StoryWorkbench/PlotContextMenu';
 import PlotAnchorModal from '../components/StoryWorkbench/PlotAnchorModal';
 import { PlotContextMenuData } from '../components/LexicalEditor/plugins/PlotContextMenuPlugin';
+import { $createPlotAnchorNode } from '../components/LexicalEditor/nodes/PlotAnchorNode';
 import { $isPlotAnchorNode } from '../components/LexicalEditor/nodes/PlotAnchorNode';
 import { usePlotSystem } from '../hooks/usePlotSystem';
 import { PlotPointModal } from '../components/StoryWorkbench/PlotPointModal';
@@ -53,10 +55,14 @@ export default function Editor({ novelId, onBack }: EditorProps) {
     const [ideas, setIdeas] = useState<Idea[]>([]);
 
     // --- 2. Story / Plot System ---
-    const { addAnchor, removeAnchor, createPlotPoint, updatePlotPoint, plotLines } = usePlotSystem(novelId);
+    const { addAnchor, removeAnchor, createPlotPoint, updatePlotPoint, deletePlotPoint, plotLines, isLoading: isPlotLoading } = usePlotSystem(novelId);
     const [plotContextMenuData, setPlotContextMenuData] = useState<PlotContextMenuData | null>(null);
     const [isPlotAnchorModalOpen, setIsPlotAnchorModalOpen] = useState(false);
     const [pendingAnchorSelection, setPendingAnchorSelection] = useState<PlotContextMenuData | null>(null);
+    const [isPlotPointModalOpen, setIsPlotPointModalOpen] = useState(false);
+    const [plotPointCreateData, setPlotPointCreateData] = useState<any>(null);
+    const [editingPlotPoint, setEditingPlotPoint] = useState<any>(null); // For future editing 
+    const [isPlotPointCreateMode, setIsPlotPointCreateMode] = useState(false);
 
     // --- 3. UI Control State ---
     const [activeTab, setActiveTab] = useState<ActivityTab>('explorer');
@@ -81,6 +87,7 @@ export default function Editor({ novelId, onBack }: EditorProps) {
     const contentRef = useRef(content);
     const titleRef = useRef(title);
     const chapterRef = useRef(currentChapter);
+    const isSwitchingChapterRef = useRef(false);
 
     useEffect(() => {
         contentRef.current = content;
@@ -90,7 +97,6 @@ export default function Editor({ novelId, onBack }: EditorProps) {
         // Sync global metadata whenever currentChapter changes
         if (currentChapter) {
             activeChapterMetadata = { id: currentChapter.id, title: currentChapter.title };
-            console.log('[Editor] Updated activeChapterMetadata:', activeChapterMetadata);
         }
     }, [content, title, currentChapter]);
 
@@ -174,7 +180,7 @@ export default function Editor({ novelId, onBack }: EditorProps) {
         }
     }, [novelId]);
 
-    // Update Recent Files Helper
+    // Update Recent Files Helper - UPDATED FIX
     const addToRecentFiles = useCallback((chapter: Chapter) => {
         setRecentFiles(prev => {
             // Remove existing if present
@@ -185,7 +191,7 @@ export default function Editor({ novelId, onBack }: EditorProps) {
                 timestamp: Date.now(),
                 initialData: {
                     novelId,
-                    chapterId: currentChapter?.id // Auto-fill current chapter
+                    chapterId: chapter.id // FIXED: Use passed chapter.id
                 }
             };
             // Add to top, limit to 25
@@ -193,7 +199,7 @@ export default function Editor({ novelId, onBack }: EditorProps) {
             localStorage.setItem(`recent_files_${novelId}`, JSON.stringify(updated));
             return updated;
         });
-    }, [novelId, currentChapter]);
+    }, [novelId]);
 
     const handleDeleteRecent = (id: string) => {
         setRecentFiles(prev => {
@@ -260,25 +266,178 @@ export default function Editor({ novelId, onBack }: EditorProps) {
         window.db.getIdeas(novelId).then(setIdeas).catch(console.error);
     }, [loadVolumes, novelId]);
 
+    // Save Logic (Moved Before handleSelectChapter)
+    const saveChanges = useCallback(async () => {
+        const currentRef = chapterRef.current;
+        if (!currentRef) return;
+
+        // Capture snapshot of values to save immediately
+        // This ensures that even if we await, we use the values from when save was triggered
+        const contentToSave = contentRef.current;
+        const titleToSave = titleRef.current;
+
+        // Guard: If we've already switched chapters physically (ref mismatch), abort
+        if (chapterRef.current?.id !== currentRef.id) return;
+
+        let chapterUpdated = false;
+
+        // Save Content
+        if (contentToSave !== currentRef.content) {
+            await window.db.saveChapter({
+                chapterId: currentRef.id,
+                content: contentToSave
+            });
+            chapterUpdated = true;
+        }
+
+        // Check staleness after first await
+        if (chapterRef.current?.id !== currentRef.id) return;
+
+        // Save Title
+        if (titleToSave !== currentRef.title) {
+            await window.db.renameChapter({
+                chapterId: currentRef.id,
+                title: titleToSave
+            });
+            loadVolumes(); // Reload volumes to reflect title change in sidebar
+            chapterUpdated = true;
+        }
+
+        // Check staleness before updating state
+        if (chapterRef.current?.id !== currentRef.id) return;
+
+        // Update currentChapter state and recent files if anything changed
+        if (chapterUpdated) {
+            const updatedChapter = {
+                ...currentRef,
+                content: contentToSave,
+                title: titleToSave
+            };
+            setCurrentChapter(updatedChapter);
+            addToRecentFiles(updatedChapter);
+        }
+    }, [loadVolumes, addToRecentFiles]);
+
+    // Auto-Save Effect
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            if (currentChapter) {
+                if (content !== currentChapter.content || title !== currentChapter.title) {
+                    saveChanges();
+                }
+            }
+        }, 1000);
+        return () => clearTimeout(timer);
+    }, [content, title, currentChapter, saveChanges]);
+
+    // Save on Unmount / BeforeUnload
+    useEffect(() => {
+        const handleUnload = () => {
+            if (chapterRef.current && (contentRef.current !== chapterRef.current.content || titleRef.current !== chapterRef.current.title)) {
+                saveChanges();
+            }
+        };
+        window.addEventListener('beforeunload', handleUnload);
+        return () => {
+            window.removeEventListener('beforeunload', handleUnload);
+            handleUnload();
+        };
+    }, [saveChanges]);
+
+
+    // Track the intended active chapter ID to prevent race conditions during rapid switching
+    const activeChapterIdRef = useRef<string | null>(null);
+    const chapterCache = useRef(new Map<string, Chapter>());
+
     // Load Chapter Content
-    const handleSelectChapter = async (chapterId: string) => {
-        setIsLoading(true);
+    const handleSelectChapter = useCallback(async (chapterId: string) => {
+        // Prevent reentry if already switching to the same chapter
+        if (isSwitchingChapterRef.current && activeChapterIdRef.current === chapterId) return;
+        if (currentChapter?.id === chapterId) return;
+
+        console.log(`[Editor] Switching to chapter ${chapterId}`);
+        isSwitchingChapterRef.current = true;
+        activeChapterMetadata = { id: chapterId, title: 'Loading...' };
+        activeChapterIdRef.current = chapterId; // Lock target ID
+
+        // 1. Background Save (Fire & Forget) - Non-blocking
+        const oldChapter = currentChapter;
+        const oldContent = contentRef.current;
+        const oldTitle = titleRef.current;
+
+        if (oldChapter) {
+            const savePromise = async () => {
+                let saved = false;
+                if (oldContent !== oldChapter.content) {
+                    await window.db.saveChapter({ chapterId: oldChapter.id, content: oldContent });
+                    saved = true;
+                }
+                if (oldTitle !== oldChapter.title) {
+                    await window.db.renameChapter({ chapterId: oldChapter.id, title: oldTitle });
+                    loadVolumes();
+                    saved = true;
+                }
+                // Update Cache with latest user edits so if return, we see them
+                if (saved || !chapterCache.current.has(oldChapter.id)) {
+                    chapterCache.current.set(oldChapter.id, {
+                        ...oldChapter,
+                        content: oldContent,
+                        title: oldTitle
+                    });
+                }
+            };
+            // Execute in background
+            savePromise().catch(e => console.error("[Editor] Background save failed", e));
+        }
+
+        // 2. Optimistic Cache Check
+        const cached = chapterCache.current.get(chapterId);
+        if (cached) {
+            console.log(`[Editor] Cache hit for ${chapterId}`);
+            activeChapterMetadata = { id: cached.id, title: cached.title };
+            setTitle(cached.title);
+            setContent(cached.content);
+            setCurrentChapter(cached);
+            setIsLoading(false); // Skip loading state
+        } else {
+            // 3. Cache Miss: Clear State & Show Loading
+            setCurrentChapter(null);
+            setIsLoading(true);
+        }
+
         try {
+            // 4. Async Fetch (Always fetch to ensure data consistency)
             const chapter = await window.db.getChapter(chapterId);
+
+            // 5. Safety Check: Is this still the chapter we want?
+            if (activeChapterIdRef.current !== chapterId) {
+                console.warn(`[Editor] Aborting switch to ${chapterId} because target changed to ${activeChapterIdRef.current}`);
+                return;
+            }
+
             if (chapter) {
-                setCurrentChapter(chapter);
-                activeChapterMetadata = { id: chapter.id, title: chapter.title }; // Update Global Metadata
+                // Update Cache & State
+                chapterCache.current.set(chapterId, chapter);
+
+                activeChapterMetadata = { id: chapter.id, title: chapter.title };
                 setTitle(chapter.title);
                 setContent(chapter.content);
+                setCurrentChapter(chapter);
+
                 localStorage.setItem(`last_chapter_${novelId}`, chapterId);
-                addToRecentFiles(chapter); // Add to recent files on selection
+                addToRecentFiles(chapter);
             }
         } catch (error) {
             console.error('Failed to load chapter:', error);
         } finally {
-            setIsLoading(false);
+            if (activeChapterIdRef.current === chapterId) {
+                setIsLoading(false);
+                setTimeout(() => {
+                    isSwitchingChapterRef.current = false;
+                }, 300);
+            }
         }
-    };
+    }, [isSwitchingChapterRef, activeChapterIdRef, currentChapter, contentRef, titleRef, loadVolumes, setCurrentChapter, setTitle, setContent, setIsLoading, novelId, addToRecentFiles]);
 
     // Plot Interaction Handlers
     const handlePlotContextMenu = useCallback((data: PlotContextMenuData) => {
@@ -322,22 +481,36 @@ export default function Editor({ novelId, onBack }: EditorProps) {
             const editor = editorRef.current;
             if (editor) {
                 editor.update(() => {
-                    const root = $getRoot();
-                    root.getAllTextNodes().forEach(textNode => {
+                    // Traverse and find the node with this ID
+                    // We don't have a direct index, so we might need to scan or if we have the node key in memory?
+                    // But anchors can be many.
+                    // Let's use a DFS or similar if needed.
+                    // Or relies on data attribute? Lexical doesn't index by data attribute.
+                    // We can iterate all MarkNodes/PlotAnchorNodes.
+
+                    // Optimization: We can't easily find a node by custom ID without traversing.
+                    // But typically the document is not huge or we can limit scope.
+                    // Actually, for now, let's traverse all nodes or rely on selection if it was clicked?
+                    // Context menu provides `anchorId`.
+
+                    // Traverse all text nodes to find parent plot anchors
+                    const rootNode = $getRoot();
+                    rootNode.getAllTextNodes().forEach(textNode => {
                         const parent = textNode.getParent();
-                        if ($isPlotAnchorNode(parent) && parent.hasID(anchorId)) {
-                            parent.deleteID(anchorId);
-                            if (parent.getIDs().length === 0) {
-                                $unwrapMarkNode(parent);
+                        if ($isPlotAnchorNode(parent)) {
+                            const ids = parent.getIDs();
+                            if (ids.includes(anchorId)) {
+                                parent.unwrap();
                             }
                         }
                     });
                 });
             }
+
+            setPlotContextMenuData(null);
         } catch (e) {
             console.error('Failed to remove anchor:', e);
         }
-        setPlotContextMenuData(null);
     };
 
     const handleSubmitAnchor = async (plotPointId: string, type: 'setup' | 'payoff') => {
@@ -355,7 +528,11 @@ export default function Editor({ novelId, onBack }: EditorProps) {
             });
 
             if (newAnchor) {
-                applyPlotAnchor(newAnchor.id);
+                if (pendingAnchorSelection.hasSelection) {
+                    applyPlotAnchor(newAnchor.id);
+                } else {
+                    applyPlotAnchorFromData(newAnchor.id, pendingAnchorSelection);
+                }
             }
 
             setIsPlotAnchorModalOpen(false);
@@ -363,6 +540,87 @@ export default function Editor({ novelId, onBack }: EditorProps) {
         } catch (e) {
             console.error('Create anchor failed:', e);
         }
+    };
+
+    // Handle Create New Point from Selection
+    const handleCreatePointFromSelection = () => {
+        if (plotContextMenuData?.text) {
+            setPlotPointCreateData({
+                title: plotContextMenuData.text.slice(0, 20),
+                description: plotContextMenuData.text,
+                chapterId: currentChapter?.id
+            });
+            setPendingAnchorSelection(plotContextMenuData);
+            setIsPlotPointCreateMode(true);
+            setIsPlotPointModalOpen(true);
+        }
+        setPlotContextMenuData(null);
+    };
+
+    const handleCreatePlotPoint = async (data: Partial<any>, initialChapterId?: string) => {
+        try {
+            // 1. Create Point
+            const newPoint = await createPlotPoint(data);
+
+            // Logic to handle anchor creation if pending selection exists
+            const targetChapterId = initialChapterId || (pendingAnchorSelection && currentChapter?.id);
+
+            // Only anchor to selection if the target chapter matches the current chapter where selection was made
+            const shouldAnchorToSelection = pendingAnchorSelection && currentChapter?.id && targetChapterId === currentChapter.id;
+
+            if (newPoint && shouldAnchorToSelection && pendingAnchorSelection) {
+                const newAnchor = await addAnchor({
+                    plotPointId: newPoint.id,
+                    chapterId: targetChapterId!,
+                    type: 'setup', // Default to setup for new points from text
+                    lexicalKey: pendingAnchorSelection.nodeKey,
+                    offset: pendingAnchorSelection.offset,
+                    length: pendingAnchorSelection.length,
+                });
+                if (newAnchor) {
+                    if (pendingAnchorSelection.hasSelection) {
+                        applyPlotAnchor(newAnchor.id);
+                    } else {
+                        applyPlotAnchorFromData(newAnchor.id, pendingAnchorSelection);
+                    }
+                }
+            } else if (newPoint && targetChapterId) {
+                // Fallback for manual creation or if chapter changed (just associate with chapter)
+                await addAnchor({
+                    plotPointId: newPoint.id,
+                    chapterId: targetChapterId,
+                    type: 'setup'
+                });
+            }
+
+            setIsPlotPointModalOpen(false);
+            setPendingAnchorSelection(null);
+        } catch (e) {
+            console.error('Failed to create point from selection:', e);
+        }
+    };
+
+    // Placeholder for future edit
+    const handleSavePlotPoint = async (id: string, data: Partial<any>) => {
+        await updatePlotPoint(id, data);
+        setIsPlotPointModalOpen(false);
+    };
+
+    const handleViewDetails = () => {
+        if (!plotContextMenuData?.anchorId) return;
+        const anchorId = plotContextMenuData.anchorId;
+
+        // Find point
+        for (const line of plotLines) {
+            const point = line.points?.find((p: any) => p.anchors?.some((a: any) => a.id === anchorId));
+            if (point) {
+                setEditingPlotPoint(point);
+                setIsPlotPointCreateMode(false);
+                setIsPlotPointModalOpen(true);
+                break;
+            }
+        }
+        setPlotContextMenuData(null);
     };
 
     // Helper to Apply Anchor
@@ -374,7 +632,7 @@ export default function Editor({ novelId, onBack }: EditorProps) {
         editor.update(() => {
             const selection = $getSelection();
             if ($isRangeSelection(selection)) {
-                $wrapSelectionInMarkNode(selection as any, selection.isCollapsed(), anchorId);
+                $wrapSelectionInMarkNode(selection as any, selection.isCollapsed(), anchorId, $createPlotAnchorNode);
             }
         });
     };
@@ -401,15 +659,13 @@ export default function Editor({ novelId, onBack }: EditorProps) {
                 selection.focus.set(nodeKey, offset + length, 'text');
                 $setSelection(selection);
 
-                if ($isRangeSelection(selection)) {
-                    $wrapSelectionInMarkNode(selection as any, false, anchorId);
-                }
+                $wrapSelectionInMarkNode(selection as any, false, anchorId, $createPlotAnchorNode);
             }
         });
     };
 
     // Create Chapter
-    const handleCreateChapter = async (volumeId: string) => {
+    const handleCreateChapter = useCallback(async (volumeId: string) => {
         const newTitle = '';
         const volume = volumes.find(v => v.id === volumeId);
         const order = volume ? volume.chapters.length + 1 : 1;
@@ -421,10 +677,10 @@ export default function Editor({ novelId, onBack }: EditorProps) {
         } catch (error) {
             console.error('Failed to create chapter:', error);
         }
-    };
+    }, [volumes, loadVolumes, handleSelectChapter]);
 
     // Create Volume
-    const handleCreateVolume = async () => {
+    const handleCreateVolume = useCallback(async () => {
         const title = '';
         try {
             const newVol = await window.db.createVolume({ novelId, title });
@@ -433,19 +689,19 @@ export default function Editor({ novelId, onBack }: EditorProps) {
         } catch (error) {
             console.error('Failed to create volume:', error);
         }
-    };
+    }, [novelId, loadVolumes, setLastCreatedVolumeId]);
 
     // Rename Logic
-    const handleRenameVolume = async (volumeId: string, title: string) => {
+    const handleRenameVolume = useCallback(async (volumeId: string, title: string) => {
         try {
             await window.db.renameVolume({ volumeId, title });
             await loadVolumes();
         } catch (error) {
             console.error('Failed to rename volume:', error);
         }
-    };
+    }, [loadVolumes]);
 
-    const handleRenameChapter = async (chapterId: string, title: string) => {
+    const handleRenameChapter = useCallback(async (chapterId: string, title: string) => {
         try {
             await window.db.renameChapter({ chapterId, title });
             if (currentChapter?.id === chapterId) {
@@ -455,71 +711,9 @@ export default function Editor({ novelId, onBack }: EditorProps) {
         } catch (error) {
             console.error('Failed to rename chapter:', error);
         }
-    };
+    }, [loadVolumes, currentChapter, setTitle]);
 
-    // Save Logic
-    const saveChanges = useCallback(async () => {
-        const currentRef = chapterRef.current;
-        if (!currentRef) return;
 
-        let chapterUpdated = false;
-
-        // Save Content
-        if (contentRef.current !== currentRef.content) {
-            await window.db.saveChapter({
-                chapterId: currentRef.id,
-                content: contentRef.current
-            });
-            chapterUpdated = true;
-        }
-
-        // Save Title
-        if (titleRef.current !== currentRef.title) {
-            await window.db.renameChapter({
-                chapterId: currentRef.id,
-                title: titleRef.current
-            });
-            loadVolumes(); // Reload volumes to reflect title change in sidebar
-            chapterUpdated = true;
-        }
-
-        // Update currentChapter state and recent files if anything changed
-        if (chapterUpdated) {
-            const updatedChapter = {
-                ...currentRef,
-                content: contentRef.current,
-                title: titleRef.current
-            };
-            setCurrentChapter(updatedChapter);
-            addToRecentFiles(updatedChapter);
-        }
-    }, [loadVolumes, addToRecentFiles]);
-
-    // Auto-Save Effect
-    useEffect(() => {
-        const timer = setTimeout(() => {
-            if (currentChapter) {
-                if (content !== currentChapter.content || title !== currentChapter.title) {
-                    saveChanges();
-                }
-            }
-        }, 1000);
-        return () => clearTimeout(timer);
-    }, [content, title, currentChapter, saveChanges]);
-
-    // Save on Unmount / BeforeUnload
-    useEffect(() => {
-        const handleUnload = () => {
-            if (chapterRef.current && (contentRef.current !== chapterRef.current.content || titleRef.current !== chapterRef.current.title)) {
-                saveChanges();
-            }
-        };
-        window.addEventListener('beforeunload', handleUnload);
-        return () => {
-            window.removeEventListener('beforeunload', handleUnload);
-            handleUnload();
-        };
-    }, [saveChanges]);
 
     // Global Search Shortcut (Ctrl+Shift+F)
     useEffect(() => {
@@ -807,6 +1001,66 @@ export default function Editor({ novelId, onBack }: EditorProps) {
         setTimeout(() => setShakingIdeaId(null), 500);
     };
 
+    const [highlightedPlotPointId, setHighlightedPlotPointId] = useState<string | null>(null);
+
+    // Handle Plot Anchor Click
+    const handlePlotAnchorClick = (anchorId: string) => {
+        console.log('[Editor] handlePlotAnchorClick:', anchorId);
+        // Find the plot point associated with this anchor
+        for (const line of plotLines) {
+            const point = line.points?.find((p: any) => p.anchors?.some((a: any) => a.id === anchorId));
+            if (point) {
+                console.log('[Editor] Found plot point:', point);
+                setHighlightedPlotPointId(point.id);
+                setActiveTab('outline');
+                setIsSidePanelOpen(true);
+
+                // Clear highlight after 2 seconds
+                setTimeout(() => {
+                    setHighlightedPlotPointId(null);
+                }, 2000);
+                return;
+            }
+        }
+    };
+
+    // Handle Plot Point Jump
+    const handleJumpToPlotPoint = (point: any): boolean => {
+        if (!point.anchors || point.anchors.length === 0) return false;
+
+        const isDarkTheme = preferences.theme === 'dark';
+        const editor = editorRef.current;
+        if (!editor) return false;
+
+        const editorRoot = editor.getRootElement();
+        if (!editorRoot) return false;
+
+        // Try to find the first visible anchor in the editor
+        // We iterate through all anchors of the point
+        for (const anchor of point.anchors) {
+            // Find DOM element with this ID
+            const element = editorRoot.querySelector(`[data-plot-anchor-id="${anchor.id}"]`);
+            if (element) {
+                (element as HTMLElement).scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+                // Add temporary highlight
+                const originalBg = (element as HTMLElement).style.backgroundColor;
+                (element as HTMLElement).style.transition = 'background-color 0.5s';
+                (element as HTMLElement).style.backgroundColor = isDarkTheme ? 'rgba(234, 179, 8, 0.4)' : 'rgba(250, 204, 21, 0.4)'; // Yellow-500/400
+
+                setTimeout(() => {
+                    (element as HTMLElement).style.backgroundColor = originalBg;
+                }, 2000);
+
+                return true;
+            }
+        }
+
+        // If we reach here, it means hooks exist but are not currently in the DOM (maybe executed on clean up? or just not found)
+        console.warn('[Editor] Anchors exist but DOM elements not found for point:', point.id);
+        return false;
+    };
+
     const triggerHighlight = (id: string) => {
         setHighlightedIdeaId(id);
         // We keep it highlighted for a while to allow animation to complete
@@ -844,10 +1098,7 @@ export default function Editor({ novelId, onBack }: EditorProps) {
     };
 
     // --- 8. Global Plot Point Modal Logic ---
-    const [isPlotPointModalOpen, setIsPlotPointModalOpen] = useState(false);
-    const [editingPlotPoint, setEditingPlotPoint] = useState<any>(null); // Resolve type if possible or stick to any for now
-    const [plotPointCreateData, setPlotPointCreateData] = useState<any>(null);
-    const [isPlotPointCreateMode, setIsPlotPointCreateMode] = useState(false);
+
 
     useEffect(() => {
         const handleOpenModal = (e: CustomEvent) => {
@@ -865,6 +1116,13 @@ export default function Editor({ novelId, onBack }: EditorProps) {
                         console.log('[Editor] handleOpenModal: Auto-filled chapter from global metadata:', active);
                     }
                 }
+
+                // [NEW] Handle Anchor Data from Floating Toolbar
+                const { anchorData } = e.detail;
+                if (anchorData) {
+                    setPendingAnchorSelection(anchorData);
+                }
+
                 setPlotPointCreateData(data);
                 setEditingPlotPoint(null);
             } else {
@@ -888,97 +1146,43 @@ export default function Editor({ novelId, onBack }: EditorProps) {
         return () => window.removeEventListener('open-plot-point-modal', handleOpenModal as EventListener);
     }, [plotLines]);
 
-    const handleCreatePointFromSelection = () => {
-        if (plotContextMenuData?.text) {
-            setPendingAnchorSelection(plotContextMenuData);
 
-            // Use global metadata if available (to avoid stale closure), otherwise fallback to currentChapter state
-            let chapter: any = activeChapterMetadata || currentChapter;
-            console.log('Creating point from selection, Chapter (Global/State):', activeChapterMetadata, currentChapter);
 
-            // Fallback: If no current chapter, try to find from localStorage
-            if (!chapter) {
-                // Try recent files first
-                if (recentFiles.length > 0) {
-                    const recentId = recentFiles[0].id;
-                    console.log('Using recent file as fallback:', recentId);
-                    for (const v of volumes) {
-                        const found = v.chapters.find(c => c.id === recentId);
-                        if (found) {
-                            chapter = found;
-                            break;
-                        }
-                    }
+    const handleDeletePlotPoint = async (id: string) => {
+        try {
+            console.log('[Editor] handleDeletePlotPoint triggered for:', id);
+            // Find the point and its anchors
+            let anchorsToRemove: string[] = [];
+            for (const line of plotLines) {
+                const point = line.points?.find(p => p.id === id);
+                if (point && point.anchors) {
+                    anchorsToRemove = point.anchors.map(a => a.id);
+                    break;
                 }
+            }
+            console.log('[Editor] Anchors to remove:', anchorsToRemove);
 
-                if (!chapter) {
-                    const lastChapterId = localStorage.getItem(`last_chapter_${novelId}`);
-                    if (lastChapterId) {
-                        // Try to find in volumes
-                        for (const v of volumes) {
-                            const found = v.chapters.find(c => c.id === lastChapterId);
-                            if (found) {
-                                chapter = found;
-                                console.log('Found fallback chapter from localStorage:', chapter);
-                                break;
+            // Cleanup Editor Nodes
+            if (anchorsToRemove.length > 0 && editorRef.current) {
+                editorRef.current.update(() => {
+                    const rootNode = $getRoot();
+                    rootNode.getAllTextNodes().forEach(textNode => {
+                        const parent = textNode.getParent();
+                        if ($isPlotAnchorNode(parent)) {
+                            const ids = parent.getIDs();
+                            // If any of the node's IDs are in the anchorsToRemove list, unwrap it.
+                            if (ids.some(id => anchorsToRemove.includes(id))) {
+                                console.log('[Editor] Unwrapping anchor node:', ids);
+                                parent.unwrap();
                             }
                         }
-                    }
-                }
-            }
-
-            // Open Modal in Create Mode
-            setIsPlotPointCreateMode(true);
-            setPlotPointCreateData({
-                description: plotContextMenuData.text, // Use selection as default description
-                chapterId: chapter?.id,
-                title: chapter?.title // Default title is chapter title
-            });
-            setEditingPlotPoint(null);
-            setIsPlotPointModalOpen(true);
-        }
-        setPlotContextMenuData(null);
-    };
-
-    const handleCreatePlotPoint = async (data: any, initialChapterId?: string) => {
-        try {
-            const newPoint = await createPlotPoint(data);
-            // Logic to handle anchor creation if pending selection exists
-            const targetChapterId = initialChapterId || (pendingAnchorSelection && currentChapter?.id);
-
-            // Only anchor to selection if the target chapter matches the current chapter where selection was made
-            // Otherwise we might anchor to wrong text in different chapter or create invalid anchor
-            const shouldAnchorToSelection = pendingAnchorSelection && currentChapter?.id && targetChapterId === currentChapter.id;
-
-            if (newPoint && shouldAnchorToSelection && pendingAnchorSelection) {
-                await addAnchor({
-                    plotPointId: newPoint.id,
-                    chapterId: targetChapterId!,
-                    type: 'setup',
-                    lexicalKey: pendingAnchorSelection.nodeKey,
-                    offset: pendingAnchorSelection.offset,
-                    length: pendingAnchorSelection.length
-                });
-                applyPlotAnchorFromData(newPoint.id, pendingAnchorSelection);
-                setPendingAnchorSelection(null);
-            } else if (newPoint && targetChapterId) {
-                // Fallback for manual creation or if chapter changed (just associate with chapter)
-                await addAnchor({
-                    plotPointId: newPoint.id,
-                    chapterId: targetChapterId,
-                    type: 'setup'
+                    });
                 });
             }
-        } catch (e) {
-            console.error("Failed to create plot point", e);
-        }
-    };
 
-    const handleSavePlotPoint = async (id: string, data: any) => {
-        try {
-            await updatePlotPoint(id, data);
+            await deletePlotPoint(id); // Ensure correct arguments for deletePlotPoint
         } catch (e) {
-            console.error("Failed to update plot point", e);
+            console.error('Failed to delete plot point:', e);
         }
     };
 
@@ -1076,15 +1280,19 @@ export default function Editor({ novelId, onBack }: EditorProps) {
                                 novelId={novelId}
                                 theme={preferences.theme}
                                 onClose={() => setIsSidePanelOpen(false)}
+                                highlightedPointId={highlightedPlotPointId}
+                                onDeletePoint={handleDeletePlotPoint}
+                                onJump={handleJumpToPlotPoint}
                             />
                         </div>
 
-                        {activeTab === 'characters' && (
-                            <div className="flex-1 flex flex-col items-center justify-center p-4 text-neutral-500 text-sm text-center">
-                                <Info className="w-8 h-8 mb-4 opacity-50" />
-                                <p>{t('sidebar.characters')} {t('common.loading')}</p>
-                            </div>
-                        )}
+                        {/* World Workbench (Keep Alive) */}
+                        <div className={clsx("flex-1 h-full flex flex-col min-h-0", activeTab !== 'characters' && "hidden")}>
+                            <WorldWorkbench
+                                novelId={novelId}
+                                theme={preferences.theme}
+                            />
+                        </div>
 
                         {activeTab === 'map' && (
                             <div className="flex-1 flex flex-col items-center justify-center p-4 text-neutral-500 text-sm text-center">
@@ -1176,9 +1384,31 @@ export default function Editor({ novelId, onBack }: EditorProps) {
 
                 {/* Editor Area or Matrix */}
                 {viewMode === 'matrix' ? (
-                    <NarrativeMatrix novelId={novelId} theme={preferences.theme} activeChapterId={currentChapter?.id} volumes={volumes} formatting={novel?.formatting} />
+                    <NarrativeMatrix
+                        novelId={novelId}
+                        theme={preferences.theme}
+                        activeChapterId={currentChapter?.id}
+                        volumes={volumes}
+                        formatting={novel?.formatting}
+                        recentFiles={recentFiles}
+                        plotLines={plotLines}
+                        isPlotLoading={isPlotLoading}
+                    />
                 ) : (
-                    currentChapter ? (
+                    isLoading && !currentChapter ? (
+                        <div className={clsx(
+                            "flex-1 flex flex-col items-center justify-start pt-20 gap-6 animate-pulse select-none",
+                            preferences.theme === 'dark' ? 'bg-[#0a0a0f]' : 'bg-white'
+                        )}>
+                            <div className={clsx("h-10 w-1/3 rounded", preferences.theme === 'dark' ? "bg-white/5" : "bg-gray-200")} />
+                            <div className="w-full max-w-3xl px-12 flex flex-col gap-4 mt-8">
+                                <div className={clsx("h-4 w-full rounded", preferences.theme === 'dark' ? "bg-white/5" : "bg-gray-200")} />
+                                <div className={clsx("h-4 w-5/6 rounded", preferences.theme === 'dark' ? "bg-white/5" : "bg-gray-200")} />
+                                <div className={clsx("h-4 w-full rounded", preferences.theme === 'dark' ? "bg-white/5" : "bg-gray-200")} />
+                                <div className={clsx("h-4 w-4/5 rounded", preferences.theme === 'dark' ? "bg-white/5" : "bg-gray-200")} />
+                            </div>
+                        </div>
+                    ) : currentChapter ? (
                         <div className={clsx(
                             "flex-1 min-h-0 editor-shell layout-transition",
                             preferences.theme === 'dark' ? 'bg-[#0a0a0f]' : 'bg-white'
@@ -1188,6 +1418,7 @@ export default function Editor({ novelId, onBack }: EditorProps) {
                                 namespace={currentChapter.id}
                                 initialContent={currentChapter.content}
                                 onChange={(editorState) => {
+                                    if (isSwitchingChapterRef.current) return;
                                     editorState.read(() => {
                                         const jsonString = JSON.stringify(editorState.toJSON());
                                         setContent(jsonString);
@@ -1215,7 +1446,9 @@ export default function Editor({ novelId, onBack }: EditorProps) {
                                 recentFiles={recentFiles}
                                 onDeleteRecent={handleDeleteRecent}
                                 onRecentFileSelect={handleSelectChapter}
-                                onPlotContextMenu={handlePlotContextMenu} // [NEW]
+                                onPlotContextMenu={handlePlotContextMenu}
+                                onPlotAnchorClick={handlePlotAnchorClick}
+                                novelId={novelId}
                             />
                             {/* Floating Elements */}
                             {plotContextMenuData && (
@@ -1224,11 +1457,7 @@ export default function Editor({ novelId, onBack }: EditorProps) {
                                     onClose={() => setPlotContextMenuData(null)}
                                     onAddAnchor={handleAddAnchorClick}
                                     onRemoveAnchor={handleRemoveAnchor}
-                                    onViewDetails={() => {
-                                        // Open sidebar to specific point?
-                                        console.log('View details for anchor:', plotContextMenuData.anchorId);
-                                        setPlotContextMenuData(null);
-                                    }}
+                                    onViewDetails={handleViewDetails}
                                     onCreatePoint={handleCreatePointFromSelection}
                                     theme={preferences.theme}
                                 />
@@ -1276,7 +1505,26 @@ export default function Editor({ novelId, onBack }: EditorProps) {
             <GlobalIdeaModal
                 isOpen={isGlobalIdeaModalOpen}
                 onClose={() => setIsGlobalIdeaModalOpen(false)}
-                onSave={async () => { }}
+                onSave={async (content) => {
+                    const newIdea: Idea = {
+                        id: crypto.randomUUID(),
+                        novelId,
+                        chapterId: currentChapter?.id || '',
+                        content,
+                        timestamp: Date.now(),
+                        isStarred: false
+                    };
+
+                    setIdeas(prev => [newIdea, ...prev]);
+                    setActiveTab('idea');
+                    setIsSidePanelOpen(true);
+
+                    try {
+                        await window.db.createIdea(newIdea);
+                    } catch (e) {
+                        console.error('Failed to create global idea:', e);
+                    }
+                }}
                 theme={preferences.theme}
             />
 
@@ -1313,13 +1561,15 @@ export default function Editor({ novelId, onBack }: EditorProps) {
                 point={editingPlotPoint}
                 isCreateMode={isPlotPointCreateMode}
                 initialData={plotPointCreateData}
-                novelId={novelId}
                 theme={preferences.theme}
                 onSave={handleSavePlotPoint}
                 onCreate={handleCreatePlotPoint}
+                onDelete={handleDeletePlotPoint}
                 onAddAnchor={addAnchor}
                 onRemoveAnchor={removeAnchor}
                 formatting={novel?.formatting}
+                volumes={volumes}
+                plotLines={plotLines}
             />
 
         </motion.div>

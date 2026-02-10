@@ -44,23 +44,50 @@ console.log('[Build] Checking for Prisma Client...');
 let prismaSrc = path.join(coreBasePath, 'node_modules', '.prisma');
 
 // If not found in core, try to find it by resolving '@prisma/client' from core
+// If not found in core, try to find it elsewhere
 if (!fs.existsSync(prismaSrc)) {
-    try {
-        const clientPath = require.resolve('@prisma/client', { paths: [coreBasePath] });
-        // clientPath is usually .../.prisma/client/index.js or .../@prisma/client/index.js
-        // If it's @prisma/client, we need to look for .prisma sibling or in .pnpm
-        console.log('[Build] Resolved @prisma/client to:', clientPath);
+    console.log('[Build] .prisma not found in core node_modules. Searching elsewhere...');
 
-        // Pnpm Structure: node_modules/.pnpm/@prisma+client@x.x.x/node_modules/@prisma/client
-        // We need the generated client which is usually in .prisma/client
-
-        // Let's look for .prisma in the root node_modules if hoisting happened
-        const rootPrisma = path.resolve(__dirname, '../../../node_modules/.prisma');
-        if (fs.existsSync(rootPrisma)) {
-            prismaSrc = rootPrisma;
+    // 1. Check Root node_modules (Most likely for pnpm workspace)
+    const rootPrisma = path.resolve(__dirname, '../../../node_modules/.prisma');
+    console.log(`[Build] Checking root: ${rootPrisma}`);
+    if (fs.existsSync(rootPrisma)) {
+        prismaSrc = rootPrisma;
+        console.log('[Build] Found .prisma in root.');
+    } else {
+        // 2. Check .pnpm in core
+        console.log('[Build] Searching in packages/core/.pnpm directory...');
+        try {
+            findInPnpm(path.join(coreBasePath, 'node_modules', '.pnpm'));
+        } catch (e) {
+            console.warn('[Build] Error searching core pnpm:', e);
         }
-    } catch (e) {
-        console.warn('[Build] Could not resolve @prisma/client from core');
+
+        // 3. Check .pnpm in root
+        if (!fs.existsSync(prismaSrc)) {
+            console.log('[Build] Searching in root .pnpm directory...');
+            try {
+                findInPnpm(path.join(__dirname, '../../../node_modules/.pnpm'));
+            } catch (e) {
+                console.warn('[Build] Error searching root pnpm:', e);
+            }
+        }
+
+        function findInPnpm(pnpmDir) {
+            if (fs.existsSync(pnpmDir)) {
+                const entries = fs.readdirSync(pnpmDir, { withFileTypes: true });
+                for (const entry of entries) {
+                    if (entry.isDirectory() && entry.name.includes('@prisma+client')) {
+                        const candidate = path.join(pnpmDir, entry.name, 'node_modules', '.prisma');
+                        if (fs.existsSync(candidate)) {
+                            prismaSrc = candidate;
+                            console.log('[Build] Found .prisma in pnpm:', prismaSrc);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 

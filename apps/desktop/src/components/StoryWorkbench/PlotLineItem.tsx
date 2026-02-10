@@ -7,6 +7,7 @@ import { clsx } from 'clsx';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useTranslation } from 'react-i18next';
 import { PlotPointItem } from './PlotPointItem';
+import { ConfirmModal } from '../ui/ConfirmModal';
 
 interface PlotLineItemProps {
     line: PlotLine;
@@ -17,6 +18,9 @@ interface PlotLineItemProps {
     onDelete: () => void;
     onCreatePoint: (title: string) => void;
     onPointClick: (point: PlotPoint) => void;
+    onPointDelete: (pointId: string) => void;
+    onJump?: (point: PlotPoint) => boolean;
+    highlightedPointId?: string | null;
 }
 
 export function PlotLineItem({
@@ -27,7 +31,10 @@ export function PlotLineItem({
     onUpdateName,
     onDelete,
     onCreatePoint,
-    onPointClick
+    onPointClick,
+    onPointDelete,
+    onJump,
+    highlightedPointId
 }: PlotLineItemProps) {
     const { t } = useTranslation();
     const {
@@ -50,6 +57,7 @@ export function PlotLineItem({
 
     const [isCreatingPoint, setIsCreatingPoint] = useState(false);
     const [newPointTitle, setNewPointTitle] = useState('');
+    const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
     const handleSaveName = () => {
         if (editName.trim() !== line.name) {
@@ -112,7 +120,7 @@ export function PlotLineItem({
                         <Edit2 className="w-3 h-3" />
                     </button>
                     <button
-                        onClick={(e) => { e.stopPropagation(); onDelete(); }}
+                        onClick={(e) => { e.stopPropagation(); setShowDeleteConfirm(true); }}
                         className="p-1 hover:text-red-400"
                     >
                         <Trash2 className="w-3 h-3" />
@@ -140,6 +148,9 @@ export function PlotLineItem({
                                         point={point}
                                         isDark={isDark}
                                         onClick={() => onPointClick(point)}
+                                        onDelete={() => onPointDelete(point.id)}
+                                        onJump={onJump}
+                                        isHighlighted={highlightedPointId === point.id}
                                     />
                                 ))}
                             </SortableContext>
@@ -178,6 +189,18 @@ export function PlotLineItem({
                     </motion.div>
                 )}
             </AnimatePresence>
+
+            <ConfirmModal
+                isOpen={showDeleteConfirm}
+                onClose={() => setShowDeleteConfirm(false)}
+                onConfirm={() => {
+                    onDelete();
+                    setShowDeleteConfirm(false);
+                }}
+                title={t('plot.deleteLine')}
+                message={t('plot.confirmDeleteLine')}
+                theme={isDark ? 'dark' : 'light'}
+            />
         </div>
     );
 }

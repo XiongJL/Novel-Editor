@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import { clsx } from 'clsx';
+import clsx from 'clsx';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Check, ChevronDown, Search, X } from 'lucide-react';
 
@@ -180,14 +180,7 @@ const VirtualizedList = ({ options, onSelect, value, isDark }: {
         return items;
     }, [options]);
 
-    const parentRef = useRef<HTMLDivElement>(null);
-    const [scrollTop, setScrollTop] = useState(0);
 
-    const ITEM_HEIGHT = 36; // Approx height for option
-    const HEADER_HEIGHT = 28; // Approx height for header
-
-    // Calculate total height needed
-    const getHeight = (index: number) => flatItems[index].type === 'header' ? HEADER_HEIGHT : ITEM_HEIGHT;
 
     // We use a simple fixed height estimation for virtualization to keep it lightweight
     // Ideally we would use a dynamic size map, but for now we assume average height or just fixed

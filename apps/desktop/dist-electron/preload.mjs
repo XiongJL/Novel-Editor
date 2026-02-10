@@ -32,7 +32,19 @@ electron.contextBridge.exposeInMainWorld("db", {
   createPlotPointAnchor: (data) => electron.ipcRenderer.invoke("db:create-plot-point-anchor", data),
   deletePlotPointAnchor: (id) => electron.ipcRenderer.invoke("db:delete-plot-point-anchor", id),
   reorderPlotLines: (novelId, lineIds) => electron.ipcRenderer.invoke("db:reorder-plot-lines", { novelId, lineIds }),
-  reorderPlotPoints: (plotLineId, pointIds) => electron.ipcRenderer.invoke("db:reorder-plot-points", { plotLineId, pointIds })
+  reorderPlotPoints: (plotLineId, pointIds) => electron.ipcRenderer.invoke("db:reorder-plot-points", { plotLineId, pointIds }),
+  // Character & Item
+  getCharacters: (novelId) => electron.ipcRenderer.invoke("db:get-characters", novelId),
+  getCharacter: (id) => electron.ipcRenderer.invoke("db:get-character", id),
+  createCharacter: (data) => electron.ipcRenderer.invoke("db:create-character", data),
+  updateCharacter: (id, data) => electron.ipcRenderer.invoke("db:update-character", { id, data }),
+  deleteCharacter: (id) => electron.ipcRenderer.invoke("db:delete-character", id),
+  getItems: (novelId) => electron.ipcRenderer.invoke("db:get-items", novelId),
+  getItem: (id) => electron.ipcRenderer.invoke("db:get-item", id),
+  createItem: (data) => electron.ipcRenderer.invoke("db:create-item", data),
+  updateItem: (id, data) => electron.ipcRenderer.invoke("db:update-item", { id, data }),
+  deleteItem: (id) => electron.ipcRenderer.invoke("db:delete-item", id),
+  getMentionables: (novelId) => electron.ipcRenderer.invoke("db:get-mentionables", novelId)
 });
 electron.contextBridge.exposeInMainWorld("electron", {
   toggleFullScreen: () => electron.ipcRenderer.invoke("app:toggle-fullscreen"),

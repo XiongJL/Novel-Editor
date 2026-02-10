@@ -220,27 +220,45 @@ const FloatingToolbar = ({
 
                     <button
                         onClick={() => {
-                            const selection = window.getSelection();
-                            const text = selection?.toString() || '';
-                            // Dispatch event to open global modal
-                            window.dispatchEvent(new CustomEvent('open-plot-point-modal', {
-                                detail: {
-                                    isCreateMode: true,
-                                    initialData: {
-                                        description: text,
-                                        // We don't have novelId/chapterId here easily without prop drilling.
-                                        // But Editor.tsx knows novelId.
-                                        // context? We can stick the chapterId into `initialData` if we knew it to pre-select.
-                                        // The user is in the editor, so it IS the current chapter usually.
-                                        // Editor.tsx will merge `novelId`.
-                                        // But Editor.tsx also knows `currentChapter.id`.
-                                        // So we can let Editor.tsx fill `chapterId` if it's missing?
-                                        // Actually `Editor.tsx` logic I wrote: `initialData: { ...initialData, novelId }`.
-                                        // I should also inject `chapterId: currentChapter?.id` in Editor.tsx logic.
-                                        // So here just pass description.
-                                    }
+                            editor.getEditorState().read(() => {
+                                const selection = $getSelection();
+                                if ($isRangeSelection(selection)) {
+                                    const text = selection.getTextContent();
+                                    const anchor = selection.anchor;
+                                    const focus = selection.focus;
+
+                                    // Ensure we have the correct order/length
+                                    // Lexical selection might be backward
+                                    const length = Math.abs(anchor.offset - focus.offset);
+                                    // We need to know which node is the "anchor" node for the PlotAnchor
+                                    // Usually we attach to the text node.
+                                    // For simplicity, let's assume single node selection or taking the anchor node.
+                                    // If selection spans multiple nodes, we might need more complex logic.
+                                    // For now, let's use the anchor node of the selection.
+
+                                    const nodeKey = anchor.key;
+                                    const offset = anchor.offset;
+
+                                    // Dispatch event to open global modal
+                                    window.dispatchEvent(new CustomEvent('open-plot-point-modal', {
+                                        detail: {
+                                            isCreateMode: true,
+                                            initialData: {
+                                                description: text,
+                                            },
+                                            anchorData: {
+                                                text: text,
+                                                nodeKey: nodeKey,
+                                                offset: offset,
+                                                length: length,
+                                                hasSelection: true,
+                                                x: 0, // Mocking PlotContextMenuData
+                                                y: 0
+                                            }
+                                        }
+                                    }));
                                 }
-                            }));
+                            });
                         }}
                         className={`p-2 rounded hover:opacity-80 ${isDark ? 'text-purple-400 hover:bg-purple-400/10' : 'text-purple-600 hover:bg-purple-600/10'}`}
                         title={t('plot.addPoint')}

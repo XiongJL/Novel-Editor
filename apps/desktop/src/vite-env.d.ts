@@ -41,6 +41,21 @@ interface DBAPI {
 
     reorderPlotLines: (novelId: string, lineIds: string[]) => Promise<{ success: boolean }>
     reorderPlotPoints: (plotLineId: string, pointIds: string[]) => Promise<{ success: boolean }>
+
+    // Character & Item
+    getCharacters: (novelId: string) => Promise<Character[]>;
+    getCharacter: (id: string) => Promise<Character | null>;
+    createCharacter: (data: Omit<Character, 'id' | 'createdAt' | 'updatedAt' | 'sortOrder'>) => Promise<Character>;
+    updateCharacter: (id: string, data: Partial<Character>) => Promise<Character>
+    deleteCharacter: (id: string) => Promise<void>
+
+    getItems: (novelId: string) => Promise<Item[]>;
+    getItem: (id: string) => Promise<Item | null>;
+    createItem: (data: Omit<Item, 'id' | 'createdAt' | 'updatedAt' | 'sortOrder'>) => Promise<Item>;
+    updateItem: (id: string, data: Partial<Item>) => Promise<Item>
+    deleteItem: (id: string) => Promise<void>
+
+    getMentionables: (novelId: string) => Promise<MentionableItem[]>
 }
 
 interface PlotLine {
@@ -149,6 +164,50 @@ interface Chapter extends ChapterMetadata {
     version: number
     deleted: boolean
     anchors?: PlotPointAnchor[]
+}
+
+interface Character {
+    id: string
+    novelId: string
+    name: string
+    role?: string | null
+    avatar?: string | null
+    description?: string | null
+    profile: string
+    sortOrder: number
+    items?: ItemOwnershipWithItem[]
+    createdAt: string | Date
+    updatedAt: string | Date
+}
+
+interface Item {
+    id: string
+    novelId: string
+    name: string
+    type: string
+    icon?: string | null
+    description?: string | null
+    profile: string
+    sortOrder: number
+    createdAt: string | Date
+    updatedAt: string | Date
+}
+
+interface ItemOwnershipWithItem {
+    id: string
+    itemId: string
+    characterId: string
+    note?: string | null
+    item: Item
+}
+
+interface MentionableItem {
+    id: string
+    name: string
+    type: 'character' | 'item'
+    avatar?: string | null
+    icon?: string | null
+    role?: string | null
 }
 
 interface SyncAPI {

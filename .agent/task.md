@@ -20,11 +20,15 @@
         - [x] IPC Handlers: 实现大纲与情节要点的 CRUD
     - [x] **Phase 2: 前端数据层 (Frontend Data)**
         - [x] Types & Hooks: `usePlotSystem` 状态管理
-    - [/] **Phase 3: 工作台 UI (Workbench UI)**
+    - [x] **Phase 3: 工作台 UI (Workbench UI)**
         - [x] Sidebar Integration: 侧边栏集成
         - [x] Plot Line Manager: 情节线管理器
-        - [ ] Narrative Matrix View: 叙事矩阵视图 (Deferred)
+        - [x] Narrative Matrix View: 叙事矩阵视图 (已集成全量提及与交互)
     - [x] **Phase 4: 编辑器集成 (Editor Integration)**
         - [x] Lexical Node: `PlotAnchorNode`
         - [x] Context Menu: `PlotContextMenuPlugin` & UI
         - [x] Editor State Integration
+    - [x] **Phase 10: 角色系统与 UI 统一 (Character & UI Unification)**
+        - [x] @Mentions: 实现剧情要点与矩阵的智能联想
+        - [x] Entity Cards: 实现档案详情卡片与自动关闭交互
+        - [x] Deletion Confirmation: 全系统集成 `ConfirmModal` 确认机制

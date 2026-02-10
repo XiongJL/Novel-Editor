@@ -41,6 +41,21 @@ contextBridge.exposeInMainWorld('db', {
 
     reorderPlotLines: (novelId: string, lineIds: string[]) => ipcRenderer.invoke('db:reorder-plot-lines', { novelId, lineIds }),
     reorderPlotPoints: (plotLineId: string, pointIds: string[]) => ipcRenderer.invoke('db:reorder-plot-points', { plotLineId, pointIds }),
+
+    // Character & Item
+    getCharacters: (novelId: string) => ipcRenderer.invoke('db:get-characters', novelId),
+    getCharacter: (id: string) => ipcRenderer.invoke('db:get-character', id),
+    createCharacter: (data: any) => ipcRenderer.invoke('db:create-character', data),
+    updateCharacter: (id: string, data: any) => ipcRenderer.invoke('db:update-character', { id, data }),
+    deleteCharacter: (id: string) => ipcRenderer.invoke('db:delete-character', id),
+
+    getItems: (novelId: string) => ipcRenderer.invoke('db:get-items', novelId),
+    getItem: (id: string) => ipcRenderer.invoke('db:get-item', id),
+    createItem: (data: any) => ipcRenderer.invoke('db:create-item', data),
+    updateItem: (id: string, data: any) => ipcRenderer.invoke('db:update-item', { id, data }),
+    deleteItem: (id: string) => ipcRenderer.invoke('db:delete-item', id),
+
+    getMentionables: (novelId: string) => ipcRenderer.invoke('db:get-mentionables', novelId),
 })
 
 contextBridge.exposeInMainWorld('electron', {

@@ -2,7 +2,7 @@
 
 This document provides a high-level summary of the Novel Editor project to help AI agents quickly establish context.
 
-**Last Updated**: 2026-02-09
+**Last Updated**: 2026-02-11
 
 ## 1. Essentials
 *   **Project**: Novel Editor (Monorepo)
@@ -32,8 +32,8 @@ This document provides a high-level summary of the Novel Editor project to help 
 *   **IPC Communication**: Renderer calls `window.db.xxx` -> Preload -> Main Process `ipcMain.handle`.
 *   **Lexical Editor**:
     *   `LexicalChapterEditor`: Main editor component with integrated toolbar.
-    *   **Plugins**: `ToolbarPlugin`, `StylePlugin`, `ShortcutsPlugin`, `AutoFormatPlugin`, `FloatingTextFormatToolbarPlugin`, `IdeaInteractionPlugin`.
-    *   **Nodes**: `IdeaMarkNode` (extends MarkNode for idea highlighting).
+    *   **Plugins**: `ToolbarPlugin`, `StylePlugin`, `ShortcutsPlugin`, `AutoFormatPlugin`, `FloatingTextFormatToolbarPlugin`, `IdeaInteractionPlugin`, `PlotAnchorInteractionPlugin`.
+    *   **Nodes**: `IdeaMarkNode`, `PlotAnchorNode` (extends MarkNode).
     *   **Features**: Rich text formatting, i18n support, mobile preview mode (iPhone frame), idea creation with text selection.
 *   **Synchronization**:
     *   Logic based on `updatedAt` timestamps and cursors (SyncCursor).
@@ -71,7 +71,6 @@ This document provides a high-level summary of the Novel Editor project to help 
     *   Full-text search across chapters and ideas
     *   Real-time keyword highlighting on jump
     *   Progressive loading (20 results per batch)
-    *   Progressive loading (20 results per batch)
     *   Auto-indexing on save
 *   **Local Search (In-Editor)**:
     *   Ctrl+F to trigger floating search bar
@@ -82,7 +81,15 @@ This document provides a high-level summary of the Novel Editor project to help 
 *   **Story Structure Tools**:
     *   **Plot Sidebar**: Manage plot lines and points.
     *   **Narrative Matrix**: 2D grid view (Chapters vs Plot Lines) to track narrative flow globally.
-    *   **Text Anchors**: Link plot points directly to lexical editor locations with visual highlights.
+    *   **Bidirectional Navigation**: 
+        *   **Text -> Plot**: Click anchor in text to highlight plot point in sidebar.
+        *   **Plot -> Text**: Click "Jump" icon on plot card to scroll to text anchor (with shake feedback if missing).
+    *   **Unified Visuals**: Consistent icons (Mystery/Promise/Foreshadowing/Event) across Matrix and Sidebar.
+    *   **Character Mentions (@)**:
+        *   **Smart Mention Recognition**: Regular expression based parsing in textareas and matrix views.
+        *   **Transparent Textarea Overlay**: Solved text overlapping by making native textarea text transparent (maintaining cursor visibility) and rendering highlighted mentions on a perfectly aligned backdrop layer.
+        *   **Entity Info Card**: Global click-outside detection for automatic closure of character/item detail cards.
+        *   **i18n Support**: Full localization for entity data cards and mention labels.
 
 ## 5. Current Status & Known Issues
 *   **Status**: 
@@ -91,8 +98,13 @@ This document provides a high-level summary of the Novel Editor project to help 
     *   One-click formatting with language-aware punctuation.
     *   All toolbar items support i18n.
     *   **Recent Files UI complete.**
-    *   **Global search with FTS5 indexing complete (Context-aware jumping fixed).**
-    *   **Narrative Matrix view implemented (Transpose & Layout Fixes integrated).**
+    *   **Global search with FTS5 indexing complete.**
+    *   **Narrative Matrix view implemented.**
+    *   **Plot System fully interactive (Anchors, Jump, Sync).**
+    *   **Character Mentions (@) fully functional** in PlotPointModal and NarrativeMatrix with integrated EntityInfoCard.
+    *   **System-wide Delete Confirmation unified** using `ConfirmModal`.
+*   **Planned**:
+    *   **Lexical Mention Node**: Real-time `@` autocomplete within the Lexical editor itself (currently implemented in Modals/Matrix).
 *   **Critical Notes**:
     *   `packages/core` MUST be built (`pnpm build`) for Electron to load it.
     *   Old `EditorToolbar.tsx` component is deprecated (replaced by Lexical `ToolbarPlugin`).
@@ -115,7 +127,18 @@ This document provides a high-level summary of the Novel Editor project to help 
 ## 8. Developer Tools
 *   **DevTools Shortcuts**: F12 or Ctrl+Shift+I to toggle Developer Tools in Electron.
 
-## 9. Next Steps for AI
+## 10. UI Development Standards (Components)
+*   **Modals**: 
+    *   All new modals MUST extend `BaseModal` (`components/ui/BaseModal.tsx`) to ensure visual consistency.
+    *   **Delete Confirmation**: Use `ConfirmModal` (`components/ui/ConfirmModal.tsx`) for ALL destructive actions. Do NOT use native `confirm()`.
+    *   **Style**: Footer buttons should be right-aligned, except for the "Delete" button which stays on the far left. Use `text-xs` for footer buttons to maintain a refined look.
+    *   **Backdrop**: Solid `bg-black/80` (no blur).
+    *   **Rounding**: `rounded-xl`.
+    *   **Animations**: Handled by `BaseModal` (Framer Motion).
+    *   **Performance**: Use uncontrolled components (Refs) for text inputs to avoid re-renders during typing.
+    *   **Theme**: Always pass the `theme` prop to `BaseModal`.
+
+## 11. Next Steps for AI
 *   If asked to fix bugs: Check `task.md` and `walkthrough.md` in `.gemini` memory first.
 *   If implementing Sync: Refer to `SyncDesign.md`.
 *   If implementing Search/Filter: Refer to `searchDesign.md`.
