@@ -6,6 +6,7 @@ import { LayoutGrid, Loader2, HelpCircle, Flag, Sparkles, CircleDot, Check } fro
 import { Chapter, PlotLine, PlotPoint, Volume } from '../../types'; // Assuming global types
 import { formatNumber } from '../../utils/format';
 import { EntityInfoCard } from './EntityInfoCard';
+import { ICON_MAP } from '../ui/IconPicker';
 
 /**
  * 渲染带 Mention 样式的纯文本描述

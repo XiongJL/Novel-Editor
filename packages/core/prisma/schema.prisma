@@ -27,6 +27,7 @@ model Novel {
   tags       Tag[]
   plotLines  PlotLine[]
   plotPoints PlotPoint[]
+  worldSettings WorldSetting[]
 }
 
 model Volume {
@@ -76,11 +77,14 @@ model Character {
   description String? // 简介
   profile     String  @default("{}") // JSON: 自定义属性 { "年龄": "18", "生日": "1月1日" }
   sortOrder   Float   @default(0)
+  isStarred   Boolean @default(false)
 
   novelId String
   novel   Novel  @relation(fields: [novelId], references: [id], onDelete: Cascade)
 
   items     ItemOwnership[]
+  relationsAsSource Relationship[] @relation("RelationSource")
+  relationsAsTarget Relationship[] @relation("RelationTarget")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -114,6 +118,36 @@ model ItemOwnership {
   createdAt   DateTime  @default(now())
 
   @@unique([characterId, itemId])
+}
+
+model WorldSetting {
+  id          String   @id @default(cuid())
+  name        String
+  content     String   @default("") // Rich text content
+  type        String   @default("other") // 'history' | 'geography' | 'magic_system' | 'faction' | 'technology' | 'other'
+  icon        String?  // Custom icon name
+  sortOrder   Float    @default(0)
+
+  novelId     String
+  novel       Novel    @relation(fields: [novelId], references: [id], onDelete: Cascade)
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Relationship {
+  id          String    @id @default(cuid())
+  sourceId    String
+  source      Character @relation("RelationSource", fields: [sourceId], references: [id], onDelete: Cascade)
+  targetId    String
+  target      Character @relation("RelationTarget", fields: [targetId], references: [id], onDelete: Cascade)
+  relation    String    // 关系名称, e.g. "父亲", "敌对", "师徒"
+  description String?   // 关系详细描述
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([sourceId, targetId])
 }
 
 model Idea {
@@ -171,6 +205,7 @@ model PlotPoint {
   description String?
   type        String   // 'foreshadowing' | 'mystery' | 'promise' | 'event'
   status      String   // 'active' | 'resolved'
+  icon        String?  // Custom icon name (e.g. from Lucide)
   
   order       Float    @default(0)
   

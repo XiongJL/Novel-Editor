@@ -1,13 +1,15 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { clsx } from 'clsx';
-import { Users, Package, Plus, RefreshCw } from 'lucide-react';
+import { Users, Package, Plus, RefreshCw, Globe } from 'lucide-react';
 import CharacterList from './CharacterList';
 import CharacterEditor from './CharacterEditor';
 import ItemLibrary from './ItemLibrary';
+import ItemEditor from './ItemEditor';
+import WorldSettingList from './WorldSettingList';
 import { Character, Item } from '../../types';
 
-type WorldTab = 'characters' | 'items';
+type WorldTab = 'characters' | 'items' | 'worldview';
 
 interface WorldWorkbenchProps {
     novelId: string;
@@ -22,8 +24,14 @@ export default function WorldWorkbench({ novelId, theme }: WorldWorkbenchProps) 
     const [characters, setCharacters] = useState<Character[]>([]);
     const [items, setItems] = useState<Item[]>([]);
     const [isLoading, setIsLoading] = useState(false);
+
+    // Character Editor State
     const [editingCharacter, setEditingCharacter] = useState<Character | null>(null);
     const [isEditorOpen, setIsEditorOpen] = useState(false);
+
+    // Item Editor State
+    const [editingItem, setEditingItem] = useState<Item | null>(null);
+    const [isItemEditorOpen, setIsItemEditorOpen] = useState(false);
 
     const loadCharacters = useCallback(async () => {
         try {
@@ -47,6 +55,47 @@ export default function WorldWorkbench({ novelId, theme }: WorldWorkbenchProps) 
         setIsLoading(true);
         Promise.all([loadCharacters(), loadItems()]).finally(() => setIsLoading(false));
     }, [loadCharacters, loadItems]);
+
+    // Listen for navigation events from search
+    useEffect(() => {
+        const handleNavigate = async (e: CustomEvent<{ category: 'character' | 'item' | 'world'; entityId: string }>) => {
+            const { category, entityId } = e.detail;
+
+            if (category === 'character') {
+                setActiveTab('characters');
+                try {
+                    const char = await window.db.getCharacter(entityId);
+                    if (char) {
+                        setEditingCharacter(char);
+                        setIsEditorOpen(true);
+                    }
+                } catch (err) {
+                    console.error('[WorldWorkbench] Failed to load character for navigation:', err);
+                }
+            } else if (category === 'item') {
+                setActiveTab('items');
+                try {
+                    const item = await window.db.getItem(entityId);
+                    if (item) {
+                        setEditingItem(item);
+                        setIsItemEditorOpen(true);
+                    }
+                } catch (err) {
+                    console.error('[WorldWorkbench] Failed to load item for navigation:', err);
+                }
+            } else if (category === 'world') {
+                setActiveTab('worldview');
+                // WorldSettingList manages its own editing state internally
+                // Dispatch a follow-up event for it to handle
+                setTimeout(() => {
+                    window.dispatchEvent(new CustomEvent('navigate-to-world-setting', { detail: { entityId } }));
+                }, 100);
+            }
+        };
+
+        window.addEventListener('navigate-to-world-entity', handleNavigate as unknown as EventListener);
+        return () => window.removeEventListener('navigate-to-world-entity', handleNavigate as unknown as EventListener);
+    }, []);
 
     const handleCreateCharacter = async () => {
         try {
@@ -95,6 +144,8 @@ export default function WorldWorkbench({ novelId, theme }: WorldWorkbenchProps) 
                 profile: '{}'
             });
             setItems(prev => [...prev, newItem]);
+            setEditingItem(newItem);
+            setIsItemEditorOpen(true);
         } catch (e) {
             console.error('Failed to create item:', e);
         }
@@ -104,6 +155,7 @@ export default function WorldWorkbench({ novelId, theme }: WorldWorkbenchProps) 
         try {
             const updated = await window.db.updateItem(id, data);
             setItems(prev => prev.map(i => i.id === id ? { ...i, ...updated } : i));
+            setEditingItem(prev => prev?.id === id ? { ...prev, ...updated } : prev);
         } catch (e) {
             console.error('Failed to update item:', e);
         }
@@ -113,6 +165,10 @@ export default function WorldWorkbench({ novelId, theme }: WorldWorkbenchProps) 
         try {
             await window.db.deleteItem(id);
             setItems(prev => prev.filter(i => i.id !== id));
+            if (editingItem?.id === id) {
+                setIsItemEditorOpen(false);
+                setEditingItem(null);
+            }
         } catch (e) {
             console.error('Failed to delete item:', e);
         }
@@ -121,6 +177,7 @@ export default function WorldWorkbench({ novelId, theme }: WorldWorkbenchProps) 
     const tabs: { id: WorldTab; icon: React.ElementType; label: string; count: number }[] = [
         { id: 'characters', icon: Users, label: t('world.characters', '角色'), count: characters.length },
         { id: 'items', icon: Package, label: t('world.items', '物品'), count: items.length },
+        { id: 'worldview', icon: Globe, label: t('world.worldview', '世界观'), count: 0 },
     ];
 
     return (
@@ -135,8 +192,12 @@ export default function WorldWorkbench({ novelId, theme }: WorldWorkbenchProps) 
                     {t('world.title', '世界观')}
                 </h2>
                 <button
-                    onClick={activeTab === 'characters' ? handleCreateCharacter : handleCreateItem}
-                    className={clsx("p-1 rounded transition-colors", isDark ? "hover:bg-white/10 text-neutral-400 hover:text-white" : "hover:bg-black/5 text-neutral-500 hover:text-black")}
+                    onClick={activeTab === 'characters' ? handleCreateCharacter : activeTab === 'items' ? handleCreateItem : undefined}
+                    className={clsx(
+                        "p-1 rounded transition-colors",
+                        activeTab === 'worldview' ? 'invisible' : '',
+                        isDark ? "hover:bg-white/10 text-neutral-400 hover:text-white" : "hover:bg-black/5 text-neutral-500 hover:text-black"
+                    )}
                     title={activeTab === 'characters' ? t('world.addCharacter', '新建角色') : t('world.addItem', '新建物品')}
                 >
                     <Plus className="w-4 h-4" />
@@ -161,7 +222,10 @@ export default function WorldWorkbench({ novelId, theme }: WorldWorkbenchProps) 
                         {tab.count > 0 && (
                             <span className={clsx(
                                 "text-[10px] px-1.5 py-0.5 rounded-full",
-                                isDark ? "bg-white/10 text-neutral-400" : "bg-black/5 text-neutral-500"
+                                "transition-colors",
+                                isDark
+                                    ? (activeTab === tab.id ? "bg-indigo-500/20 text-indigo-300" : "bg-white/10 text-neutral-400")
+                                    : (activeTab === tab.id ? "bg-indigo-50 text-indigo-600" : "bg-black/5 text-neutral-500")
                             )}>
                                 {tab.count}
                             </span>
@@ -182,13 +246,26 @@ export default function WorldWorkbench({ novelId, theme }: WorldWorkbenchProps) 
                         theme={theme}
                         onEdit={(c: Character) => { setEditingCharacter(c); setIsEditorOpen(true); }}
                         onDelete={handleDeleteCharacter}
+                        onToggleStar={async (c: Character) => {
+                            try {
+                                await window.db.updateCharacter(c.id, { isStarred: !c.isStarred });
+                                setCharacters(prev => prev.map(char => char.id === c.id ? { ...char, isStarred: !c.isStarred } : char));
+                            } catch (e) {
+                                console.error('Failed to toggle star:', e);
+                            }
+                        }}
                     />
-                ) : (
+                ) : activeTab === 'items' ? (
                     <ItemLibrary
                         items={items}
                         theme={theme}
-                        onUpdate={handleUpdateItem}
+                        onEdit={(i: Item) => { setEditingItem(i); setIsItemEditorOpen(true); }}
                         onDelete={handleDeleteItem}
+                    />
+                ) : (
+                    <WorldSettingList
+                        novelId={novelId}
+                        theme={theme}
                     />
                 )}
             </div>
@@ -198,9 +275,21 @@ export default function WorldWorkbench({ novelId, theme }: WorldWorkbenchProps) 
                 <CharacterEditor
                     character={editingCharacter}
                     theme={theme}
+                    novelId={novelId}
                     onClose={() => { setIsEditorOpen(false); setEditingCharacter(null); }}
                     onSave={handleUpdateCharacter}
                     onDelete={handleDeleteCharacter}
+                />
+            )}
+
+            {/* Item Editor Modal */}
+            {isItemEditorOpen && editingItem && (
+                <ItemEditor
+                    item={editingItem}
+                    theme={theme}
+                    onClose={() => { setIsItemEditorOpen(false); setEditingItem(null); }}
+                    onSave={handleUpdateItem}
+                    onDelete={handleDeleteItem}
                 />
             )}
         </div>

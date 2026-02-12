@@ -19,7 +19,12 @@
     "chapters": "章节",
     "plotLines": "情节线",
     "showAll": "显示全部",
-    "hideAll": "隐藏全部"
+    "hideAll": "隐藏全部",
+    "icon": "图标",
+    "selectIcon": "选择图标",
+    "searchIcons": "搜索图标...",
+    "noIcon": "无图标",
+    "noIconsFound": "未找到图标"
   },
   "matrix": {
     "title": "叙事矩阵",
@@ -130,7 +135,17 @@
     "regex": "使用正则表达式",
     "replace": "替换",
     "replaceAll": "全部替换",
-    "find": "查找"
+    "find": "查找",
+    "characters": "角色",
+    "items": "物品",
+    "worldSettings": "世界观",
+    "category": {
+      "chapter": "章节",
+      "idea": "灵感",
+      "character": "角色",
+      "item": "物品",
+      "world": "世界观"
+    }
   },
     "idea": {
         "create": "添加灵感",
@@ -258,6 +273,12 @@
       "skill": "技能",
       "location": "地点"
     },
+    "editItem": "编辑物品",
+    "itemName": "名称",
+    "itemNamePlaceholder": "物品名称",
+    "itemType": "类型",
+    "itemDesc": "描述",
+    "itemDescPlaceholder": "物品的功能、来源、外观描述...",
     "dossier": {
       "characterTitle": "角色档案",
       "itemTitle": "物品详情",
@@ -266,6 +287,52 @@
       "role": "身份角色",
       "traits": "特征标签",
       "verified": "已验证链接"
-    }
+    },
+    "worldview": "世界观",
+    "newSetting": "新设定",
+    "addSetting": "添加设定",
+    "editSetting": "编辑设定",
+    "settingName": "设定名称",
+    "settingNamePlaceholder": "如：魔法体系、地理环境...",
+    "settingCategory": "分类",
+    "settingContent": "内容",
+    "settingContentPlaceholder": "描述你的世界观设定...",
+    "noSettings": "暂无世界观设定",
+    "addSettingHint": "点击添加按钮创建",
+    "confirmDeleteSetting": "确定要删除这条设定吗？",
+    "settingType": {
+      "history": "历史",
+      "geography": "地理",
+      "magic_system": "魔法体系",
+      "faction": "阵营",
+      "technology": "科技",
+      "other": "其他"
+    },
+    "relations": "人际关系",
+    "inventory": "物品清单",
+    "timeline": "生平时间线",
+    "basicInfo": "基本信息",
+    "addRelation": "添加关系",
+    "relationName": "关系名称",
+    "relationNamePlaceholder": "如：父亲、师长、敌人...",
+    "relationDesc": "关系描述",
+    "relationDescPlaceholder": "描述两人之间的关系...",
+    "selectTarget": "选择目标角色",
+    "noRelations": "暂无人际关系",
+    "addRelationHint": "点击上方按钮添加",
+    "confirmDeleteRelation": "确定删除此关系？",
+    "addItemToChar": "添加物品",
+    "searchItem": "搜索物品...",
+    "ownerNote": "持有备注",
+    "ownerNotePlaceholder": "如：已损坏...",
+    "noInventory": "暂无物品",
+    "addInventoryHint": "搜索物品库添加",
+    "confirmRemoveItem": "确定移除此物品？",
+    "noTimeline": "暂无故事性生平记录",
+    "noTimelineHint": "在情节要点中使用 @提及 该角色后自动生成",
+    "chapterLine": "章节线",
+    "storyTimeline": "故事性生平",
+    "noChapterAppearances": "该角色未在任何章节中出现",
+    "noChapterAppearancesHint": "角色名称出现在章节正文中时自动标记"
   }
 }

@@ -56,6 +56,28 @@ contextBridge.exposeInMainWorld('db', {
     deleteItem: (id: string) => ipcRenderer.invoke('db:delete-item', id),
 
     getMentionables: (novelId: string) => ipcRenderer.invoke('db:get-mentionables', novelId),
+
+    // World Settings
+    getWorldSettings: (novelId: string) => ipcRenderer.invoke('db:get-world-settings', novelId),
+    createWorldSetting: (data: { novelId: string; name: string; type?: string }) => ipcRenderer.invoke('db:create-world-setting', data),
+    updateWorldSetting: (id: string, data: any) => ipcRenderer.invoke('db:update-world-setting', id, data),
+    deleteWorldSetting: (id: string) => ipcRenderer.invoke('db:delete-world-setting', id),
+
+    // Relationships
+    getRelationships: (characterId: string) => ipcRenderer.invoke('db:get-relationships', characterId),
+    createRelationship: (data: { sourceId: string; targetId: string; relation: string; description?: string }) => ipcRenderer.invoke('db:create-relationship', data),
+    deleteRelationship: (id: string) => ipcRenderer.invoke('db:delete-relationship', id),
+
+    // Item Ownership
+    getCharacterItems: (characterId: string) => ipcRenderer.invoke('db:get-character-items', characterId),
+    addItemToCharacter: (data: { characterId: string; itemId: string; note?: string }) => ipcRenderer.invoke('db:add-item-to-character', data),
+    removeItemFromCharacter: (id: string) => ipcRenderer.invoke('db:remove-item-from-character', id),
+    updateItemOwnership: (id: string, data: { note?: string }) => ipcRenderer.invoke('db:update-item-ownership', id, data),
+
+    // Data Aggregation
+    getCharacterTimeline: (characterId: string) => ipcRenderer.invoke('db:get-character-timeline', characterId),
+    getRecentChapters: (characterName: string, novelId: string, limit?: number) => ipcRenderer.invoke('db:get-recent-chapters', characterName, novelId, limit),
+    getCharacterChapterAppearances: (characterId: string) => ipcRenderer.invoke('db:get-character-chapter-appearances', characterId),
 })
 
 contextBridge.exposeInMainWorld('electron', {

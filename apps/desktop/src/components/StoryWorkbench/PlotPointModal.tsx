@@ -8,6 +8,7 @@ import { SearchableSelect } from './SearchableSelect';
 import { formatNumber } from '../../utils/format';
 import { BaseModal } from '../ui/BaseModal';
 import { ConfirmModal } from '../ui/ConfirmModal';
+import { IconPicker } from '../ui/IconPicker';
 import { EntityInfoCard } from './EntityInfoCard';
 
 interface PlotPointModalProps {
@@ -70,6 +71,7 @@ export function PlotPointModal({
     }, [isOpen, point, initialData]);
     const [type, setType] = useState('foreshadowing');
     const [status, setStatus] = useState('active');
+    const [icon, setIcon] = useState<string | null>(null);
     const [description, setDescription] = useState('');
     const [selectedPlotLineId, setSelectedPlotLineId] = useState<string>('');
 
@@ -366,6 +368,7 @@ export function PlotPointModal({
 
                 setType(point.type || 'foreshadowing');
                 setStatus(point.status || 'active');
+                setIcon(point.icon || null);
 
                 const anchor = point.anchors?.find(a => a.chapterId);
                 if (anchor) {
@@ -393,7 +396,8 @@ export function PlotPointModal({
                 title: currentTitle,
                 description: description,
                 type,
-                status
+                status,
+                icon: icon || undefined
             }, selectedChapterId);
         } else {
             if (!point) return;
@@ -401,7 +405,8 @@ export function PlotPointModal({
                 title: currentTitle,
                 description: description,
                 type,
-                status
+                status,
+                icon
             };
             await onSave(point.id, data);
 
@@ -423,6 +428,14 @@ export function PlotPointModal({
         }
         toast.success(t('plot.saveSuccess'));
         onClose();
+    };
+
+    const backdropRef = useRef<HTMLDivElement>(null);
+
+    const handleScroll = () => {
+        if (descriptionRef.current && backdropRef.current) {
+            backdropRef.current.scrollTop = descriptionRef.current.scrollTop;
+        }
     };
 
     return (
@@ -452,16 +465,28 @@ export function PlotPointModal({
                     </div>
                 )}
 
-                <div>
-                    <label className="block text-xs font-medium uppercase opacity-50 mb-1">{t('common.title')}</label>
-                    <input
-                        ref={titleRef}
-                        spellCheck={false}
-                        className={clsx(
-                            "w-full p-2 rounded-lg text-sm outline-none border transition-colors focus:border-indigo-500",
-                            isDark ? "bg-black/50 border-white/10" : "bg-gray-50 border-gray-200"
-                        )}
-                    />
+
+
+                <div className="flex gap-4">
+                    <div className="flex-shrink-0">
+                        <label className="block text-xs font-medium uppercase opacity-50 mb-1">{t('common.icon', 'Icon')}</label>
+                        <IconPicker
+                            value={icon}
+                            onChange={setIcon}
+                            theme={theme}
+                        />
+                    </div>
+                    <div className="flex-1">
+                        <label className="block text-xs font-medium uppercase opacity-50 mb-1">{t('common.title')}</label>
+                        <input
+                            ref={titleRef}
+                            spellCheck={false}
+                            className={clsx(
+                                "w-full p-2 rounded-lg text-sm outline-none border transition-colors focus:border-indigo-500",
+                                isDark ? "bg-black/50 border-white/10" : "bg-gray-50 border-gray-200"
+                            )}
+                        />
+                    </div>
                 </div>
 
                 <div>
@@ -523,7 +548,10 @@ export function PlotPointModal({
                     <label className="block text-xs font-medium uppercase opacity-50 mb-1">{t('common.description')}</label>
                     <div className="relative w-full rounded-lg border overflow-hidden transition-colors focus-within:border-indigo-500 min-h-[120px]">
                         {/* 背景高亮层 */}
-                        <div className="absolute inset-0 pointer-events-none overflow-hidden">
+                        <div
+                            ref={backdropRef}
+                            className="absolute inset-0 pointer-events-none overflow-hidden pb-8"
+                        >
                             {renderBackdrop(description)}
                         </div>
 
@@ -536,8 +564,9 @@ export function PlotPointModal({
                             onInput={handleTextareaInput}
                             onKeyDown={handleKeyDown}
                             onClick={handleTextareaClick}
+                            onScroll={handleScroll}
                             className={clsx(
-                                "relative w-full p-2 text-sm outline-none border-none resize-none min-h-[120px] bg-transparent flex-1",
+                                "relative w-full p-2 pb-8 text-sm leading-relaxed outline-none border-none resize-none min-h-[120px] bg-transparent flex-1",
                                 "text-transparent caret-indigo-500", // 让原生文字透明，但保留光标可见
                                 isDark ? "placeholder:text-white/20" : "placeholder:text-gray-400"
                             )}
@@ -586,6 +615,8 @@ export function PlotPointModal({
                 </div>
             </div>
 
+
+
             <div className={clsx("mt-6 flex items-center pt-4 border-t", isDark ? "border-white/5" : "border-gray-100", (!isCreateMode && point) ? "justify-between" : "justify-end")}>
                 {!isCreateMode && point && (
                     <button
@@ -633,6 +664,6 @@ export function PlotPointModal({
                 message={t('plot.confirmDeletePoint')}
                 theme={isDark ? 'dark' : 'light'}
             />
-        </BaseModal>
+        </BaseModal >
     );
 }

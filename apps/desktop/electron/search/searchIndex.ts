@@ -272,19 +272,31 @@ export async function search(
                 });
             }
 
-            // 3. Check Content Matches
+            // 3. Check Content Matches — deduplicated by snippet window
+            // Find all match positions, then merge nearby ones so
+            // the same passage only produces one result.
             const lowerContent = docContent.toLowerCase();
             const indices: number[] = [];
             let pos = 0;
 
-            while (pos < lowerContent.length && indices.length < 50) {
+            while (pos < lowerContent.length && indices.length < 200) {
                 const idx = lowerContent.indexOf(lowerKeyword, pos);
                 if (idx === -1) break;
                 indices.push(idx);
                 pos = idx + lowerKeyword.length;
             }
 
+            // Merge indices that fall within the same snippet window (60 chars)
+            const SNIPPET_WINDOW = 60;
+            const mergedIndices: number[] = [];
             for (const index of indices) {
+                if (mergedIndices.length === 0 || index - mergedIndices[mergedIndices.length - 1] > SNIPPET_WINDOW) {
+                    mergedIndices.push(index);
+                }
+                // else: skip — this match is close to a previous one
+            }
+
+            for (const index of mergedIndices) {
                 allResults.push({
                     entityType: r.entity_type as 'chapter' | 'idea',
                     entityId: r.entity_id,

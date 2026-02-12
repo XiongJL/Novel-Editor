@@ -31,6 +31,7 @@ export interface PlotPoint {
     description?: string | null;
     type: string; // 'foreshadowing' | 'mystery' | 'promise' | 'event'
     status: string; // 'active' | 'resolved'
+    icon?: string | null;
     order: number;
     anchors?: PlotPointAnchor[];
     createdAt: string | Date;
@@ -102,6 +103,7 @@ export interface Character {
     description?: string | null;
     profile: string; // JSON: 自定义属性
     sortOrder: number;
+    isStarred?: boolean;
     items?: ItemOwnershipWithItem[];
     createdAt: string | Date;
     updatedAt: string | Date;
@@ -137,3 +139,45 @@ export interface MentionableItem {
     role?: string | null;
 }
 
+export interface WorldSetting {
+    id: string;
+    novelId: string;
+    name: string;
+    content: string;
+    type: string; // 'history' | 'geography' | 'magic_system' | 'faction' | 'technology' | 'other'
+    icon?: string | null;
+    sortOrder: number;
+    createdAt: string | Date;
+    updatedAt: string | Date;
+}
+
+export interface Relationship {
+    id: string;
+    sourceId: string;
+    targetId: string;
+    relation: string;
+    description?: string | null;
+    source?: Character;
+    target?: Character;
+    createdAt: string | Date;
+    updatedAt: string | Date;
+}
+
+export interface ItemOwnership {
+    id: string;
+    characterId: string;
+    itemId: string;
+    note?: string | null;
+    character?: Character;
+    item?: Item;
+    createdAt: string | Date;
+}
+
+export interface CharacterTimelineEntry {
+    chapterId: string;
+    chapterTitle: string;
+    volumeTitle: string;
+    order: number;
+    volumeOrder: number;
+    snippet: string;
+}

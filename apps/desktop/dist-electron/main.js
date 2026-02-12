@@ -201,14 +201,21 @@ async function search(novelId, keyword, limit = 20, offset = 0) {
       const lowerContent = docContent.toLowerCase();
       const indices = [];
       let pos = 0;
-      while (pos < lowerContent.length && indices.length < 50) {
+      while (pos < lowerContent.length && indices.length < 200) {
         const idx = lowerContent.indexOf(lowerKeyword, pos);
         if (idx === -1)
           break;
         indices.push(idx);
         pos = idx + lowerKeyword.length;
       }
+      const SNIPPET_WINDOW = 60;
+      const mergedIndices = [];
       for (const index of indices) {
+        if (mergedIndices.length === 0 || index - mergedIndices[mergedIndices.length - 1] > SNIPPET_WINDOW) {
+          mergedIndices.push(index);
+        }
+      }
+      for (const index of mergedIndices) {
         allResults.push({
           entityType: r.entity_type,
           entityId: r.entity_id,
@@ -3261,7 +3268,6 @@ function createWindow() {
   });
   if (VITE_DEV_SERVER_URL) {
     win.loadURL(VITE_DEV_SERVER_URL);
-    win.webContents.openDevTools();
   } else {
     win.loadFile(path$1.join(RENDERER_DIST, "index.html"));
   }
@@ -3872,7 +3878,10 @@ ipcMain.handle("db:get-characters", async (_, novelId) => {
           include: { item: true }
         }
       },
-      orderBy: { sortOrder: "asc" }
+      orderBy: [
+        { isStarred: "desc" },
+        { sortOrder: "asc" }
+      ]
     });
   } catch (e) {
     console.error("[Main] db:get-characters failed:", e);
@@ -3983,8 +3992,11 @@ ipcMain.handle("db:get-mentionables", async (_, novelId) => {
     const [characters, items] = await Promise.all([
       db.character.findMany({
         where: { novelId },
-        select: { id: true, name: true, avatar: true, role: true },
-        orderBy: { name: "asc" }
+        select: { id: true, name: true, avatar: true, role: true, isStarred: true },
+        orderBy: [
+          { isStarred: "desc" },
+          { name: "asc" }
+        ]
       }),
       db.item.findMany({
         where: { novelId },
@@ -3998,6 +4010,263 @@ ipcMain.handle("db:get-mentionables", async (_, novelId) => {
     ];
   } catch (e) {
     console.error("[Main] db:get-mentionables failed:", e);
+    throw e;
+  }
+});
+ipcMain.handle("db:get-world-settings", async (_, novelId) => {
+  try {
+    return await db.worldSetting.findMany({
+      where: { novelId },
+      orderBy: { sortOrder: "asc" }
+    });
+  } catch (e) {
+    console.error("[Main] db:get-world-settings failed:", e);
+    throw e;
+  }
+});
+ipcMain.handle("db:create-world-setting", async (_, data) => {
+  try {
+    const last = await db.worldSetting.findFirst({
+      where: { novelId: data.novelId },
+      orderBy: { sortOrder: "desc" }
+    });
+    return await db.worldSetting.create({
+      data: {
+        novelId: data.novelId,
+        name: data.name,
+        type: data.type || "other",
+        sortOrder: ((last == null ? void 0 : last.sortOrder) || 0) + 1
+      }
+    });
+  } catch (e) {
+    console.error("[Main] db:create-world-setting failed:", e);
+    throw e;
+  }
+});
+ipcMain.handle("db:update-world-setting", async (_, id, data) => {
+  try {
+    return await db.worldSetting.update({
+      where: { id },
+      data
+    });
+  } catch (e) {
+    console.error("[Main] db:update-world-setting failed:", e);
+    throw e;
+  }
+});
+ipcMain.handle("db:delete-world-setting", async (_, id) => {
+  try {
+    return await db.worldSetting.delete({ where: { id } });
+  } catch (e) {
+    console.error("[Main] db:delete-world-setting failed:", e);
+    throw e;
+  }
+});
+ipcMain.handle("db:get-relationships", async (_, characterId) => {
+  try {
+    const [asSource, asTarget] = await Promise.all([
+      db.relationship.findMany({
+        where: { sourceId: characterId },
+        include: { target: { select: { id: true, name: true, avatar: true, role: true } } }
+      }),
+      db.relationship.findMany({
+        where: { targetId: characterId },
+        include: { source: { select: { id: true, name: true, avatar: true, role: true } } }
+      })
+    ]);
+    return [...asSource, ...asTarget];
+  } catch (e) {
+    console.error("[Main] db:get-relationships failed:", e);
+    throw e;
+  }
+});
+ipcMain.handle("db:create-relationship", async (_, data) => {
+  try {
+    return await db.relationship.create({
+      data,
+      include: {
+        source: { select: { id: true, name: true, avatar: true, role: true } },
+        target: { select: { id: true, name: true, avatar: true, role: true } }
+      }
+    });
+  } catch (e) {
+    console.error("[Main] db:create-relationship failed:", e);
+    throw e;
+  }
+});
+ipcMain.handle("db:delete-relationship", async (_, id) => {
+  try {
+    return await db.relationship.delete({ where: { id } });
+  } catch (e) {
+    console.error("[Main] db:delete-relationship failed:", e);
+    throw e;
+  }
+});
+ipcMain.handle("db:get-character-items", async (_, characterId) => {
+  try {
+    return await db.itemOwnership.findMany({
+      where: { characterId },
+      include: { item: true }
+    });
+  } catch (e) {
+    console.error("[Main] db:get-character-items failed:", e);
+    throw e;
+  }
+});
+ipcMain.handle("db:add-item-to-character", async (_, data) => {
+  try {
+    return await db.itemOwnership.create({
+      data,
+      include: { item: true }
+    });
+  } catch (e) {
+    console.error("[Main] db:add-item-to-character failed:", e);
+    throw e;
+  }
+});
+ipcMain.handle("db:remove-item-from-character", async (_, id) => {
+  try {
+    return await db.itemOwnership.delete({ where: { id } });
+  } catch (e) {
+    console.error("[Main] db:remove-item-from-character failed:", e);
+    throw e;
+  }
+});
+ipcMain.handle("db:update-item-ownership", async (_, id, data) => {
+  try {
+    return await db.itemOwnership.update({
+      where: { id },
+      data,
+      include: { item: true }
+    });
+  } catch (e) {
+    console.error("[Main] db:update-item-ownership failed:", e);
+    throw e;
+  }
+});
+ipcMain.handle("db:get-character-timeline", async (_, characterId) => {
+  try {
+    const character = await db.character.findUnique({ where: { id: characterId }, select: { name: true, novelId: true } });
+    if (!character)
+      return [];
+    const anchors = await db.plotPointAnchor.findMany({
+      where: {
+        plotPoint: {
+          novelId: character.novelId,
+          description: { contains: `@${character.name}` }
+        }
+      },
+      include: {
+        plotPoint: { select: { title: true, description: true, plotLine: { select: { name: true } } } },
+        chapter: { select: { id: true, title: true, order: true, volume: { select: { title: true, order: true } } } }
+      },
+      orderBy: [{ chapter: { volume: { order: "asc" } } }, { chapter: { order: "asc" } }]
+    });
+    const seen = /* @__PURE__ */ new Set();
+    return anchors.filter((a) => a.chapter && !seen.has(a.chapter.id) && seen.add(a.chapter.id)).map((a) => {
+      var _a;
+      return {
+        chapterId: a.chapter.id,
+        chapterTitle: a.chapter.title,
+        volumeTitle: a.chapter.volume.title,
+        order: a.chapter.order,
+        volumeOrder: a.chapter.volume.order,
+        snippet: ((_a = a.plotPoint.description) == null ? void 0 : _a.substring(0, 100)) || a.plotPoint.title
+      };
+    });
+  } catch (e) {
+    console.error("[Main] db:get-character-timeline failed:", e);
+    throw e;
+  }
+});
+function extractTextFromLexical(jsonString) {
+  if (!jsonString)
+    return "";
+  try {
+    const content = JSON.parse(jsonString);
+    if (!content.root)
+      return jsonString;
+    const texts = [];
+    const traverse = (node) => {
+      if (node.text) {
+        texts.push(node.text);
+      }
+      if (node.children && Array.isArray(node.children)) {
+        node.children.forEach(traverse);
+      }
+      if (node.type === "paragraph" || node.type === "heading" || node.type === "quote") {
+        texts.push(" ");
+      }
+    };
+    traverse(content.root);
+    return texts.join("").replace(/\s+/g, " ").trim();
+  } catch (e) {
+    return jsonString;
+  }
+}
+ipcMain.handle("db:get-character-chapter-appearances", async (_, characterId) => {
+  try {
+    const character = await db.character.findUnique({ where: { id: characterId }, select: { name: true, novelId: true } });
+    if (!character)
+      return [];
+    const chapters = await db.chapter.findMany({
+      where: {
+        volume: { novelId: character.novelId },
+        // Use LIKE for rough match on JSON string (imperfect but fast first filter)
+        content: { contains: character.name }
+      },
+      select: {
+        id: true,
+        title: true,
+        order: true,
+        content: true,
+        volume: { select: { title: true, order: true } }
+      },
+      orderBy: [{ volume: { order: "asc" } }, { order: "asc" }]
+    });
+    return chapters.map((ch) => {
+      const plainText = extractTextFromLexical(ch.content || "");
+      let snippet = "";
+      const idx = plainText.indexOf(character.name);
+      if (idx >= 0) {
+        const start = Math.max(0, idx - 30);
+        const end = Math.min(plainText.length, idx + character.name.length + 50);
+        snippet = (start > 0 ? "..." : "") + plainText.substring(start, end) + (end < plainText.length ? "..." : "");
+      } else {
+      }
+      return {
+        chapterId: ch.id,
+        chapterTitle: ch.title,
+        volumeTitle: ch.volume.title,
+        order: ch.order,
+        volumeOrder: ch.volume.order,
+        snippet
+      };
+    }).filter((item) => item.snippet !== "");
+  } catch (e) {
+    console.error("[Main] db:get-character-chapter-appearances failed:", e);
+    throw e;
+  }
+});
+ipcMain.handle("db:get-recent-chapters", async (_, characterName, novelId, limit = 5) => {
+  try {
+    return await db.chapter.findMany({
+      where: {
+        volume: { novelId },
+        content: { contains: `@${characterName}` }
+      },
+      select: {
+        id: true,
+        title: true,
+        order: true,
+        wordCount: true,
+        updatedAt: true
+      },
+      orderBy: { updatedAt: "desc" },
+      take: limit
+    });
+  } catch (e) {
+    console.error("[Main] db:get-recent-chapters failed:", e);
     throw e;
   }
 });

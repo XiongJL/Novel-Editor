@@ -1265,6 +1265,16 @@ export default function Editor({ novelId, onBack }: EditorProps) {
                                     const idea = ideas.find(i => i.id === ideaId);
                                     if (idea) handleJumpToIdea(idea);
                                 }}
+                                onJumpToEntity={(category, entityId) => {
+                                    // Switch to WorldWorkbench tab and dispatch event
+                                    setActiveTab('characters');
+                                    setIsSidePanelOpen(true);
+                                    setTimeout(() => {
+                                        window.dispatchEvent(new CustomEvent('navigate-to-world-entity', {
+                                            detail: { category, entityId }
+                                        }));
+                                    }, 100);
+                                }}
                                 onSearchChange={(keyword) => {
                                     if (!keyword.trim()) {
                                         clearSearchHighlights();

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useCallback } from 'react';
 import { BaseModal } from './BaseModal';
 import { useTranslation } from 'react-i18next';
 import { clsx } from 'clsx';
@@ -29,6 +29,22 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({
 }) => {
     const { t } = useTranslation();
     const isDark = theme === 'dark';
+
+    // Enter key to confirm
+    const handleKeyDown = useCallback((e: KeyboardEvent) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            onConfirm();
+            onClose();
+        }
+    }, [onConfirm, onClose]);
+
+    useEffect(() => {
+        if (isOpen) {
+            window.addEventListener('keydown', handleKeyDown);
+            return () => window.removeEventListener('keydown', handleKeyDown);
+        }
+    }, [isOpen, handleKeyDown]);
 
     return (
         <BaseModal

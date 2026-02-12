@@ -77,7 +77,7 @@ function createWindow() {
     if (VITE_DEV_SERVER_URL) {
         win.loadURL(VITE_DEV_SERVER_URL)
         // Open DevTools in development mode
-        win.webContents.openDevTools()
+        // win.webContents.openDevTools()
     } else {
         // win.loadFile('dist/index.html')
         win.loadFile(path.join(RENDERER_DIST, 'index.html'))
@@ -793,7 +793,10 @@ ipcMain.handle('db:get-characters', async (_, novelId: string) => {
                     include: { item: true }
                 }
             },
-            orderBy: { sortOrder: 'asc' }
+            orderBy: [
+                { isStarred: 'desc' },
+                { sortOrder: 'asc' }
+            ]
         });
     } catch (e) {
         console.error('[Main] db:get-characters failed:', e);
@@ -916,8 +919,11 @@ ipcMain.handle('db:get-mentionables', async (_, novelId: string) => {
         const [characters, items] = await Promise.all([
             (db as any).character.findMany({
                 where: { novelId },
-                select: { id: true, name: true, avatar: true, role: true },
-                orderBy: { name: 'asc' }
+                select: { id: true, name: true, avatar: true, role: true, isStarred: true },
+                orderBy: [
+                    { isStarred: 'desc' },
+                    { name: 'asc' }
+                ]
             }),
             (db as any).item.findMany({
                 where: { novelId },
@@ -935,6 +941,295 @@ ipcMain.handle('db:get-mentionables', async (_, novelId: string) => {
         throw e;
     }
 });
+
+// --- World Settings IPC ---
+ipcMain.handle('db:get-world-settings', async (_, novelId: string) => {
+    try {
+        return await (db as any).worldSetting.findMany({
+            where: { novelId },
+            orderBy: { sortOrder: 'asc' }
+        });
+    } catch (e) {
+        console.error('[Main] db:get-world-settings failed:', e);
+        throw e;
+    }
+});
+
+ipcMain.handle('db:create-world-setting', async (_, data: { novelId: string; name: string; type?: string }) => {
+    try {
+        const last = await (db as any).worldSetting.findFirst({
+            where: { novelId: data.novelId },
+            orderBy: { sortOrder: 'desc' }
+        });
+        return await (db as any).worldSetting.create({
+            data: {
+                novelId: data.novelId,
+                name: data.name,
+                type: data.type || 'other',
+                sortOrder: (last?.sortOrder || 0) + 1
+            }
+        });
+    } catch (e) {
+        console.error('[Main] db:create-world-setting failed:', e);
+        throw e;
+    }
+});
+
+ipcMain.handle('db:update-world-setting', async (_, id: string, data: any) => {
+    try {
+        return await (db as any).worldSetting.update({
+            where: { id },
+            data
+        });
+    } catch (e) {
+        console.error('[Main] db:update-world-setting failed:', e);
+        throw e;
+    }
+});
+
+ipcMain.handle('db:delete-world-setting', async (_, id: string) => {
+    try {
+        return await (db as any).worldSetting.delete({ where: { id } });
+    } catch (e) {
+        console.error('[Main] db:delete-world-setting failed:', e);
+        throw e;
+    }
+});
+
+// --- Relationship IPC ---
+ipcMain.handle('db:get-relationships', async (_, characterId: string) => {
+    try {
+        const [asSource, asTarget] = await Promise.all([
+            (db as any).relationship.findMany({
+                where: { sourceId: characterId },
+                include: { target: { select: { id: true, name: true, avatar: true, role: true } } }
+            }),
+            (db as any).relationship.findMany({
+                where: { targetId: characterId },
+                include: { source: { select: { id: true, name: true, avatar: true, role: true } } }
+            })
+        ]);
+        return [...asSource, ...asTarget];
+    } catch (e) {
+        console.error('[Main] db:get-relationships failed:', e);
+        throw e;
+    }
+});
+
+ipcMain.handle('db:create-relationship', async (_, data: { sourceId: string; targetId: string; relation: string; description?: string }) => {
+    try {
+        return await (db as any).relationship.create({
+            data,
+            include: {
+                source: { select: { id: true, name: true, avatar: true, role: true } },
+                target: { select: { id: true, name: true, avatar: true, role: true } }
+            }
+        });
+    } catch (e) {
+        console.error('[Main] db:create-relationship failed:', e);
+        throw e;
+    }
+});
+
+ipcMain.handle('db:delete-relationship', async (_, id: string) => {
+    try {
+        return await (db as any).relationship.delete({ where: { id } });
+    } catch (e) {
+        console.error('[Main] db:delete-relationship failed:', e);
+        throw e;
+    }
+});
+
+// --- Item Ownership IPC ---
+ipcMain.handle('db:get-character-items', async (_, characterId: string) => {
+    try {
+        return await (db as any).itemOwnership.findMany({
+            where: { characterId },
+            include: { item: true }
+        });
+    } catch (e) {
+        console.error('[Main] db:get-character-items failed:', e);
+        throw e;
+    }
+});
+
+ipcMain.handle('db:add-item-to-character', async (_, data: { characterId: string; itemId: string; note?: string }) => {
+    try {
+        return await (db as any).itemOwnership.create({
+            data,
+            include: { item: true }
+        });
+    } catch (e) {
+        console.error('[Main] db:add-item-to-character failed:', e);
+        throw e;
+    }
+});
+
+ipcMain.handle('db:remove-item-from-character', async (_, id: string) => {
+    try {
+        return await (db as any).itemOwnership.delete({ where: { id } });
+    } catch (e) {
+        console.error('[Main] db:remove-item-from-character failed:', e);
+        throw e;
+    }
+});
+
+ipcMain.handle('db:update-item-ownership', async (_, id: string, data: { note?: string }) => {
+    try {
+        return await (db as any).itemOwnership.update({
+            where: { id },
+            data,
+            include: { item: true }
+        });
+    } catch (e) {
+        console.error('[Main] db:update-item-ownership failed:', e);
+        throw e;
+    }
+});
+
+// --- Data Aggregation IPC ---
+
+// Character Timeline (Story Mentions from PlotPoints via Anchors)
+ipcMain.handle('db:get-character-timeline', async (_, characterId: string) => {
+    try {
+        const character = await (db as any).character.findUnique({ where: { id: characterId }, select: { name: true, novelId: true } });
+        if (!character) return [];
+
+        // PlotPoint → PlotPointAnchor → Chapter
+        const anchors = await (db as any).plotPointAnchor.findMany({
+            where: {
+                plotPoint: {
+                    novelId: character.novelId,
+                    description: { contains: `@${character.name}` }
+                }
+            },
+            include: {
+                plotPoint: { select: { title: true, description: true, plotLine: { select: { name: true } } } },
+                chapter: { select: { id: true, title: true, order: true, volume: { select: { title: true, order: true } } } }
+            },
+            orderBy: [{ chapter: { volume: { order: 'asc' } } }, { chapter: { order: 'asc' } }]
+        });
+
+        // Deduplicate by chapterId
+        const seen = new Set<string>();
+        return anchors
+            .filter((a: any) => a.chapter && !seen.has(a.chapter.id) && seen.add(a.chapter.id))
+            .map((a: any) => ({
+                chapterId: a.chapter.id,
+                chapterTitle: a.chapter.title,
+                volumeTitle: a.chapter.volume.title,
+                order: a.chapter.order,
+                volumeOrder: a.chapter.volume.order,
+                snippet: a.plotPoint.description?.substring(0, 100) || a.plotPoint.title
+            }));
+    } catch (e) {
+        console.error('[Main] db:get-character-timeline failed:', e);
+        throw e;
+    }
+});
+
+// Helper to extract plain text from Lexical JSON
+function extractTextFromLexical(jsonString: string): string {
+    if (!jsonString) return '';
+    try {
+        const content = JSON.parse(jsonString);
+        if (!content.root) return jsonString; // Fallback if not Lexical JSON
+
+        const texts: string[] = [];
+        const traverse = (node: any) => {
+            if (node.text) {
+                texts.push(node.text);
+            }
+            if (node.children && Array.isArray(node.children)) {
+                node.children.forEach(traverse);
+            }
+            // Add space for block elements to prevent words merging
+            if (node.type === 'paragraph' || node.type === 'heading' || node.type === 'quote') {
+                texts.push(' ');
+            }
+        };
+        traverse(content.root);
+        return texts.join('').replace(/\s+/g, ' ').trim();
+    } catch (e) {
+        return jsonString; // Return raw if parsing fails
+    }
+}
+
+// Character Chapter Appearances (Name search in chapter content)
+ipcMain.handle('db:get-character-chapter-appearances', async (_, characterId: string) => {
+    try {
+        const character = await (db as any).character.findUnique({ where: { id: characterId }, select: { name: true, novelId: true } });
+        if (!character) return [];
+
+        const chapters = await (db as any).chapter.findMany({
+            where: {
+                volume: { novelId: character.novelId },
+                // Use LIKE for rough match on JSON string (imperfect but fast first filter)
+                content: { contains: character.name }
+            },
+            select: {
+                id: true, title: true, order: true, content: true,
+                volume: { select: { title: true, order: true } }
+            },
+            orderBy: [{ volume: { order: 'asc' } }, { order: 'asc' }]
+        });
+
+        return chapters.map((ch: any) => {
+            const plainText = extractTextFromLexical(ch.content || '');
+            let snippet = '';
+
+            // Search in plain text
+            const idx = plainText.indexOf(character.name);
+            if (idx >= 0) {
+                const start = Math.max(0, idx - 30);
+                const end = Math.min(plainText.length, idx + character.name.length + 50);
+                snippet = (start > 0 ? '...' : '') + plainText.substring(start, end) + (end < plainText.length ? '...' : '');
+            } else {
+                // Fallback: mostly shouldn't reach here if database filter worked and text extraction is correct
+                // But JSON structure might contain name in keys or other non-text parts
+                // We only want actual text occurrences. If not found in plain text, skip or return empty snippet.
+                // Let's try to return a generic snippet from start if specific name not found in text (e.g. name was in formatting)
+                // snippet = plainText.substring(0, 80) + '...';
+                // Actually, better to filter this out if not found in text? 
+                // The requirement is "if appearance". If name is only in attributes not text, it's not appearance.
+                // We will return empty snippet or maybe filter these entries out in frontend? 
+                // Backend filter is already applied. Let's return snippet if found, else empty.
+            }
+
+            return {
+                chapterId: ch.id,
+                chapterTitle: ch.title,
+                volumeTitle: ch.volume.title,
+                order: ch.order,
+                volumeOrder: ch.volume.order,
+                snippet
+            };
+        }).filter((item: any) => item.snippet !== ''); // Filter out items where name wasn't found in plain text
+    } catch (e) {
+        console.error('[Main] db:get-character-chapter-appearances failed:', e);
+        throw e;
+    }
+});
+
+ipcMain.handle('db:get-recent-chapters', async (_, characterName: string, novelId: string, limit: number = 5) => {
+    try {
+        return await (db as any).chapter.findMany({
+            where: {
+                volume: { novelId },
+                content: { contains: `@${characterName}` }
+            },
+            select: {
+                id: true, title: true, order: true, wordCount: true, updatedAt: true
+            },
+            orderBy: { updatedAt: 'desc' },
+            take: limit
+        });
+    } catch (e) {
+        console.error('[Main] db:get-recent-chapters failed:', e);
+        throw e;
+    }
+});
+
 
 // --- App Lifecycle ---
 

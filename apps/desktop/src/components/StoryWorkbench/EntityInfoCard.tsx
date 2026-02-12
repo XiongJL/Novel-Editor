@@ -82,31 +82,40 @@ export const EntityInfoCard: React.FC<EntityInfoCardProps> = ({
                     </div>
                 )}
 
-                {/* Character Specifics */}
-                {type === 'character' && (
-                    <div className="grid grid-cols-2 gap-3">
-                        {entity.role && (
-                            <div className={clsx("p-2 rounded-lg border", isDark ? "bg-white/5 border-white/5" : "bg-gray-50 border-gray-100")}>
-                                <div className="text-[9px] opacity-40 font-bold uppercase mb-1">
-                                    {t('world.dossier.role', 'Role')}
+                {/* Custom Attributes (Profile) */}
+                {(() => {
+                    let profile = {};
+                    try {
+                        profile = entity.profile ? JSON.parse(entity.profile) : {};
+                    } catch (e) { console.error('Failed to parse profile', e); }
+
+                    const entries = Object.entries(profile);
+                    if (entries.length === 0 && !entity.role) return null;
+
+                    return (
+                        <div className="grid grid-cols-2 gap-3">
+                            {/* Role (for character) */}
+                            {type === 'character' && entity.role && (
+                                <div className={clsx("p-2 rounded-lg border", isDark ? "bg-white/5 border-white/5" : "bg-gray-50 border-gray-100")}>
+                                    <div className="text-[9px] opacity-40 font-bold uppercase mb-1">
+                                        {t('world.dossier.role', 'Role')}
+                                    </div>
+                                    <div className="text-[11px] font-medium truncate" title={entity.role}>{entity.role}</div>
                                 </div>
-                                <div className="text-[11px] font-medium truncate">{entity.role}</div>
-                            </div>
-                        )}
-                        {entity.tags && entity.tags.length > 0 && (
-                            <div className={clsx("p-2 rounded-lg border", isDark ? "bg-white/5 border-white/5" : "bg-gray-50 border-gray-100")}>
-                                <div className="text-[9px] opacity-40 font-bold uppercase mb-1">
-                                    {t('world.dossier.traits', 'Traits')}
+                            )}
+
+                            {/* Profile Entries */}
+                            {entries.map(([key, value]) => (
+                                <div key={key} className={clsx("p-2 rounded-lg border", isDark ? "bg-white/5 border-white/5" : "bg-gray-50 border-gray-100")}>
+                                    <div className="text-[9px] opacity-40 font-bold uppercase mb-1 truncate" title={key}>
+                                        {key}
+                                    </div>
+                                    <div className="text-[11px] font-medium truncate" title={String(value)}>{String(value)}</div>
                                 </div>
-                                <div className="flex flex-wrap gap-1">
-                                    {(Array.isArray(entity.tags) ? entity.tags : JSON.parse(entity.tags || '[]')).slice(0, 2).map((tag: string, i: number) => (
-                                        <span key={i} className="text-[9px] px-1 bg-black/20 rounded truncate">{tag}</span>
-                                    ))}
-                                </div>
-                            </div>
-                        )}
-                    </div>
-                )}
+                            ))}
+                        </div>
+                    );
+                })()}
 
                 {/* Footer/Stats */}
                 <div className="pt-2 flex items-center justify-between opacity-30 text-[9px] border-t border-white/5 mt-4">

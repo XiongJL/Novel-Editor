@@ -16,7 +16,12 @@
     "description": "Description",
     "confirmDelete": "Are you sure you want to delete this?",
     "showAll": "Show All",
-    "hideAll": "Hide All"
+    "hideAll": "Hide All",
+    "icon": "Icon",
+    "selectIcon": "Select Icon",
+    "searchIcons": "Search icons...",
+    "noIcon": "No Icon",
+    "noIconsFound": "No icons found"
   },
   "matrix": {
     "title": "Narrative Matrix",
@@ -120,7 +125,17 @@
     "regex": "Use Regular Expression",
     "replace": "Replace",
     "replaceAll": "Replace All",
-    "find": "Find"
+    "find": "Find",
+    "characters": "Characters",
+    "items": "Items",
+    "worldSettings": "World Settings",
+    "category": {
+      "chapter": "Chapters",
+      "idea": "Ideas",
+      "character": "Characters",
+      "item": "Items",
+      "world": "World"
+    }
   },
   "idea": {
     "create": "Add Idea",

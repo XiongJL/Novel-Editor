@@ -56,6 +56,28 @@ interface DBAPI {
     deleteItem: (id: string) => Promise<void>
 
     getMentionables: (novelId: string) => Promise<MentionableItem[]>
+
+    // World Settings
+    getWorldSettings: (novelId: string) => Promise<WorldSetting[]>
+    createWorldSetting: (data: { novelId: string; name: string; type?: string }) => Promise<WorldSetting>
+    updateWorldSetting: (id: string, data: Partial<WorldSetting>) => Promise<WorldSetting>
+    deleteWorldSetting: (id: string) => Promise<void>
+
+    // Relationships
+    getRelationships: (characterId: string) => Promise<Relationship[]>
+    createRelationship: (data: { sourceId: string; targetId: string; relation: string; description?: string }) => Promise<Relationship>
+    deleteRelationship: (id: string) => Promise<void>
+
+    // Item Ownership
+    getCharacterItems: (characterId: string) => Promise<ItemOwnership[]>
+    addItemToCharacter: (data: { characterId: string; itemId: string; note?: string }) => Promise<ItemOwnership>
+    removeItemFromCharacter: (id: string) => Promise<void>
+    updateItemOwnership: (id: string, data: { note?: string }) => Promise<ItemOwnership>
+
+    // Data Aggregation
+    getCharacterTimeline: (characterId: string) => Promise<CharacterTimelineEntry[]>
+    getCharacterChapterAppearances: (characterId: string) => Promise<CharacterTimelineEntry[]>
+    getRecentChapters: (characterName: string, novelId: string, limit?: number) => Promise<ChapterMetadata[]>
 }
 
 interface PlotLine {
@@ -175,6 +197,7 @@ interface Character {
     description?: string | null
     profile: string
     sortOrder: number
+    isStarred?: boolean
     items?: ItemOwnershipWithItem[]
     createdAt: string | Date
     updatedAt: string | Date
@@ -208,6 +231,49 @@ interface MentionableItem {
     avatar?: string | null
     icon?: string | null
     role?: string | null
+    isStarred?: boolean
+}
+
+interface WorldSetting {
+    id: string
+    novelId: string
+    name: string
+    content: string
+    type: string
+    sortOrder: number
+    createdAt: string | Date
+    updatedAt: string | Date
+}
+
+interface Relationship {
+    id: string
+    sourceId: string
+    targetId: string
+    relation: string
+    description?: string | null
+    source?: Character
+    target?: Character
+    createdAt: string | Date
+    updatedAt: string | Date
+}
+
+interface ItemOwnership {
+    id: string
+    characterId: string
+    itemId: string
+    note?: string | null
+    character?: Character
+    item?: Item
+    createdAt: string | Date
+}
+
+interface CharacterTimelineEntry {
+    chapterId: string
+    chapterTitle: string
+    volumeTitle: string
+    order: number
+    volumeOrder: number
+    snippet: string
 }
 
 interface SyncAPI {

@@ -44,7 +44,25 @@ electron.contextBridge.exposeInMainWorld("db", {
   createItem: (data) => electron.ipcRenderer.invoke("db:create-item", data),
   updateItem: (id, data) => electron.ipcRenderer.invoke("db:update-item", { id, data }),
   deleteItem: (id) => electron.ipcRenderer.invoke("db:delete-item", id),
-  getMentionables: (novelId) => electron.ipcRenderer.invoke("db:get-mentionables", novelId)
+  getMentionables: (novelId) => electron.ipcRenderer.invoke("db:get-mentionables", novelId),
+  // World Settings
+  getWorldSettings: (novelId) => electron.ipcRenderer.invoke("db:get-world-settings", novelId),
+  createWorldSetting: (data) => electron.ipcRenderer.invoke("db:create-world-setting", data),
+  updateWorldSetting: (id, data) => electron.ipcRenderer.invoke("db:update-world-setting", id, data),
+  deleteWorldSetting: (id) => electron.ipcRenderer.invoke("db:delete-world-setting", id),
+  // Relationships
+  getRelationships: (characterId) => electron.ipcRenderer.invoke("db:get-relationships", characterId),
+  createRelationship: (data) => electron.ipcRenderer.invoke("db:create-relationship", data),
+  deleteRelationship: (id) => electron.ipcRenderer.invoke("db:delete-relationship", id),
+  // Item Ownership
+  getCharacterItems: (characterId) => electron.ipcRenderer.invoke("db:get-character-items", characterId),
+  addItemToCharacter: (data) => electron.ipcRenderer.invoke("db:add-item-to-character", data),
+  removeItemFromCharacter: (id) => electron.ipcRenderer.invoke("db:remove-item-from-character", id),
+  updateItemOwnership: (id, data) => electron.ipcRenderer.invoke("db:update-item-ownership", id, data),
+  // Data Aggregation
+  getCharacterTimeline: (characterId) => electron.ipcRenderer.invoke("db:get-character-timeline", characterId),
+  getRecentChapters: (characterName, novelId, limit) => electron.ipcRenderer.invoke("db:get-recent-chapters", characterName, novelId, limit),
+  getCharacterChapterAppearances: (characterId) => electron.ipcRenderer.invoke("db:get-character-chapter-appearances", characterId)
 });
 electron.contextBridge.exposeInMainWorld("electron", {
   toggleFullScreen: () => electron.ipcRenderer.invoke("app:toggle-fullscreen"),

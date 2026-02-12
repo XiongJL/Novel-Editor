@@ -17,6 +17,7 @@
     "@dnd-kit/modifiers": "^9.0.0",
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
+    "@headlessui/react": "^2.2.9",
     "@lexical/history": "^0.40.0",
     "@lexical/mark": "^0.40.0",
     "@lexical/react": "^0.40.0",

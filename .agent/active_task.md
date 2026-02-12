@@ -68,8 +68,7 @@
                 - [x] 实现 `handleJumpToPlotPoint` (bi-directional sync)
                 - [x] 更新 `PlotSidebar` / `PlotPointItem` 添加跳转按钮
                 - [x] 实现无锚点时的抖动反馈 (Shake Animation)
-    - [ ] **Phase 7: 可视化时间轴 (Timeline Visualization)**
-        - [ ] 实现 `PlotTimeline` 组件 (轨道视图)
+
     - [x] **Phase 8: 角色系统增强 (Character System)**
         - [x] **@Mentions**: 在剧情要点与矩阵视图中实现快捷选取与高亮
         - [x] **角色卡片**: 实现点击 Mention 弹出详情档案卡
@@ -78,7 +77,7 @@
         - [x] **按钮迁移**: 统一将删除按钮移至模态框页脚左侧
         - [x] **确认拦截**: 全系统集成 `ConfirmModal` 二次确认机制
         - [x] **视觉对齐**: 统一页脚按钮比例与 `text-xs` 字号
-        - [ ] 完善角色、物品功能
+        - [x] 完善角色、物品功能
 - [ ] 云同步功能开发
     - [ ] `SyncService.java` 代码审查
     - [ ] 增量同步逻辑完善
