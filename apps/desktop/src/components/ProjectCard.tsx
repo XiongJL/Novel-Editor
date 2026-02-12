@@ -89,7 +89,7 @@ export function ProjectCard({ novel, onOpen, onEdit }: ProjectCardProps) {
                     isDark ? "bg-[#1a1a20]" : "bg-gray-100 shadow-lg shadow-black/5"
                 )}>
                     {novel.coverUrl ? (
-                        <img src={novel.coverUrl} alt={novel.title} className="h-full w-full object-cover" />
+                        <img src={novel.coverUrl.startsWith('covers/') ? `local-resource://${novel.coverUrl}` : novel.coverUrl} alt={novel.title} className="h-full w-full object-cover" />
                     ) : (
                         <>
                             {/* Generated Cover */}

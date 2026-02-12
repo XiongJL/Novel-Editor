@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { clsx } from 'clsx';
 import { Package, Trash2, ChevronRight } from 'lucide-react';
@@ -8,6 +8,7 @@ import { Item } from '../../types';
 interface ItemLibraryProps {
     items: Item[];
     theme: 'dark' | 'light';
+    highlightId?: string | null;
     onEdit: (item: Item) => void;
     onDelete: (id: string) => void;
 }
@@ -30,6 +31,7 @@ const ItemRow = ({ item, isDark, onEdit, onDelete }: {
 
     return (
         <div
+            data-item-id={item.id}
             className={clsx(
                 "group flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-all duration-200",
                 isDark
@@ -69,10 +71,23 @@ const ItemRow = ({ item, isDark, onEdit, onDelete }: {
     );
 };
 
-export default function ItemLibrary({ items, theme, onEdit, onDelete }: ItemLibraryProps) {
+export default function ItemLibrary({ items, theme, highlightId, onEdit, onDelete }: ItemLibraryProps) {
     const { t } = useTranslation();
     const isDark = theme === 'dark';
     const [deletingItemId, setDeletingItemId] = useState<string | null>(null);
+    const containerRef = useRef<HTMLDivElement>(null);
+
+    // Scroll to and highlight target item
+    useEffect(() => {
+        if (!highlightId || !containerRef.current) return;
+        const el = containerRef.current.querySelector(`[data-item-id="${highlightId}"]`) as HTMLElement;
+        if (el) {
+            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            el.style.transition = 'background-color 0.3s';
+            el.style.backgroundColor = isDark ? 'rgba(16, 185, 129, 0.15)' : 'rgba(16, 185, 129, 0.1)';
+            setTimeout(() => { el.style.backgroundColor = ''; }, 2000);
+        }
+    }, [highlightId, isDark]);
 
     if (items.length === 0) {
         return (
@@ -85,7 +100,7 @@ export default function ItemLibrary({ items, theme, onEdit, onDelete }: ItemLibr
     }
 
     return (
-        <div className="p-2 space-y-0.5">
+        <div ref={containerRef} className="p-2 space-y-0.5">
             {items.map(item => (
                 <ItemRow
                     key={item.id}

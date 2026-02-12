@@ -78,6 +78,13 @@
         - [x] **确认拦截**: 全系统集成 `ConfirmModal` 二次确认机制
         - [x] **视觉对齐**: 统一页脚按钮比例与 `text-xs` 字号
         - [x] 完善角色、物品功能
+    - [x] **Phase 10: @ Mention 扩展与全局搜索增强**
+        - [x] **@ Mention 世界观/地图支持**: 扩展 `MentionsPlugin.tsx` 和 `PlotPointModal.tsx` 支持 world/map 类型
+        - [x] **类别筛选标签**: 在 @ mention 下拉中添加全部/角色/物品/世界观/地图标签
+        - [x] **后端数据源**: 修改 `main.ts` 的 `db:get-mentionables` 返回世界观和地图数据
+        - [x] **全局搜索地图集成**: `SearchSidebar.tsx` 新增地图搜索分类和结果展示
+        - [x] **搜索导航增强**: 点击搜索结果跳转到对应实体并高亮（角色/物品/世界观/地图）
+        - [x] **EntityInfoCard 优化**: 移除底部 ID/验证链接，实现动态定位防溢出
 - [ ] 云同步功能开发
     - [ ] `SyncService.java` 代码审查
     - [ ] 增量同步逻辑完善

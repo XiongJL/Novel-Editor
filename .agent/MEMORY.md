@@ -3,8 +3,8 @@
 此文件用于记录跨会话的项目记忆、关键决策、已知问题和解决方案。每次会话结束或达成重要里程碑时，请考虑更新此文件。
 
 ## 📅 最新状态 (Latest Status)
-> 最近更新时间: 2026-02-11
-> 当前焦点: 提及系统稳定性增强 (Mention Stability) 与 全系统交互一致性 (UI Unification)。
+> 最近更新时间: 2026-02-12
+> 当前焦点: @ Mention 扩展（世界观/地图支持）、全局搜索地图集成、EntityInfoCard 优化
 
 ## 🏛️ 关键架构决策 (Architecture Decisions)
 - **双数据库架构**: 桌面端使用 SQLite (离线优先)，服务端使用 MariaDB (云同步)。
@@ -15,6 +15,8 @@
 - **提及重叠解决方案 (Transparent Textarea)**: 针对 Mention 文本在输入框中与背景重叠模糊的问题，决定采取“全透明 Textarea”方案。通过将原生 textarea 的颜色设为透明并移除 border/padding 干扰，仅保留光标。文字渲染由底层的 Backdrop 层负责，确保与 Mention 高亮块完美对齐且无视觉重影。
 - **UI 统一交互规范 (Unified Modals)**: 全系统新模态框必须继承 `BaseModal`，且所有删除操作强制使用 `ConfirmModal` 替代 `confirm()`。页脚布局规范化：左侧放置删除按钮（如有），右侧放置取消与保存按钮。按钮统一使用 `text-xs`。
 - **档案卡自动关闭 (Click-outside)**: 实现了全局点击检测逻辑，确保 `EntityInfoCard` 在点击非活性区域时自动收起，提升了多层级浮窗下的操作流畅度。
+- **PlotPointModal 独立 Mention 系统**: `PlotPointModal.tsx` 使用原生 textarea + 自定义 @ 逻辑实现 mention，不依赖 Lexical 的 `MentionsPlugin.tsx`。两套 mention 系统并存：Lexical 编辑器用 `MentionsPlugin`，情节要点用 `PlotPointModal` 内置实现。
+- **EntityInfoCard 动态定位**: 使用 `useRef` + `useEffect` + `requestAnimationFrame` 动态检测卡片实际尺寸，溢出视口时自动翻转方向，避免卡片被裁切。
 
 ## 🐛 踩坑与解决方案 (Troubleshooting Log)
 - **Modal Footer Desynchronization**: 
@@ -43,6 +45,8 @@
 - **Editor Corruption (文件损坏防御)**: 在对 `Editor.tsx` 等数千行的巨型文件执行复杂合并或多次 `replace` 操作时，若发现语法突然崩溃（如 state 重复或 export 丢失），应立即停止自动化修改，读取文件的分段内容手动拼合。
 - **Type Desynchronization (类型不同步)**: 在向 Prisma Schema 添加字段后，若仅运行 `db:push` 而未同步更新 `types.ts` 或 `vite-env.d.ts` 的接口，会导致 `tsc` 报出大量“属性缺失”或“类型不兼容”错误。必须确保三方同步。
 - **Editor Root Access**: 在 `Editor.tsx` 中，`editorRoot` 不是一个可以直接访问的状态变量。要获取编辑器根元素（用于 `querySelector` 等 DOM 操作），必须通过 `editorRef.current?.getRootElement()` 获取。
+- **PlotPointModal 与 MentionsPlugin 的双重实现**: `PlotPointEditor.tsx` 虽然使用了 `MentionsPlugin`，但它从未被任何组件 import。实际的情节要点编辑在 `PlotPointModal.tsx` 中用原生 textarea 实现，修改 `MentionsPlugin` 不会影响情节要点的 @ mention。修改时需两处同步。
+- **Electron 主进程热加载**: `main.ts` 的修改不会被 Vite 热加载，需要完全重启 `pnpm dev` 才能生效。但前端代码（renderer process）会被 Vite 热加载。
 
 ## 📝 长期待办 (Backlog)
 - [ ] 完善云同步的冲突解决策略 (CRDT 或 Last-Write-Wins)。

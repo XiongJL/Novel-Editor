@@ -1,10 +1,11 @@
 import { useState, useRef, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { clsx } from 'clsx';
-import { X, Plus, Trash2, Save, User, Link2, Package, Clock } from 'lucide-react';
+import { X, Plus, Trash2, Save, User, Link2, Package, Clock, Camera, Image as ImageIcon, MapPin } from 'lucide-react';
 import { BaseModal } from '../ui/BaseModal';
 import { ConfirmModal } from '../ui/ConfirmModal';
 import { Character } from '../../types';
+import { getAvatarColors } from '../../utils/avatarUtils';
 import RelationManager from './RelationManager';
 import InventoryManager from './InventoryManager';
 import CharacterTimeline from './CharacterTimeline';
@@ -39,6 +40,11 @@ export default function CharacterEditor({ character, theme, novelId, onClose, on
     const [name, setName] = useState(character.name);
     const [role, setRole] = useState(character.role || '');
     const [description, setDescription] = useState(character.description || '');
+    const [avatarPath, setAvatarPath] = useState(character.avatar || '');
+    const [fullBodyImages, setFullBodyImages] = useState<string[]>(() => {
+        try { return JSON.parse(character.fullBodyImages || '[]'); } catch { return []; }
+    });
+    const [mapLocations, setMapLocations] = useState<{ mapId: string; mapName: string; mapType: string }[]>([]);
     const [profileEntries, setProfileEntries] = useState<ProfileEntry[]>(() => {
         try {
             const parsed = JSON.parse(character.profile || '{}');
@@ -48,12 +54,19 @@ export default function CharacterEditor({ character, theme, novelId, onClose, on
         }
     });
 
+    const avatarColors = getAvatarColors(character.id, character.name, isDark);
+
     // Auto-focus name if it's the default
     useEffect(() => {
         if (character.name === t('world.newCharacter', '新角色')) {
             nameRef.current?.select();
         }
     }, []);
+
+    // Load map locations
+    useEffect(() => {
+        window.db.getCharacterMapLocations(character.id).then(setMapLocations).catch(console.error);
+    }, [character.id]);
 
     const handleSave = () => {
         const profile: Record<string, string> = {};
@@ -145,33 +158,65 @@ export default function CharacterEditor({ character, theme, novelId, onClose, on
                 <div className="flex-1 overflow-y-auto custom-scrollbar">
                     {activeTab === 'basic' && (
                         <div className="space-y-5 p-6">
-                            {/* Name */}
-                            <div>
-                                <label className={clsx("text-xs font-medium mb-1.5 block", isDark ? "text-neutral-400" : "text-neutral-500")}>
-                                    {t('world.charName', '名称')}
-                                </label>
-                                <input
-                                    ref={nameRef}
-                                    value={name}
-                                    onChange={e => setName(e.target.value)}
-                                    className={clsx(inputClass, "w-full")}
-                                    placeholder={t('world.charNamePlaceholder', '角色名称')}
-                                />
+                            {/* Avatar + Name Row */}
+                            <div className="flex items-start gap-4">
+                                {/* Avatar */}
+                                <div className="relative group flex-shrink-0">
+                                    <div className={clsx(
+                                        "w-16 h-16 rounded-full flex items-center justify-center text-lg font-bold overflow-hidden bg-gradient-to-br",
+                                        avatarColors[0], avatarColors[1], avatarColors[2]
+                                    )}>
+                                        {avatarPath ? (
+                                            <img src={`local-resource://${avatarPath}`} alt={name} className="w-full h-full object-cover" />
+                                        ) : (
+                                            <span>{name.charAt(0) || '?'}</span>
+                                        )}
+                                    </div>
+                                    <div className="absolute inset-0 rounded-full bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1">
+                                        <button
+                                            onClick={async () => {
+                                                const result = await window.db.uploadCharacterImage(character.id, 'avatar');
+                                                if (result) setAvatarPath(result.path);
+                                            }}
+                                            className="p-1.5 rounded-full bg-white/20 hover:bg-white/30 transition-colors text-white"
+                                            title={t('world.uploadAvatar', '上传头像')}
+                                        >
+                                            <Camera className="w-3.5 h-3.5" />
+                                        </button>
+                                        {avatarPath && (
+                                            <button
+                                                onClick={async () => {
+                                                    await window.db.deleteCharacterImage(character.id, avatarPath, 'avatar');
+                                                    setAvatarPath('');
+                                                }}
+                                                className="p-1.5 rounded-full bg-white/20 hover:bg-red-500/60 transition-colors text-white"
+                                                title={t('common.delete')}
+                                            >
+                                                <X className="w-3.5 h-3.5" />
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+                                {/* Name + Role */}
+                                <div className="flex-1 space-y-2">
+                                    <input
+                                        ref={nameRef}
+                                        value={name}
+                                        onChange={e => setName(e.target.value)}
+                                        className={clsx(inputClass, "w-full")}
+                                        placeholder={t('world.charNamePlaceholder', '角色名称')}
+                                    />
+                                    <input
+                                        ref={roleRef}
+                                        value={role}
+                                        onChange={e => setRole(e.target.value)}
+                                        className={clsx(inputClass, "w-full")}
+                                        placeholder={t('world.charRolePlaceholder', '主角 / 配角 / 反派...')}
+                                    />
+                                </div>
                             </div>
 
-                            {/* Role */}
-                            <div>
-                                <label className={clsx("text-xs font-medium mb-1.5 block", isDark ? "text-neutral-400" : "text-neutral-500")}>
-                                    {t('world.charRole', '角色定位')}
-                                </label>
-                                <input
-                                    ref={roleRef}
-                                    value={role}
-                                    onChange={e => setRole(e.target.value)}
-                                    className={clsx(inputClass, "w-full")}
-                                    placeholder={t('world.charRolePlaceholder', '主角 / 配角 / 反派...')}
-                                />
-                            </div>
+
 
                             {/* Description */}
                             <div>
@@ -232,6 +277,80 @@ export default function CharacterEditor({ character, theme, novelId, onClose, on
                                     )}
                                 </div>
                             </div>
+
+                            {/* Full Body Images */}
+                            <div>
+                                <div className="flex justify-between items-center mb-2">
+                                    <label className={clsx("text-xs font-medium block", isDark ? "text-neutral-400" : "text-neutral-500")}>
+                                        {t('world.fullBodyImages', '全身图')}
+                                    </label>
+                                    <button
+                                        onClick={async () => {
+                                            const result = await window.db.uploadCharacterImage(character.id, 'fullBody');
+                                            if (result?.images) setFullBodyImages(result.images);
+                                            else if (result?.path) setFullBodyImages(prev => [...prev, result.path]);
+                                        }}
+                                        className="text-indigo-500 hover:text-indigo-600 text-xs flex items-center gap-1 font-medium"
+                                    >
+                                        <Plus className="w-3.5 h-3.5" />
+                                        {t('common.add', '添加')}
+                                    </button>
+                                </div>
+                                {fullBodyImages.length > 0 ? (
+                                    <div className="flex gap-2 overflow-x-auto pb-1">
+                                        {fullBodyImages.map((imgPath, idx) => (
+                                            <div key={idx} className="relative group flex-shrink-0">
+                                                <img
+                                                    src={`local-resource://${imgPath}`}
+                                                    alt={`fullbody-${idx}`}
+                                                    className={clsx(
+                                                        "w-20 h-28 object-cover rounded-lg border",
+                                                        isDark ? "border-white/10" : "border-gray-200"
+                                                    )}
+                                                />
+                                                <button
+                                                    onClick={async () => {
+                                                        await window.db.deleteCharacterImage(character.id, imgPath, 'fullBody');
+                                                        setFullBodyImages(prev => prev.filter(p => p !== imgPath));
+                                                    }}
+                                                    className="absolute top-0.5 right-0.5 p-0.5 rounded-full bg-black/60 text-white opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-500"
+                                                >
+                                                    <X className="w-3 h-3" />
+                                                </button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                ) : (
+                                    <div className={clsx("text-center py-4 rounded-lg border border-dashed text-xs", isDark ? "border-white/10 text-neutral-600" : "border-gray-200 text-neutral-400")}>
+                                        <ImageIcon className="w-5 h-5 mx-auto mb-1 opacity-30" />
+                                        {t('world.noFullBody', '暂无全身图')}
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Map Locations */}
+                            {mapLocations.length > 0 && (
+                                <div>
+                                    <label className={clsx("text-xs font-medium mb-1.5 block", isDark ? "text-neutral-400" : "text-neutral-500")}>
+                                        <MapPin className="w-3 h-3 inline mr-1" />
+                                        {t('world.mapLocations', '所处位置')}
+                                    </label>
+                                    <div className="flex flex-wrap gap-1.5">
+                                        {mapLocations.map(loc => (
+                                            <span
+                                                key={loc.mapId}
+                                                className={clsx(
+                                                    "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs",
+                                                    isDark ? "bg-indigo-500/15 text-indigo-300" : "bg-indigo-50 text-indigo-600"
+                                                )}
+                                            >
+                                                <MapPin className="w-2.5 h-2.5" />
+                                                {loc.mapName}
+                                            </span>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
                         </div>
                     )}
 

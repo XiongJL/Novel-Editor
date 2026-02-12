@@ -1,10 +1,12 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowLeft, Save, PanelLeftClose, PanelLeftOpen, Settings, Info, ChevronRight, LayoutGrid, FileText } from 'lucide-react';
+import { ArrowLeft, Save, PanelLeftClose, PanelLeftOpen, Settings, ChevronRight, LayoutGrid, FileText } from 'lucide-react';
 import NarrativeMatrix from '../components/StoryWorkbench/NarrativeMatrix';
 import Sidebar from '../components/Sidebar';
 import ActivityBar, { ActivityTab } from '../components/ActivityBar';
 import SettingsModal from '../components/SettingsModal';
+import MapSidebar from '../components/MapWorkbench/MapSidebar';
+import MapCanvasView from '../components/MapWorkbench/MapCanvas';
 import { useTranslation } from 'react-i18next';
 import { useEditorPreferences } from '../hooks/useEditorPreferences';
 import { useShortcuts } from '../hooks/useShortcuts';
@@ -42,7 +44,9 @@ export default function Editor({ novelId, onBack }: EditorProps) {
     const { preferences, updatePreference } = useEditorPreferences();
     const { shortcuts, isMatch } = useShortcuts();
 
-    const [viewMode, setViewMode] = useState<'editor' | 'matrix'>('editor');
+    const [viewMode, setViewMode] = useState<'editor' | 'matrix' | 'map'>('editor');
+    const [activeMapId, setActiveMapId] = useState<string | null>(null);
+    const [mapCharacters, setMapCharacters] = useState<import('../types').Character[]>([]);
 
     // --- 1. Core Data State ---
     const [novel, setNovel] = useState<Novel | null>(null);
@@ -359,6 +363,11 @@ export default function Editor({ novelId, onBack }: EditorProps) {
         isSwitchingChapterRef.current = true;
         activeChapterMetadata = { id: chapterId, title: 'Loading...' };
         activeChapterIdRef.current = chapterId; // Lock target ID
+
+        // Switch to editor view if currently in map mode (matrix has its own chapter navigation)
+        if (viewMode === 'map') {
+            setViewMode('editor');
+        }
 
         // 1. Background Save (Fire & Forget) - Non-blocking
         const oldChapter = currentChapter;
@@ -1266,14 +1275,25 @@ export default function Editor({ novelId, onBack }: EditorProps) {
                                     if (idea) handleJumpToIdea(idea);
                                 }}
                                 onJumpToEntity={(category, entityId) => {
-                                    // Switch to WorldWorkbench tab and dispatch event
-                                    setActiveTab('characters');
-                                    setIsSidePanelOpen(true);
-                                    setTimeout(() => {
-                                        window.dispatchEvent(new CustomEvent('navigate-to-world-entity', {
-                                            detail: { category, entityId }
-                                        }));
-                                    }, 100);
+                                    if (category === 'map') {
+                                        // Switch to maps tab and select the map
+                                        setActiveTab('map');
+                                        setIsSidePanelOpen(true);
+                                        setTimeout(() => {
+                                            window.dispatchEvent(new CustomEvent('navigate-to-map', {
+                                                detail: { mapId: entityId }
+                                            }));
+                                        }, 100);
+                                    } else {
+                                        // Switch to WorldWorkbench tab and dispatch event
+                                        setActiveTab('characters');
+                                        setIsSidePanelOpen(true);
+                                        setTimeout(() => {
+                                            window.dispatchEvent(new CustomEvent('navigate-to-world-entity', {
+                                                detail: { category, entityId }
+                                            }));
+                                        }, 100);
+                                    }
                                 }}
                                 onSearchChange={(keyword) => {
                                     if (!keyword.trim()) {
@@ -1305,9 +1325,23 @@ export default function Editor({ novelId, onBack }: EditorProps) {
                         </div>
 
                         {activeTab === 'map' && (
-                            <div className="flex-1 flex flex-col items-center justify-center p-4 text-neutral-500 text-sm text-center">
-                                <Info className="w-8 h-8 mb-4 opacity-50" />
-                                <p>{t('sidebar.map')} {t('common.loading')}</p>
+                            <div className="flex-1 flex flex-col min-h-0">
+                                <MapSidebar
+                                    novelId={novelId}
+                                    theme={preferences.theme}
+                                    activeMapId={activeMapId}
+                                    onSelectMap={(mapId) => {
+                                        if (mapId) {
+                                            setActiveMapId(mapId);
+                                            setViewMode('map');
+                                            // Always reload characters to stay current
+                                            window.db.getCharacters(novelId).then(setMapCharacters).catch(console.error);
+                                        } else {
+                                            setActiveMapId(null);
+                                            setViewMode('editor');
+                                        }
+                                    }}
+                                />
                             </div>
                         )}
                     </motion.div>
@@ -1392,8 +1426,15 @@ export default function Editor({ novelId, onBack }: EditorProps) {
                     </div>
                 </div>
 
-                {/* Editor Area or Matrix */}
-                {viewMode === 'matrix' ? (
+                {/* Editor Area, Matrix, or Map */}
+                {viewMode === 'map' && activeMapId ? (
+                    <MapCanvasView
+                        mapId={activeMapId}
+                        novelId={novelId}
+                        theme={preferences.theme}
+                        characters={mapCharacters}
+                    />
+                ) : viewMode === 'matrix' ? (
                     <NarrativeMatrix
                         novelId={novelId}
                         theme={preferences.theme}

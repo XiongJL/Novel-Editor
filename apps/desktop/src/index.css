@@ -119,6 +119,24 @@
     background-color: rgba(16, 185, 129, 0.1) !important;
   }
 
+  .mention-world {
+    color: #f59e0b;
+    border-bottom-color: rgba(245, 158, 11, 0.5);
+  }
+
+  .mention-world:hover {
+    background-color: rgba(245, 158, 11, 0.1) !important;
+  }
+
+  .mention-map {
+    color: #06b6d4;
+    border-bottom-color: rgba(6, 182, 212, 0.5);
+  }
+
+  .mention-map:hover {
+    background-color: rgba(6, 182, 212, 0.1) !important;
+  }
+
   :is(.dark .mention-character) {
     color: #a5b4fc;
     border-bottom-color: rgba(129, 140, 248, 0.5);
@@ -127,6 +145,16 @@
   :is(.dark .mention-item) {
     color: #6ee7b7;
     border-bottom-color: rgba(52, 211, 153, 0.5);
+  }
+
+  :is(.dark .mention-world) {
+    color: #fbbf24;
+    border-bottom-color: rgba(251, 191, 36, 0.5);
+  }
+
+  :is(.dark .mention-map) {
+    color: #22d3ee;
+    border-bottom-color: rgba(34, 211, 238, 0.5);
   }
 
   /* Hide icon for lighter look */
@@ -146,7 +174,7 @@
     box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
     min-width: 200px;
     max-width: 300px;
-    max-height: 240px;
+    max-height: 300px;
     overflow-y: auto;
     padding: 4px;
   }
@@ -155,6 +183,59 @@
     background: #1e1e2e;
     border-color: rgba(255, 255, 255, 0.1);
     box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+  }
+
+  .mention-menu-tabs {
+    display: flex;
+    gap: 2px;
+    padding: 4px 4px 6px;
+    border-bottom: 1px solid #e5e7eb;
+    margin-bottom: 4px;
+    flex-wrap: wrap;
+  }
+
+  .dark .mention-menu-tabs {
+    border-bottom-color: rgba(255, 255, 255, 0.08);
+  }
+
+  .mention-menu-tab {
+    padding: 2px 8px;
+    font-size: 11px;
+    border-radius: 4px;
+    cursor: pointer;
+    border: 1px solid transparent;
+    background: transparent;
+    color: #6b7280;
+    transition: all 0.15s;
+    font-weight: 500;
+  }
+
+  .mention-menu-tab:hover {
+    background: #f3f4f6;
+    color: #374151;
+  }
+
+  .dark .mention-menu-tab:hover {
+    background: rgba(255, 255, 255, 0.06);
+    color: #d1d5db;
+  }
+
+  .mention-menu-tab.active {
+    background: #6366f1;
+    color: white;
+    border-color: #6366f1;
+  }
+
+  .dark .mention-menu-tab.active {
+    background: #6366f1;
+    color: white;
+  }
+
+  .mention-menu-empty {
+    padding: 12px;
+    text-align: center;
+    font-size: 12px;
+    color: #9ca3af;
   }
 
   .mention-menu-item {

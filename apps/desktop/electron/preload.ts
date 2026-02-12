@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld('db', {
     renameVolume: (data: { volumeId: string; title: string }) => ipcRenderer.invoke('db:rename-volume', data),
     renameChapter: (data: { chapterId: string; title: string }) => ipcRenderer.invoke('db:rename-chapter', data),
     updateNovel: (data: { id: string; data: { title?: string; coverUrl?: string; formatting?: string } }) => ipcRenderer.invoke('db:update-novel', data),
+    uploadNovelCover: (novelId: string) => ipcRenderer.invoke('db:upload-novel-cover', novelId),
 
     // Idea
     getIdeas: (novelId: string) => ipcRenderer.invoke('db:get-ideas', novelId),
@@ -48,6 +49,9 @@ contextBridge.exposeInMainWorld('db', {
     createCharacter: (data: any) => ipcRenderer.invoke('db:create-character', data),
     updateCharacter: (id: string, data: any) => ipcRenderer.invoke('db:update-character', { id, data }),
     deleteCharacter: (id: string) => ipcRenderer.invoke('db:delete-character', id),
+    uploadCharacterImage: (characterId: string, type: 'avatar' | 'fullBody') => ipcRenderer.invoke('db:upload-character-image', { characterId, type }),
+    deleteCharacterImage: (characterId: string, imagePath: string, type: 'avatar' | 'fullBody') => ipcRenderer.invoke('db:delete-character-image', { characterId, imagePath, type }),
+    getCharacterMapLocations: (characterId: string) => ipcRenderer.invoke('db:get-character-map-locations', characterId),
 
     getItems: (novelId: string) => ipcRenderer.invoke('db:get-items', novelId),
     getItem: (id: string) => ipcRenderer.invoke('db:get-item', id),
@@ -78,10 +82,29 @@ contextBridge.exposeInMainWorld('db', {
     getCharacterTimeline: (characterId: string) => ipcRenderer.invoke('db:get-character-timeline', characterId),
     getRecentChapters: (characterName: string, novelId: string, limit?: number) => ipcRenderer.invoke('db:get-recent-chapters', characterName, novelId, limit),
     getCharacterChapterAppearances: (characterId: string) => ipcRenderer.invoke('db:get-character-chapter-appearances', characterId),
+
+    // Map System
+    getMaps: (novelId: string) => ipcRenderer.invoke('db:get-maps', novelId),
+    getMap: (id: string) => ipcRenderer.invoke('db:get-map', id),
+    createMap: (data: { novelId: string; name: string; type?: string }) => ipcRenderer.invoke('db:create-map', data),
+    updateMap: (id: string, data: any) => ipcRenderer.invoke('db:update-map', { id, data }),
+    deleteMap: (id: string) => ipcRenderer.invoke('db:delete-map', id),
+    uploadMapBackground: (mapId: string) => ipcRenderer.invoke('db:upload-map-bg', mapId),
+
+    getMapMarkers: (mapId: string) => ipcRenderer.invoke('db:get-map-markers', mapId),
+    createMapMarker: (data: { characterId: string; mapId: string; x: number; y: number; label?: string }) => ipcRenderer.invoke('db:create-map-marker', data),
+    updateMapMarker: (id: string, data: { x?: number; y?: number; label?: string }) => ipcRenderer.invoke('db:update-map-marker', { id, data }),
+    deleteMapMarker: (id: string) => ipcRenderer.invoke('db:delete-map-marker', id),
+
+    getMapElements: (mapId: string) => ipcRenderer.invoke('db:get-map-elements', mapId),
+    createMapElement: (data: { mapId: string; type: string; x: number; y: number; text?: string; iconKey?: string }) => ipcRenderer.invoke('db:create-map-element', data),
+    updateMapElement: (id: string, data: any) => ipcRenderer.invoke('db:update-map-element', { id, data }),
+    deleteMapElement: (id: string) => ipcRenderer.invoke('db:delete-map-element', id),
 })
 
 contextBridge.exposeInMainWorld('electron', {
     toggleFullScreen: () => ipcRenderer.invoke('app:toggle-fullscreen'),
+    getUserDataPath: () => ipcRenderer.invoke('app:get-user-data-path'),
     onFullScreenChange: (callback: (isFullScreen: boolean) => void) => {
         const listener = (_event: any, state: boolean) => callback(state);
         ipcRenderer.on('app:fullscreen-change', listener);

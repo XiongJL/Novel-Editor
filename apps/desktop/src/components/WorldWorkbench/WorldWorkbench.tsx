@@ -32,6 +32,7 @@ export default function WorldWorkbench({ novelId, theme }: WorldWorkbenchProps) 
     // Item Editor State
     const [editingItem, setEditingItem] = useState<Item | null>(null);
     const [isItemEditorOpen, setIsItemEditorOpen] = useState(false);
+    const [highlightEntityId, setHighlightEntityId] = useState<string | null>(null);
 
     const loadCharacters = useCallback(async () => {
         try {
@@ -58,38 +59,24 @@ export default function WorldWorkbench({ novelId, theme }: WorldWorkbenchProps) 
 
     // Listen for navigation events from search
     useEffect(() => {
-        const handleNavigate = async (e: CustomEvent<{ category: 'character' | 'item' | 'world'; entityId: string }>) => {
+        const handleNavigate = async (e: CustomEvent<{ category: 'character' | 'item' | 'world' | 'map'; entityId: string }>) => {
             const { category, entityId } = e.detail;
+
+            // Set highlight for scroll-into-view
+            setHighlightEntityId(entityId);
+            setTimeout(() => setHighlightEntityId(null), 3000);
 
             if (category === 'character') {
                 setActiveTab('characters');
-                try {
-                    const char = await window.db.getCharacter(entityId);
-                    if (char) {
-                        setEditingCharacter(char);
-                        setIsEditorOpen(true);
-                    }
-                } catch (err) {
-                    console.error('[WorldWorkbench] Failed to load character for navigation:', err);
-                }
             } else if (category === 'item') {
                 setActiveTab('items');
-                try {
-                    const item = await window.db.getItem(entityId);
-                    if (item) {
-                        setEditingItem(item);
-                        setIsItemEditorOpen(true);
-                    }
-                } catch (err) {
-                    console.error('[WorldWorkbench] Failed to load item for navigation:', err);
-                }
             } else if (category === 'world') {
                 setActiveTab('worldview');
-                // WorldSettingList manages its own editing state internally
-                // Dispatch a follow-up event for it to handle
                 setTimeout(() => {
                     window.dispatchEvent(new CustomEvent('navigate-to-world-setting', { detail: { entityId } }));
                 }, 100);
+            } else if (category === 'map') {
+                // Map navigation is handled by Editor.tsx directly
             }
         };
 
@@ -244,6 +231,7 @@ export default function WorldWorkbench({ novelId, theme }: WorldWorkbenchProps) 
                     <CharacterList
                         characters={characters}
                         theme={theme}
+                        highlightId={highlightEntityId}
                         onEdit={(c: Character) => { setEditingCharacter(c); setIsEditorOpen(true); }}
                         onDelete={handleDeleteCharacter}
                         onToggleStar={async (c: Character) => {
@@ -259,6 +247,7 @@ export default function WorldWorkbench({ novelId, theme }: WorldWorkbenchProps) 
                     <ItemLibrary
                         items={items}
                         theme={theme}
+                        highlightId={highlightEntityId}
                         onEdit={(i: Item) => { setEditingItem(i); setIsItemEditorOpen(true); }}
                         onDelete={handleDeleteItem}
                     />

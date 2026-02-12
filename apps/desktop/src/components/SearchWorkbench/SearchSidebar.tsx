@@ -2,11 +2,11 @@ import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { clsx } from 'clsx';
 import { useTranslation } from 'react-i18next';
-import { Search, X, Lightbulb, RefreshCw, Loader2, Library, ChevronRight, ChevronDown, FileText, User, Package, Globe } from 'lucide-react';
+import { Search, X, Lightbulb, RefreshCw, Loader2, Library, ChevronRight, ChevronDown, FileText, User, Package, Globe, Map } from 'lucide-react';
 import { formatNumber } from '../../utils/format';
 
 // ─── Types ──────────────────────────────────────────
-type SearchCategory = 'chapter' | 'idea' | 'character' | 'item' | 'world';
+type SearchCategory = 'chapter' | 'idea' | 'character' | 'item' | 'world' | 'map';
 
 interface SearchSidebarProps {
     theme: 'dark' | 'light';
@@ -14,7 +14,7 @@ interface SearchSidebarProps {
     onClose?: () => void;
     onJumpToChapter?: (chapterId: string, keyword: string, context?: string) => void;
     onJumpToIdea?: (ideaId: string) => void;
-    onJumpToEntity?: (category: 'character' | 'item' | 'world', entityId: string) => void;
+    onJumpToEntity?: (category: 'character' | 'item' | 'world' | 'map', entityId: string) => void;
     onSearchChange?: (keyword: string) => void;
 }
 
@@ -24,7 +24,7 @@ interface FrontendMatch {
     name: string;
     snippet: string; // highlighted snippet
     type: string; // sub-type (role, item type, world setting type, etc.)
-    category: 'character' | 'item' | 'world';
+    category: 'character' | 'item' | 'world' | 'map';
 }
 
 // ─── Helpers ────────────────────────────────────────
@@ -83,10 +83,11 @@ export default function SearchSidebar({
     const [collapsedCharacters, setCollapsedCharacters] = useState(false);
     const [collapsedItems, setCollapsedItems] = useState(false);
     const [collapsedWorld, setCollapsedWorld] = useState(false);
+    const [collapsedMaps, setCollapsedMaps] = useState(false);
 
     // Category filter
     const [activeCategories, setActiveCategories] = useState<Set<SearchCategory>>(
-        new Set(['chapter', 'idea', 'character', 'item', 'world'])
+        new Set(['chapter', 'idea', 'character', 'item', 'world', 'map'])
     );
 
     const debounceRef = useRef<NodeJS.Timeout | null>(null);
@@ -150,10 +151,11 @@ export default function SearchSidebar({
         const matches: FrontendMatch[] = [];
 
         try {
-            const [characters, items, worldSettings] = await Promise.all([
+            const [characters, items, worldSettings, maps] = await Promise.all([
                 window.db.getCharacters(novelId),
                 window.db.getItems(novelId),
                 window.db.getWorldSettings(novelId),
+                window.db.getMaps(novelId),
             ]);
 
             // Search characters: match name, role, description, profile values
@@ -206,6 +208,20 @@ export default function SearchSidebar({
                         snippet: highlightKeyword(snippetSource, keyword),
                         type: ws.type || '',
                         category: 'world',
+                    });
+                }
+            }
+
+            // Search maps
+            for (const map of maps) {
+                if (matchEntity(keyword, map.name, map.description, map.type)) {
+                    const snippetSource = map.description || map.name;
+                    matches.push({
+                        id: map.id,
+                        name: map.name,
+                        snippet: highlightKeyword(snippetSource, keyword),
+                        type: map.type || '',
+                        category: 'map',
                     });
                 }
             }
@@ -366,7 +382,8 @@ export default function SearchSidebar({
         const characters = frontendResults.filter(r => r.category === 'character');
         const items = frontendResults.filter(r => r.category === 'item');
         const world = frontendResults.filter(r => r.category === 'world');
-        return { characters, items, world };
+        const maps = frontendResults.filter(r => r.category === 'map');
+        return { characters, items, world, maps };
     }, [frontendResults]);
 
     const totalChaptersFound: number = groupedResults.volumes.reduce((acc: number, vol: any) => acc + vol.sortedChapterList.length, 0);
@@ -409,6 +426,7 @@ export default function SearchSidebar({
         { id: 'character', icon: User, count: frontendGrouped.characters.length },
         { id: 'item', icon: Package, count: frontendGrouped.items.length },
         { id: 'world', icon: Globe, count: frontendGrouped.world.length },
+        { id: 'map', icon: Map, count: frontendGrouped.maps.length },
     ];
 
     const hasAnyResults = results.length > 0 || frontendResults.length > 0;
@@ -776,6 +794,50 @@ export default function SearchSidebar({
                                         </div>
                                         <div className={clsx("line-clamp-2 text-[10.5px]", isDark ? "text-neutral-400" : "text-neutral-500")}>
                                             {renderSnippet(ws.snippet)}
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                )}
+
+                {/* ═══ Maps Group ═══ */}
+                {activeCategories.has('map') && frontendGrouped.maps.length > 0 && (
+                    <div className="pt-2">
+                        <div
+                            className={clsx(
+                                "flex items-center gap-2 text-xs font-bold uppercase tracking-wider mb-2 cursor-pointer group hover:opacity-80 transition-colors select-none",
+                                isDark ? "text-neutral-500" : "text-neutral-400"
+                            )}
+                            onClick={() => setCollapsedMaps(!collapsedMaps)}
+                        >
+                            <ChevronDown className={clsx("w-3 h-3 transition-transform opacity-50", collapsedMaps && "-rotate-90")} />
+                            <Map className="w-3.5 h-3.5" />
+                            <span>{t('search.maps', '地图')} ({frontendGrouped.maps.length})</span>
+                        </div>
+
+                        {!collapsedMaps && (
+                            <div className="space-y-1">
+                                {frontendGrouped.maps.map(map => (
+                                    <div
+                                        key={map.id}
+                                        className={clsx(
+                                            "p-3 rounded-lg border transition-all cursor-pointer",
+                                            isDark ? "bg-cyan-500/10 border-cyan-500/20 hover:bg-cyan-500/15" : "bg-cyan-50 border-cyan-200 hover:bg-cyan-100"
+                                        )}
+                                        onClick={() => onJumpToEntity?.('map', map.id)}
+                                    >
+                                        <div className="flex items-center gap-2 mb-1">
+                                            <span className={clsx("text-xs font-semibold", isDark ? "text-cyan-300" : "text-cyan-700")}>{map.name}</span>
+                                            {map.type && (
+                                                <span className={clsx("text-[10px] px-1.5 py-0.5 rounded-full", isDark ? "bg-white/10 text-neutral-400" : "bg-gray-200 text-neutral-500")}>
+                                                    {map.type}
+                                                </span>
+                                            )}
+                                        </div>
+                                        <div className={clsx("line-clamp-2 text-[10.5px]", isDark ? "text-neutral-400" : "text-neutral-500")}>
+                                            {renderSnippet(map.snippet)}
                                         </div>
                                     </div>
                                 ))}

@@ -11,6 +11,7 @@ interface DBAPI {
     renameVolume: (data: { volumeId: string; title: string }) => Promise<Volume>
     renameChapter: (data: { chapterId: string; title: string }) => Promise<Chapter>
     updateNovel: (data: { id: string; data: { title?: string; coverUrl?: string; formatting?: string } }) => Promise<Novel>
+    uploadNovelCover: (novelId: string) => Promise<{ path: string } | null>
     getIdeas: (novelId: string) => Promise<Idea[]>
     createIdea: (data: Idea) => Promise<Idea>
     deleteIdea: (id: string) => Promise<void>
@@ -48,6 +49,9 @@ interface DBAPI {
     createCharacter: (data: Omit<Character, 'id' | 'createdAt' | 'updatedAt' | 'sortOrder'>) => Promise<Character>;
     updateCharacter: (id: string, data: Partial<Character>) => Promise<Character>
     deleteCharacter: (id: string) => Promise<void>
+    uploadCharacterImage: (characterId: string, type: 'avatar' | 'fullBody') => Promise<{ path: string; images?: string[] } | null>
+    deleteCharacterImage: (characterId: string, imagePath: string, type: 'avatar' | 'fullBody') => Promise<void>
+    getCharacterMapLocations: (characterId: string) => Promise<{ mapId: string; mapName: string; mapType: string }[]>
 
     getItems: (novelId: string) => Promise<Item[]>;
     getItem: (id: string) => Promise<Item | null>;
@@ -78,6 +82,24 @@ interface DBAPI {
     getCharacterTimeline: (characterId: string) => Promise<CharacterTimelineEntry[]>
     getCharacterChapterAppearances: (characterId: string) => Promise<CharacterTimelineEntry[]>
     getRecentChapters: (characterName: string, novelId: string, limit?: number) => Promise<ChapterMetadata[]>
+
+    // Map System
+    getMaps: (novelId: string) => Promise<MapCanvas[]>
+    getMap: (id: string) => Promise<MapCanvas | null>
+    createMap: (data: { novelId: string; name: string; type?: string }) => Promise<MapCanvas>
+    updateMap: (id: string, data: Partial<MapCanvas>) => Promise<MapCanvas>
+    deleteMap: (id: string) => Promise<void>
+    uploadMapBackground: (mapId: string) => Promise<{ path: string; width: number; height: number } | null>
+
+    getMapMarkers: (mapId: string) => Promise<CharacterMapMarker[]>
+    createMapMarker: (data: { characterId: string; mapId: string; x: number; y: number; label?: string }) => Promise<CharacterMapMarker>
+    updateMapMarker: (id: string, data: { x?: number; y?: number; label?: string }) => Promise<CharacterMapMarker>
+    deleteMapMarker: (id: string) => Promise<void>
+
+    getMapElements: (mapId: string) => Promise<MapElement[]>
+    createMapElement: (data: { mapId: string; type: string; x: number; y: number; text?: string; iconKey?: string }) => Promise<MapElement>
+    updateMapElement: (id: string, data: Partial<MapElement>) => Promise<MapElement>
+    deleteMapElement: (id: string) => Promise<void>
 }
 
 interface PlotLine {
@@ -284,6 +306,11 @@ interface SyncAPI {
 interface Window {
     ipcRenderer: import('electron').IpcRenderer
     db: DBAPI
+    electron: {
+        toggleFullScreen: () => Promise<boolean>
+        getUserDataPath: () => Promise<string>
+        onFullScreenChange: (callback: (isFullScreen: boolean) => void) => () => void
+    }
     sync: SyncAPI
     backup: {
         export: (password?: string) => Promise<string>;

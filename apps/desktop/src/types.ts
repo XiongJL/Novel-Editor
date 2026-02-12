@@ -100,6 +100,7 @@ export interface Character {
     name: string;
     role?: string | null;
     avatar?: string | null;
+    fullBodyImages?: string | null; // JSON array of file paths
     description?: string | null;
     profile: string; // JSON: 自定义属性
     sortOrder: number;
@@ -133,7 +134,7 @@ export interface ItemOwnershipWithItem {
 export interface MentionableItem {
     id: string;
     name: string;
-    type: 'character' | 'item';
+    type: 'character' | 'item' | 'world' | 'map';
     avatar?: string | null;
     icon?: string | null;
     role?: string | null;
@@ -180,4 +181,44 @@ export interface CharacterTimelineEntry {
     order: number;
     volumeOrder: number;
     snippet: string;
+}
+
+// ── Map System ──
+
+export interface MapCanvas {
+    id: string;
+    novelId: string;
+    name: string;
+    type: string; // 'world' | 'region' | 'scene'
+    description?: string | null;
+    background?: string | null;
+    width: number;
+    height: number;
+    sortOrder: number;
+    markers?: CharacterMapMarker[];
+    elements?: MapElement[];
+    createdAt: string | Date;
+    updatedAt: string | Date;
+}
+
+export interface MapElement {
+    id: string;
+    mapId: string;
+    type: string; // 'poi' | 'label'
+    x: number;
+    y: number;
+    text?: string | null;
+    iconKey?: string | null;
+    style: string; // JSON string
+    z: number;
+}
+
+export interface CharacterMapMarker {
+    id: string;
+    characterId: string;
+    mapId: string;
+    x: number;
+    y: number;
+    label?: string | null;
+    character?: Character;
 }

@@ -74,6 +74,7 @@ model Character {
   name        String
   role        String? // 主角, 配角, 反派...
   avatar      String? // Base64 or file path
+  fullBodyImages String? // JSON array of file paths
   description String? // 简介
   profile     String  @default("{}") // JSON: 自定义属性 { "年龄": "18", "生日": "1月1日" }
   sortOrder   Float   @default(0)
@@ -85,6 +86,7 @@ model Character {
   items     ItemOwnership[]
   relationsAsSource Relationship[] @relation("RelationSource")
   relationsAsTarget Relationship[] @relation("RelationTarget")
+  mapMarkers CharacterMapMarker[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -231,4 +233,56 @@ model PlotPointAnchor {
   
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+}
+
+// ── 地图系统 ──
+
+model MapCanvas {
+  id          String   @id @default(cuid())
+  novelId     String
+  name        String
+  type        String   @default("world") // world | region | scene
+  description String?
+  background  String?  // 底图相对路径
+  width       Int      @default(1200)
+  height      Int      @default(800)
+  sortOrder   Float    @default(0)
+
+  markers     CharacterMapMarker[]
+  elements    MapElement[]
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([novelId])
+}
+
+model MapElement {
+  id      String  @id @default(cuid())
+  mapId   String
+  type    String  // poi | label
+  x       Float   // 0-1 相对坐标
+  y       Float
+  text    String?
+  iconKey String?
+  style   String  @default("{}")
+  z       Int     @default(0)
+
+  map     MapCanvas @relation(fields: [mapId], references: [id], onDelete: Cascade)
+
+  @@index([mapId])
+}
+
+model CharacterMapMarker {
+  id          String    @id @default(cuid())
+  characterId String
+  mapId       String
+  x           Float     // 0-1 相对坐标
+  y           Float
+  label       String?
+
+  character   Character @relation(fields: [characterId], references: [id], onDelete: Cascade)
+  map         MapCanvas @relation(fields: [mapId], references: [id], onDelete: Cascade)
+
+  @@unique([characterId, mapId])
 }

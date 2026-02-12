@@ -1,36 +1,16 @@
-import { memo, useState, useMemo } from 'react';
+import { memo, useState, useMemo, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { clsx } from 'clsx';
 import { User, Trash2, ChevronRight, Star } from 'lucide-react';
 import { ConfirmModal } from '../ui/ConfirmModal';
 import { Character } from '../../types';
+import { AVATAR_PALETTES, hashStringToIndex } from '../../utils/avatarUtils';
 
-// 精选美观渐变色调色板 (dark: [from, to, text], light: [from, to, text])
-const AVATAR_PALETTES = [
-    { dark: ['from-rose-500/30', 'to-pink-500/30', 'text-rose-300'], light: ['from-rose-100', 'to-pink-100', 'text-rose-600'] },
-    { dark: ['from-orange-500/30', 'to-amber-500/30', 'text-orange-300'], light: ['from-orange-100', 'to-amber-100', 'text-orange-600'] },
-    { dark: ['from-emerald-500/30', 'to-teal-500/30', 'text-emerald-300'], light: ['from-emerald-100', 'to-teal-100', 'text-emerald-600'] },
-    { dark: ['from-cyan-500/30', 'to-sky-500/30', 'text-cyan-300'], light: ['from-cyan-100', 'to-sky-100', 'text-cyan-600'] },
-    { dark: ['from-indigo-500/30', 'to-purple-500/30', 'text-indigo-300'], light: ['from-indigo-100', 'to-purple-100', 'text-indigo-600'] },
-    { dark: ['from-violet-500/30', 'to-fuchsia-500/30', 'text-violet-300'], light: ['from-violet-100', 'to-fuchsia-100', 'text-violet-600'] },
-    { dark: ['from-blue-500/30', 'to-indigo-500/30', 'text-blue-300'], light: ['from-blue-100', 'to-indigo-100', 'text-blue-600'] },
-    { dark: ['from-teal-500/30', 'to-green-500/30', 'text-teal-300'], light: ['from-teal-100', 'to-green-100', 'text-teal-600'] },
-    { dark: ['from-pink-500/30', 'to-rose-500/30', 'text-pink-300'], light: ['from-pink-100', 'to-rose-100', 'text-pink-600'] },
-    { dark: ['from-amber-500/30', 'to-yellow-500/30', 'text-amber-300'], light: ['from-amber-100', 'to-yellow-100', 'text-amber-600'] },
-];
-
-/** 基于字符串的简单哈希，确保同一名字总返回相同索引 */
-function hashStringToIndex(str: string, max: number): number {
-    let hash = 0;
-    for (let i = 0; i < str.length; i++) {
-        hash = ((hash << 5) - hash + str.charCodeAt(i)) | 0;
-    }
-    return Math.abs(hash) % max;
-}
 
 interface CharacterListProps {
     characters: Character[];
     theme: 'dark' | 'light';
+    highlightId?: string | null;
     onEdit: (character: Character) => void;
     onDelete: (id: string) => void;
     onToggleStar: (character: Character) => void;
@@ -55,6 +35,7 @@ const CharacterCard = memo(({ character, isDark, onEdit, onDelete, onToggleStar 
 
     return (
         <div
+            data-character-id={character.id}
             onClick={onEdit}
             className={clsx(
                 "group flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-all duration-200",
@@ -80,7 +61,7 @@ const CharacterCard = memo(({ character, isDark, onEdit, onDelete, onToggleStar 
                 avatarColors[0], avatarColors[1], avatarColors[2]
             )}>
                 {character.avatar ? (
-                    <img src={character.avatar} alt={character.name} className="w-full h-full rounded-full object-cover" />
+                    <img src={`local-resource://${character.avatar}`} alt={character.name} className="w-full h-full rounded-full object-cover" />
                 ) : (
                     <span>{character.name.charAt(0)}</span>
                 )}
@@ -114,10 +95,23 @@ const CharacterCard = memo(({ character, isDark, onEdit, onDelete, onToggleStar 
     );
 });
 
-export default function CharacterList({ characters, theme, onEdit, onDelete, onToggleStar }: CharacterListProps) {
+export default function CharacterList({ characters, theme, highlightId, onEdit, onDelete, onToggleStar }: CharacterListProps) {
     const { t } = useTranslation();
     const isDark = theme === 'dark';
     const [deletingCharId, setDeletingCharId] = useState<string | null>(null);
+    const containerRef = useRef<HTMLDivElement>(null);
+
+    // Scroll to and highlight target character
+    useEffect(() => {
+        if (!highlightId || !containerRef.current) return;
+        const el = containerRef.current.querySelector(`[data-character-id="${highlightId}"]`) as HTMLElement;
+        if (el) {
+            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            el.style.transition = 'background-color 0.3s';
+            el.style.backgroundColor = isDark ? 'rgba(99, 102, 241, 0.15)' : 'rgba(99, 102, 241, 0.1)';
+            setTimeout(() => { el.style.backgroundColor = ''; }, 2000);
+        }
+    }, [highlightId, isDark]);
 
     if (characters.length === 0) {
         return (
@@ -130,7 +124,7 @@ export default function CharacterList({ characters, theme, onEdit, onDelete, onT
     }
 
     return (
-        <div className="p-2 space-y-0.5">
+        <div ref={containerRef} className="p-2 space-y-0.5">
             {characters.map(char => (
                 <CharacterCard
                     key={char.id}

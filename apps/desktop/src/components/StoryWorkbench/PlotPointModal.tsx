@@ -76,31 +76,52 @@ export function PlotPointModal({
     const [selectedPlotLineId, setSelectedPlotLineId] = useState<string>('');
 
     // Mention system states
+    type MentionItemType = 'character' | 'item' | 'world' | 'map';
     const [mentionSearch, setMentionSearch] = useState<string | null>(null);
     const [mentionPosition, setMentionPosition] = useState<{ top: number; left: number } | null>(null);
-    const [mentionList, setMentionList] = useState<{ id: string; name: string; type: 'character' | 'item' }[]>([]);
+    const [mentionList, setMentionList] = useState<{ id: string; name: string; type: MentionItemType }[]>([]);
     const [selectedIndex, setSelectedIndex] = useState(0);
+    const [mentionFilter, setMentionFilter] = useState<'all' | MentionItemType>('all');
 
     // Entity Dossier States
     const [activeEntity, setActiveEntity] = useState<any>(null);
     const [entityType, setEntityType] = useState<'character' | 'item'>('character');
     const [entityPosition, setEntityPosition] = useState<{ top: number; left: number } | null>(null);
 
-    // Fetch characters and items for mentions
-    const [allMentionables, setAllMentionables] = useState<{ id: string; name: string; type: 'character' | 'item' }[]>([]);
+    // Fetch characters, items, world settings, and maps for mentions
+    const [allMentionables, setAllMentionables] = useState<{ id: string; name: string; type: MentionItemType }[]>([]);
+
+    const MENTION_ICON_MAP: Record<MentionItemType, string> = {
+        character: '👤',
+        item: '📦',
+        world: '🌐',
+        map: '🗺️',
+    };
+
+    const MENTION_FILTER_TABS: { key: 'all' | MentionItemType; label: string }[] = [
+        { key: 'all', label: t('search.category.all', '全部') },
+        { key: 'character', label: t('search.category.character', '角色') },
+        { key: 'item', label: t('search.category.item', '物品') },
+        { key: 'world', label: t('search.category.world', '世界观') },
+        { key: 'map', label: t('search.category.map', '地图') },
+    ];
 
     useEffect(() => {
         if (!isOpen) return;
         const load = async () => {
             try {
                 const novelId = initialData?.novelId || point?.novelId || '';
-                const [chars, items] = await Promise.all([
+                const [chars, items, worldSettings, maps] = await Promise.all([
                     window.db.getCharacters(novelId),
-                    window.db.getItems(novelId)
+                    window.db.getItems(novelId),
+                    window.db.getWorldSettings(novelId),
+                    window.db.getMaps(novelId),
                 ]);
                 setAllMentionables([
                     ...chars.map((c: any) => ({ id: c.id, name: c.name, type: 'character' as const })),
-                    ...items.map((i: any) => ({ id: i.id, name: i.name, type: 'item' as const }))
+                    ...items.map((i: any) => ({ id: i.id, name: i.name, type: 'item' as const })),
+                    ...worldSettings.map((ws: any) => ({ id: ws.id, name: ws.name, type: 'world' as const })),
+                    ...maps.map((m: any) => ({ id: m.id, name: m.name, type: 'map' as const })),
                 ]);
             } catch (err) {
                 console.error('Failed to load mentionables:', err);
@@ -118,7 +139,11 @@ export function PlotPointModal({
 
         // 性能优化：限制展示数量，匹配优先级排序
         const filtered = allMentionables
-            .filter(item => item.name.toLowerCase().includes(query))
+            .filter(item => {
+                const nameMatch = item.name.toLowerCase().includes(query);
+                const filterMatch = mentionFilter === 'all' || item.type === mentionFilter;
+                return nameMatch && filterMatch;
+            })
             .sort((a, b) => {
                 const aName = a.name.toLowerCase();
                 const bName = b.name.toLowerCase();
@@ -134,7 +159,7 @@ export function PlotPointModal({
 
         setMentionList(filtered);
         setSelectedIndex(0);
-    }, [mentionSearch, allMentionables]);
+    }, [mentionSearch, allMentionables, mentionFilter]);
 
     const handleTextareaInput = (e: React.FormEvent<HTMLTextAreaElement>) => {
         const textarea = e.currentTarget;
@@ -148,6 +173,7 @@ export function PlotPointModal({
         if (lastAtMatch) {
             const query = lastAtMatch[1];
             setMentionSearch(query);
+            setMentionFilter('all');
 
             // --- 精准坐标计算 (Mirror Div) ---
             const rect = textarea.getBoundingClientRect();
@@ -247,19 +273,22 @@ export function PlotPointModal({
                 const item = allMentionables.find(m => m.name === name);
                 if (item) {
                     hitMention = true;
-                    try {
-                        let fullData;
-                        if (item.type === 'character') {
-                            fullData = await window.db.getCharacter(item.id);
-                        } else {
-                            fullData = await window.db.getItem(item.id);
-                        }
+                    // Only show entity card for character and item types
+                    if (item.type === 'character' || item.type === 'item') {
+                        try {
+                            let fullData;
+                            if (item.type === 'character') {
+                                fullData = await window.db.getCharacter(item.id);
+                            } else {
+                                fullData = await window.db.getItem(item.id);
+                            }
 
-                        setActiveEntity(fullData);
-                        setEntityType(item.type);
-                        setEntityPosition({ top: e.clientY + 10, left: e.clientX + 10 });
-                    } catch (err) {
-                        console.error('Failed to fetch entity details:', err);
+                            setActiveEntity(fullData);
+                            setEntityType(item.type);
+                            setEntityPosition({ top: e.clientY + 10, left: e.clientX + 10 });
+                        } catch (err) {
+                            console.error('Failed to fetch entity details:', err);
+                        }
                     }
                 }
                 break;
@@ -584,32 +613,61 @@ export function PlotPointModal({
                         />
                     )}
 
-                    {mentionSearch !== null && mentionPosition && mentionList.length > 0 && (
+                    {mentionSearch !== null && mentionPosition && (
                         <div
                             className={clsx(
-                                "fixed z-[60] min-w-[160px] max-h-[200px] overflow-y-auto rounded-lg border shadow-xl py-1 custom-scrollbar",
+                                "fixed z-[60] min-w-[200px] max-w-[300px] max-h-[280px] overflow-y-auto rounded-lg border shadow-xl custom-scrollbar",
                                 isDark ? "bg-neutral-900 border-white/10 shadow-black/50" : "bg-white border-gray-200 shadow-gray-200/50"
                             )}
                             style={{
                                 top: mentionPosition.top,
-                                left: Math.min(mentionPosition.left, window.innerWidth - 180)
+                                left: Math.min(mentionPosition.left, window.innerWidth - 220)
                             }}
                         >
-                            {mentionList.map((item, idx) => (
-                                <button
-                                    key={item.id}
-                                    onClick={() => insertMention(item)}
-                                    className={clsx(
-                                        "w-full px-3 py-1.5 text-left text-sm flex items-center gap-2 transition-colors",
-                                        idx === selectedIndex
-                                            ? (isDark ? "bg-indigo-500/20 text-indigo-300" : "bg-indigo-50 text-indigo-600")
-                                            : (isDark ? "hover:bg-white/5 text-neutral-400" : "hover:bg-gray-50 text-gray-700")
-                                    )}
-                                >
-                                    <span className="opacity-60">{item.type === 'character' ? '👤' : '📦'}</span>
-                                    <span className="truncate">{item.name}</span>
-                                </button>
-                            ))}
+                            {/* Category filter tabs */}
+                            <div className={clsx(
+                                "flex gap-1 px-2 py-1.5 border-b flex-wrap",
+                                isDark ? "border-white/8" : "border-gray-100"
+                            )}>
+                                {MENTION_FILTER_TABS.map(tab => (
+                                    <button
+                                        key={tab.key}
+                                        onMouseDown={(e) => { e.preventDefault(); setMentionFilter(tab.key); }}
+                                        className={clsx(
+                                            "px-2 py-0.5 text-[10px] rounded-md font-medium transition-colors",
+                                            mentionFilter === tab.key
+                                                ? "bg-indigo-600 text-white"
+                                                : (isDark ? "text-neutral-500 hover:bg-white/5" : "text-neutral-400 hover:bg-gray-100")
+                                        )}
+                                    >
+                                        {tab.label}
+                                    </button>
+                                ))}
+                            </div>
+                            {/* Results */}
+                            <div className="py-1">
+                                {mentionList.length === 0 ? (
+                                    <div className={clsx("px-3 py-3 text-center text-xs", isDark ? "text-neutral-600" : "text-neutral-400")}>
+                                        {t('common.noResults', '无匹配结果')}
+                                    </div>
+                                ) : (
+                                    mentionList.map((item, idx) => (
+                                        <button
+                                            key={item.id}
+                                            onClick={() => insertMention(item)}
+                                            className={clsx(
+                                                "w-full px-3 py-1.5 text-left text-sm flex items-center gap-2 transition-colors",
+                                                idx === selectedIndex
+                                                    ? (isDark ? "bg-indigo-500/20 text-indigo-300" : "bg-indigo-50 text-indigo-600")
+                                                    : (isDark ? "hover:bg-white/5 text-neutral-400" : "hover:bg-gray-50 text-gray-700")
+                                            )}
+                                        >
+                                            <span className="opacity-60">{MENTION_ICON_MAP[item.type]}</span>
+                                            <span className="truncate">{item.name}</span>
+                                        </button>
+                                    ))
+                                )}
+                            </div>
                         </div>
                     )}
                 </div>

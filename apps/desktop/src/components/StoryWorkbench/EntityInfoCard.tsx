@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { useRef, useEffect, useState } from 'react';
 import { clsx } from 'clsx';
-import { User, Package, X, Hash, BookOpen } from 'lucide-react';
+import { User, Package, X, BookOpen } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 interface EntityInfoCardProps {
@@ -21,15 +21,38 @@ export const EntityInfoCard: React.FC<EntityInfoCardProps> = ({
     const { t } = useTranslation();
     if (!entity) return null;
 
+    const cardRef = useRef<HTMLDivElement>(null);
+    const [adjustedPos, setAdjustedPos] = useState(position);
+
+    useEffect(() => {
+        // Delay to allow the card to render and get actual dimensions
+        requestAnimationFrame(() => {
+            const card = cardRef.current;
+            if (!card) return;
+            const { offsetWidth: w, offsetHeight: h } = card;
+            const vw = window.innerWidth;
+            const vh = window.innerHeight;
+            const pad = 10;
+            let top = position.top;
+            let left = position.left;
+            // If card overflows bottom, flip above cursor
+            if (top + h + pad > vh) top = Math.max(pad, position.top - h - 20);
+            // If card overflows right, shift left
+            if (left + w + pad > vw) left = Math.max(pad, vw - w - pad);
+            setAdjustedPos({ top, left });
+        });
+    }, [position]);
+
     return (
         <div
+            ref={cardRef}
             className={clsx(
                 "fixed z-[100] w-72 rounded-xl border shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200 entity-info-card",
                 isDark ? "bg-neutral-900 border-white/10 shadow-black/60" : "bg-white border-gray-200 shadow-gray-300/50"
             )}
             style={{
-                top: Math.max(10, Math.min(position.top, window.innerHeight - 400)),
-                left: Math.max(10, Math.min(position.left, window.innerWidth - 300))
+                top: adjustedPos.top,
+                left: adjustedPos.left
             }}
         >
             {/* Header */}
@@ -39,12 +62,14 @@ export const EntityInfoCard: React.FC<EntityInfoCardProps> = ({
             )}>
                 <div className="flex items-center gap-3">
                     <div className={clsx(
-                        "w-10 h-10 rounded-lg flex items-center justify-center shadow-inner",
+                        "w-10 h-10 rounded-lg flex items-center justify-center shadow-inner overflow-hidden",
                         type === 'character'
                             ? (isDark ? "bg-indigo-500/20 text-indigo-400" : "bg-indigo-100 text-indigo-600")
                             : (isDark ? "bg-amber-500/20 text-amber-400" : "bg-amber-100 text-amber-600")
                     )}>
-                        {type === 'character' ? <User className="w-5 h-5" /> : <Package className="w-5 h-5" />}
+                        {type === 'character' && entity.avatar ? (
+                            <img src={`local-resource://${entity.avatar}`} alt={entity.name} className="w-full h-full object-cover" />
+                        ) : type === 'character' ? <User className="w-5 h-5" /> : <Package className="w-5 h-5" />}
                     </div>
                     <div>
                         <h3 className={clsx("font-bold text-base leading-tight", isDark ? "text-white" : "text-gray-900")}>
@@ -117,13 +142,7 @@ export const EntityInfoCard: React.FC<EntityInfoCardProps> = ({
                     );
                 })()}
 
-                {/* Footer/Stats */}
-                <div className="pt-2 flex items-center justify-between opacity-30 text-[9px] border-t border-white/5 mt-4">
-                    <span className="flex items-center gap-1"><Hash className="w-2.5 h-2.5" /> ID: {entity.id.slice(-6)}</span>
-                    <span className="flex items-center gap-1 uppercase tracking-tighter">
-                        {t('world.dossier.verified', 'Verified Link')}
-                    </span>
-                </div>
+
             </div>
         </div>
     );

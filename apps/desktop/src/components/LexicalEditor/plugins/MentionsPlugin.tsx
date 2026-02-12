@@ -30,8 +30,24 @@ export default function MentionsPlugin({ novelId }: MentionsPluginProps) {
     const [results, setResults] = useState<MentionableItem[]>([]);
     const [selectedIndex, setSelectedIndex] = useState(0);
     const [menuPosition, setMenuPosition] = useState<{ top: number; left: number } | null>(null);
+    const [activeFilter, setActiveFilter] = useState<'all' | MentionableItem['type']>('all');
     const allMentionables = useRef<MentionableItem[]>([]);
     const triggerOffset = useRef<number | null>(null);
+
+    const ICON_MAP: Record<MentionableItem['type'], string> = {
+        character: '👤',
+        item: '📦',
+        world: '🌐',
+        map: '🗺️',
+    };
+
+    const FILTER_TABS: { key: 'all' | MentionableItem['type']; label: string }[] = [
+        { key: 'all', label: '全部' },
+        { key: 'character', label: '角色' },
+        { key: 'item', label: '物品' },
+        { key: 'world', label: '世界观' },
+        { key: 'map', label: '地图' },
+    ];
 
     // Load mentionables once
     useEffect(() => {
@@ -41,17 +57,20 @@ export default function MentionsPlugin({ novelId }: MentionsPluginProps) {
         }).catch(console.error);
     }, [novelId]);
 
-    // Filter results based on query
+    // Filter results based on query + activeFilter
     useEffect(() => {
         if (queryString === null) {
             setResults([]);
             return;
         }
         const q = queryString.toLowerCase();
-        const filtered = allMentionables.current.filter(m => m.name.toLowerCase().includes(q));
+        let filtered = allMentionables.current.filter(m => m.name.toLowerCase().includes(q));
+        if (activeFilter !== 'all') {
+            filtered = filtered.filter(m => m.type === activeFilter);
+        }
         setResults(filtered.slice(0, 8));
         setSelectedIndex(0);
-    }, [queryString]);
+    }, [queryString, activeFilter]);
 
     // Listen for text changes to detect @ trigger
     useEffect(() => {
@@ -104,6 +123,7 @@ export default function MentionsPlugin({ novelId }: MentionsPluginProps) {
 
                 triggerOffset.current = atIdx;
                 setQueryString(query);
+                setActiveFilter('all');
 
                 // Calculate position
                 const domSelection = window.getSelection();
@@ -230,7 +250,7 @@ export default function MentionsPlugin({ novelId }: MentionsPluginProps) {
         };
     }, [editor, queryString, results, selectedIndex, insertMention]);
 
-    if (queryString === null || !menuPosition || results.length === 0) return null;
+    if (queryString === null || !menuPosition) return null;
 
     return createPortal(
         <div
@@ -242,25 +262,45 @@ export default function MentionsPlugin({ novelId }: MentionsPluginProps) {
                 zIndex: 9999
             }}
         >
-            {results.map((item, i) => (
-                <div
-                    key={item.id}
-                    className={`mention-menu-item ${i === selectedIndex ? 'selected' : ''}`}
-                    onMouseDown={(e) => {
-                        e.preventDefault();
-                        insertMention(item);
-                    }}
-                    onMouseEnter={() => setSelectedIndex(i)}
-                >
-                    <span className="mention-menu-icon">
-                        {item.type === 'character' ? '👤' : '📦'}
-                    </span>
-                    <span className="mention-menu-name">{item.name}</span>
-                    {item.role && (
-                        <span className="mention-menu-role">{item.role}</span>
-                    )}
-                </div>
-            ))}
+            {/* Category filter tabs */}
+            <div className="mention-menu-tabs">
+                {FILTER_TABS.map(tab => (
+                    <button
+                        key={tab.key}
+                        className={`mention-menu-tab ${activeFilter === tab.key ? 'active' : ''}`}
+                        onMouseDown={(e) => {
+                            e.preventDefault();
+                            setActiveFilter(tab.key);
+                        }}
+                    >
+                        {tab.label}
+                    </button>
+                ))}
+            </div>
+            {/* Results list */}
+            {results.length === 0 ? (
+                <div className="mention-menu-empty">无匹配结果</div>
+            ) : (
+                results.map((item, i) => (
+                    <div
+                        key={item.id}
+                        className={`mention-menu-item ${i === selectedIndex ? 'selected' : ''}`}
+                        onMouseDown={(e) => {
+                            e.preventDefault();
+                            insertMention(item);
+                        }}
+                        onMouseEnter={() => setSelectedIndex(i)}
+                    >
+                        <span className="mention-menu-icon">
+                            {ICON_MAP[item.type]}
+                        </span>
+                        <span className="mention-menu-name">{item.name}</span>
+                        {item.role && (
+                            <span className="mention-menu-role">{item.role}</span>
+                        )}
+                    </div>
+                ))
+            )}
         </div>,
         document.body
     );

@@ -8,6 +8,8 @@ Navigate through the main views using the left Activity Bar:
 - **Explorer**: Manage volumes and chapters.
 - **Outline**: (In Development) View chapter outlines.
 - **Ideas**: Manage and view all idea notes.
+- **Plot**: Manage plot lines and story points.
+- **World**: Manage characters, items, world settings, and maps.
 - **Search**: Global full-text search.
 - **Settings**: Adjust theme, language, and shortcuts.
 
@@ -44,8 +46,29 @@ Capture ideas without breaking your flow.
     - Support Regex and Case Sensitivity.
     - Real-time highlighting.
 - **Global Search**: `Ctrl+Shift+F`
-    - Search across all chapters and ideas.
-    - Jump to results instantly.
+    - Search across all chapters, ideas, characters, items, world settings, and maps.
+    - Click results to jump and highlight the corresponding content.
+
+### 📖 Story Structure
+Manage your plot from the "Plot" tab in the editor sidebar:
+- **Plot Lines**: Create multiple parallel or intersecting plot lines (e.g., main plot, subplots).
+- **Plot Points**: Add nodes like foreshadowing, mysteries, promises, and events to plot lines.
+- **Narrative Matrix**: View a "Chapters × Plot Lines" grid for a full overview, with row/column transpose.
+- **Text Anchors**: Pin plot points to specific locations in the editor text for bidirectional navigation.
+
+### 📝 @ Mentions
+Use `@` in plot point descriptions to quickly reference entities:
+1.  Type `@` to open the mention dropdown.
+2.  Use the top tabs to filter by category: **All / Character / Item / World / Map**.
+3.  Type to filter, then press Enter or click to insert.
+4.  Click an inserted @Character or @Item mention to view its detail card.
+
+### 🌍 World Building
+Manage your creative world from the "World" tab:
+- **Characters**: Create character cards with avatars, descriptions, and custom attributes.
+- **Items**: Manage props and objects in your story.
+- **World Settings**: Record world lore, rules, and background.
+- **Maps**: Create canvas maps to visually manage spatial relationships.
 
 ### 🎨 Personalization
 Click the Gear icon at the bottom left to open Settings:

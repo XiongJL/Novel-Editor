@@ -12,7 +12,7 @@ import {
 } from 'lexical';
 import { ReactNode } from 'react';
 
-export type MentionType = 'character' | 'item';
+export type MentionType = 'character' | 'item' | 'world' | 'map';
 
 export type SerializedMentionNode = Spread<
     {
@@ -113,13 +113,24 @@ export class MentionNode extends DecoratorNode<ReactNode> {
     }
 
     decorate(): ReactNode {
-        const isChar = this.__mentionType === 'character';
+        const iconMap: Record<MentionType, string> = {
+            character: '👤',
+            item: '📦',
+            world: '🌐',
+            map: '🗺️',
+        };
+        const labelMap: Record<MentionType, string> = {
+            character: '角色',
+            item: '物品',
+            world: '世界观',
+            map: '地图',
+        };
         return (
             <span
-                className={`mention-capsule-inner ${isChar ? 'mention-character' : 'mention-item'}`}
-                title={`${isChar ? '角色' : '物品'}: ${this.__mentionName}`}
+                className={`mention-capsule-inner mention-${this.__mentionType}`}
+                title={`${labelMap[this.__mentionType]}: ${this.__mentionName}`}
             >
-                <span className="mention-icon">{isChar ? '👤' : '📦'}</span>
+                <span className="mention-icon">{iconMap[this.__mentionType]}</span>
                 <span className="mention-text">{this.__mentionName}</span>
             </span>
         );

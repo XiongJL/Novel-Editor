@@ -1,4 +1,4 @@
-import { app, dialog, ipcMain, BrowserWindow } from "electron";
+import { app, dialog, ipcMain, nativeImage, BrowserWindow, protocol, net } from "electron";
 import { db, initDb } from "@novel-editor/core";
 import { fileURLToPath } from "node:url";
 import path$1 from "node:path";
@@ -3286,6 +3286,9 @@ ipcMain.handle("app:toggle-fullscreen", () => {
   }
   return false;
 });
+ipcMain.handle("app:get-user-data-path", () => {
+  return app.getPath("userData");
+});
 ipcMain.handle("db:get-novels", async () => {
   console.log("[Main] Received db:get-novels");
   try {
@@ -3327,6 +3330,41 @@ ipcMain.handle("db:update-novel", async (_, { id, data }) => {
     });
   } catch (e) {
     console.error("[Main] db:update-novel failed:", e);
+    throw e;
+  }
+});
+ipcMain.handle("db:upload-novel-cover", async (_, novelId) => {
+  var _a;
+  try {
+    const result = await dialog.showOpenDialog(win, {
+      title: "Select Cover Image",
+      filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "webp", "gif", "bmp"] }],
+      properties: ["openFile"]
+    });
+    if (result.canceled || result.filePaths.length === 0)
+      return null;
+    const srcPath = result.filePaths[0];
+    const ext = path$1.extname(srcPath);
+    const coversDir = path$1.join(app.getPath("userData"), "covers");
+    if (!fs.existsSync(coversDir))
+      fs.mkdirSync(coversDir, { recursive: true });
+    const novel = await db.novel.findUnique({ where: { id: novelId }, select: { coverUrl: true } });
+    if ((_a = novel == null ? void 0 : novel.coverUrl) == null ? void 0 : _a.startsWith("covers/")) {
+      const oldPath = path$1.join(app.getPath("userData"), novel.coverUrl);
+      if (fs.existsSync(oldPath))
+        fs.unlinkSync(oldPath);
+    }
+    const fileName = `${novelId}${ext}`;
+    const destPath = path$1.join(coversDir, fileName);
+    fs.copyFileSync(srcPath, destPath);
+    const relativePath = `covers/${fileName}`;
+    await db.novel.update({
+      where: { id: novelId },
+      data: { coverUrl: relativePath }
+    });
+    return { path: relativePath };
+  } catch (e) {
+    console.error("[Main] db:upload-novel-cover failed:", e);
     throw e;
   }
 });
@@ -3869,6 +3907,107 @@ ipcMain.handle("db:reorder-plot-points", async (_, { plotLineId, pointIds }) => 
     throw e;
   }
 });
+ipcMain.handle("db:upload-character-image", async (_, { characterId, type }) => {
+  try {
+    const result = await dialog.showOpenDialog(win, {
+      title: type === "avatar" ? "Select Avatar Image" : "Select Full Body Image",
+      filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "webp", "gif", "bmp"] }],
+      properties: ["openFile"]
+    });
+    if (result.canceled || result.filePaths.length === 0)
+      return null;
+    const srcPath = result.filePaths[0];
+    const ext = path$1.extname(srcPath);
+    const charDir = path$1.join(app.getPath("userData"), "characters", characterId);
+    if (!fs.existsSync(charDir))
+      fs.mkdirSync(charDir, { recursive: true });
+    if (type === "avatar") {
+      const fileName = `avatar${ext}`;
+      const destPath = path$1.join(charDir, fileName);
+      const existingFiles = fs.readdirSync(charDir).filter((f) => f.startsWith("avatar."));
+      existingFiles.forEach((f) => {
+        try {
+          fs.unlinkSync(path$1.join(charDir, f));
+        } catch {
+        }
+      });
+      fs.copyFileSync(srcPath, destPath);
+      const relativePath = `characters/${characterId}/${fileName}`;
+      await db.character.update({
+        where: { id: characterId },
+        data: { avatar: relativePath }
+      });
+      return { path: relativePath };
+    } else {
+      const timestamp = Date.now();
+      const fileName = `fullbody_${timestamp}${ext}`;
+      const destPath = path$1.join(charDir, fileName);
+      fs.copyFileSync(srcPath, destPath);
+      const relativePath = `characters/${characterId}/${fileName}`;
+      const char = await db.character.findUnique({ where: { id: characterId }, select: { fullBodyImages: true } });
+      let images = [];
+      try {
+        images = JSON.parse((char == null ? void 0 : char.fullBodyImages) || "[]");
+      } catch {
+      }
+      images.push(relativePath);
+      await db.character.update({
+        where: { id: characterId },
+        data: { fullBodyImages: JSON.stringify(images) }
+      });
+      return { path: relativePath, images };
+    }
+  } catch (e) {
+    console.error("[Main] db:upload-character-image failed:", e);
+    throw e;
+  }
+});
+ipcMain.handle("db:delete-character-image", async (_, { characterId, imagePath, type }) => {
+  try {
+    const fullPath = path$1.join(app.getPath("userData"), imagePath);
+    if (fs.existsSync(fullPath))
+      fs.unlinkSync(fullPath);
+    if (type === "avatar") {
+      await db.character.update({
+        where: { id: characterId },
+        data: { avatar: null }
+      });
+    } else {
+      const char = await db.character.findUnique({ where: { id: characterId }, select: { fullBodyImages: true } });
+      let images = [];
+      try {
+        images = JSON.parse((char == null ? void 0 : char.fullBodyImages) || "[]");
+      } catch {
+      }
+      images = images.filter((p) => p !== imagePath);
+      await db.character.update({
+        where: { id: characterId },
+        data: { fullBodyImages: JSON.stringify(images) }
+      });
+    }
+  } catch (e) {
+    console.error("[Main] db:delete-character-image failed:", e);
+    throw e;
+  }
+});
+ipcMain.handle("db:get-character-map-locations", async (_, characterId) => {
+  try {
+    const markers = await db.characterMapMarker.findMany({
+      where: { characterId },
+      include: {
+        map: { select: { id: true, name: true, type: true } }
+      }
+    });
+    return markers.map((m) => ({
+      mapId: m.map.id,
+      mapName: m.map.name,
+      mapType: m.map.type
+    }));
+  } catch (e) {
+    console.error("[Main] db:get-character-map-locations failed:", e);
+    return [];
+  }
+});
 ipcMain.handle("db:get-characters", async (_, novelId) => {
   try {
     return await db.character.findMany({
@@ -3989,7 +4128,7 @@ ipcMain.handle("db:delete-item", async (_, id) => {
 });
 ipcMain.handle("db:get-mentionables", async (_, novelId) => {
   try {
-    const [characters, items] = await Promise.all([
+    const [characters, items, worldSettings, maps] = await Promise.all([
       db.character.findMany({
         where: { novelId },
         select: { id: true, name: true, avatar: true, role: true, isStarred: true },
@@ -4002,11 +4141,23 @@ ipcMain.handle("db:get-mentionables", async (_, novelId) => {
         where: { novelId },
         select: { id: true, name: true, icon: true },
         orderBy: { name: "asc" }
+      }),
+      db.worldSetting.findMany({
+        where: { novelId },
+        select: { id: true, name: true, icon: true, type: true },
+        orderBy: { name: "asc" }
+      }),
+      db.mapCanvas.findMany({
+        where: { novelId },
+        select: { id: true, name: true, type: true },
+        orderBy: { name: "asc" }
       })
     ]);
     return [
       ...characters.map((c) => ({ ...c, type: "character" })),
-      ...items.map((i) => ({ ...i, type: "item" }))
+      ...items.map((i) => ({ ...i, type: "item" })),
+      ...worldSettings.map((ws) => ({ id: ws.id, name: ws.name, icon: ws.icon, type: "world", role: ws.type })),
+      ...maps.map((m) => ({ id: m.id, name: m.name, type: "map", role: m.type }))
     ];
   } catch (e) {
     console.error("[Main] db:get-mentionables failed:", e);
@@ -4059,6 +4210,180 @@ ipcMain.handle("db:delete-world-setting", async (_, id) => {
     return await db.worldSetting.delete({ where: { id } });
   } catch (e) {
     console.error("[Main] db:delete-world-setting failed:", e);
+    throw e;
+  }
+});
+ipcMain.handle("db:get-maps", async (_, novelId) => {
+  try {
+    return await db.mapCanvas.findMany({
+      where: { novelId },
+      orderBy: { sortOrder: "asc" }
+    });
+  } catch (e) {
+    console.error("[Main] db:get-maps failed:", e);
+    throw e;
+  }
+});
+ipcMain.handle("db:get-map", async (_, id) => {
+  try {
+    return await db.mapCanvas.findUnique({
+      where: { id },
+      include: {
+        markers: { include: { character: { select: { id: true, name: true, avatar: true, role: true } } } },
+        elements: { orderBy: { z: "asc" } }
+      }
+    });
+  } catch (e) {
+    console.error("[Main] db:get-map failed:", e);
+    throw e;
+  }
+});
+ipcMain.handle("db:create-map", async (_, data) => {
+  try {
+    return await db.mapCanvas.create({ data });
+  } catch (e) {
+    console.error("[Main] db:create-map failed:", e);
+    throw e;
+  }
+});
+ipcMain.handle("db:update-map", async (_, { id, data }) => {
+  try {
+    const { markers, elements, createdAt, updatedAt, ...updateData } = data;
+    return await db.mapCanvas.update({ where: { id }, data: updateData });
+  } catch (e) {
+    console.error("[Main] db:update-map failed:", e);
+    throw e;
+  }
+});
+ipcMain.handle("db:delete-map", async (_, id) => {
+  try {
+    const map = await db.mapCanvas.findUnique({ where: { id }, select: { background: true, novelId: true } });
+    if (map == null ? void 0 : map.background) {
+      const bgPath = path$1.join(app.getPath("userData"), map.background);
+      if (fs.existsSync(bgPath))
+        fs.unlinkSync(bgPath);
+    }
+    return await db.mapCanvas.delete({ where: { id } });
+  } catch (e) {
+    console.error("[Main] db:delete-map failed:", e);
+    throw e;
+  }
+});
+ipcMain.handle("db:upload-map-bg", async (_, mapId) => {
+  try {
+    const map = await db.mapCanvas.findUnique({ where: { id: mapId }, select: { novelId: true, background: true } });
+    if (!map)
+      return null;
+    const result = await dialog.showOpenDialog(win, {
+      title: "Select Map Image",
+      filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "webp", "gif", "bmp"] }],
+      properties: ["openFile"]
+    });
+    if (result.canceled || result.filePaths.length === 0)
+      return null;
+    const srcPath = result.filePaths[0];
+    const ext = path$1.extname(srcPath);
+    const mapsDir = path$1.join(app.getPath("userData"), "maps", map.novelId);
+    if (!fs.existsSync(mapsDir))
+      fs.mkdirSync(mapsDir, { recursive: true });
+    if (map.background) {
+      const oldPath = path$1.join(app.getPath("userData"), map.background);
+      if (fs.existsSync(oldPath))
+        fs.unlinkSync(oldPath);
+    }
+    const fileName = `${mapId}${ext}`;
+    const destPath = path$1.join(mapsDir, fileName);
+    fs.copyFileSync(srcPath, destPath);
+    const relativePath = `maps/${map.novelId}/${fileName}`;
+    const img = nativeImage.createFromPath(destPath);
+    const imgSize = img.getSize();
+    const width = imgSize.width || 1200;
+    const height = imgSize.height || 800;
+    await db.mapCanvas.update({
+      where: { id: mapId },
+      data: { background: relativePath, width, height }
+    });
+    return { path: relativePath, width, height };
+  } catch (e) {
+    console.error("[Main] db:upload-map-bg failed:", e);
+    throw e;
+  }
+});
+ipcMain.handle("db:get-map-markers", async (_, mapId) => {
+  try {
+    return await db.characterMapMarker.findMany({
+      where: { mapId },
+      include: { character: { select: { id: true, name: true, avatar: true, role: true } } }
+    });
+  } catch (e) {
+    console.error("[Main] db:get-map-markers failed:", e);
+    throw e;
+  }
+});
+ipcMain.handle("db:create-map-marker", async (_, data) => {
+  try {
+    return await db.characterMapMarker.create({
+      data,
+      include: { character: { select: { id: true, name: true, avatar: true, role: true } } }
+    });
+  } catch (e) {
+    console.error("[Main] db:create-map-marker failed:", e);
+    throw e;
+  }
+});
+ipcMain.handle("db:update-map-marker", async (_, { id, data }) => {
+  try {
+    return await db.characterMapMarker.update({
+      where: { id },
+      data,
+      include: { character: { select: { id: true, name: true, avatar: true, role: true } } }
+    });
+  } catch (e) {
+    console.error("[Main] db:update-map-marker failed:", e);
+    throw e;
+  }
+});
+ipcMain.handle("db:delete-map-marker", async (_, id) => {
+  try {
+    return await db.characterMapMarker.delete({ where: { id } });
+  } catch (e) {
+    console.error("[Main] db:delete-map-marker failed:", e);
+    throw e;
+  }
+});
+ipcMain.handle("db:get-map-elements", async (_, mapId) => {
+  try {
+    return await db.mapElement.findMany({
+      where: { mapId },
+      orderBy: { z: "asc" }
+    });
+  } catch (e) {
+    console.error("[Main] db:get-map-elements failed:", e);
+    throw e;
+  }
+});
+ipcMain.handle("db:create-map-element", async (_, data) => {
+  try {
+    return await db.mapElement.create({ data });
+  } catch (e) {
+    console.error("[Main] db:create-map-element failed:", e);
+    throw e;
+  }
+});
+ipcMain.handle("db:update-map-element", async (_, { id, data }) => {
+  try {
+    const { createdAt, updatedAt, map, ...updateData } = data;
+    return await db.mapElement.update({ where: { id }, data: updateData });
+  } catch (e) {
+    console.error("[Main] db:update-map-element failed:", e);
+    throw e;
+  }
+});
+ipcMain.handle("db:delete-map-element", async (_, id) => {
+  try {
+    return await db.mapElement.delete({ where: { id } });
+  } catch (e) {
+    console.error("[Main] db:delete-map-element failed:", e);
     throw e;
   }
 });
@@ -4283,6 +4608,11 @@ app.on("activate", () => {
 });
 app.whenReady().then(async () => {
   console.log("[Main] App Ready. Starting DB Setup...");
+  protocol.handle("local-resource", (request) => {
+    const relativePath = decodeURIComponent(request.url.replace("local-resource://", ""));
+    const fullPath = path$1.join(app.getPath("userData"), relativePath);
+    return net.fetch("file:///" + fullPath.replace(/\\/g, "/"));
+  });
   let dataPath;
   if (app.isPackaged) {
     const exePath = path$1.dirname(app.getPath("exe"));

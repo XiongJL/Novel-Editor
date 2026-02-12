@@ -12,6 +12,7 @@ electron.contextBridge.exposeInMainWorld("db", {
   renameVolume: (data) => electron.ipcRenderer.invoke("db:rename-volume", data),
   renameChapter: (data) => electron.ipcRenderer.invoke("db:rename-chapter", data),
   updateNovel: (data) => electron.ipcRenderer.invoke("db:update-novel", data),
+  uploadNovelCover: (novelId) => electron.ipcRenderer.invoke("db:upload-novel-cover", novelId),
   // Idea
   getIdeas: (novelId) => electron.ipcRenderer.invoke("db:get-ideas", novelId),
   createIdea: (data) => electron.ipcRenderer.invoke("db:create-idea", data),
@@ -39,6 +40,9 @@ electron.contextBridge.exposeInMainWorld("db", {
   createCharacter: (data) => electron.ipcRenderer.invoke("db:create-character", data),
   updateCharacter: (id, data) => electron.ipcRenderer.invoke("db:update-character", { id, data }),
   deleteCharacter: (id) => electron.ipcRenderer.invoke("db:delete-character", id),
+  uploadCharacterImage: (characterId, type) => electron.ipcRenderer.invoke("db:upload-character-image", { characterId, type }),
+  deleteCharacterImage: (characterId, imagePath, type) => electron.ipcRenderer.invoke("db:delete-character-image", { characterId, imagePath, type }),
+  getCharacterMapLocations: (characterId) => electron.ipcRenderer.invoke("db:get-character-map-locations", characterId),
   getItems: (novelId) => electron.ipcRenderer.invoke("db:get-items", novelId),
   getItem: (id) => electron.ipcRenderer.invoke("db:get-item", id),
   createItem: (data) => electron.ipcRenderer.invoke("db:create-item", data),
@@ -62,10 +66,26 @@ electron.contextBridge.exposeInMainWorld("db", {
   // Data Aggregation
   getCharacterTimeline: (characterId) => electron.ipcRenderer.invoke("db:get-character-timeline", characterId),
   getRecentChapters: (characterName, novelId, limit) => electron.ipcRenderer.invoke("db:get-recent-chapters", characterName, novelId, limit),
-  getCharacterChapterAppearances: (characterId) => electron.ipcRenderer.invoke("db:get-character-chapter-appearances", characterId)
+  getCharacterChapterAppearances: (characterId) => electron.ipcRenderer.invoke("db:get-character-chapter-appearances", characterId),
+  // Map System
+  getMaps: (novelId) => electron.ipcRenderer.invoke("db:get-maps", novelId),
+  getMap: (id) => electron.ipcRenderer.invoke("db:get-map", id),
+  createMap: (data) => electron.ipcRenderer.invoke("db:create-map", data),
+  updateMap: (id, data) => electron.ipcRenderer.invoke("db:update-map", { id, data }),
+  deleteMap: (id) => electron.ipcRenderer.invoke("db:delete-map", id),
+  uploadMapBackground: (mapId) => electron.ipcRenderer.invoke("db:upload-map-bg", mapId),
+  getMapMarkers: (mapId) => electron.ipcRenderer.invoke("db:get-map-markers", mapId),
+  createMapMarker: (data) => electron.ipcRenderer.invoke("db:create-map-marker", data),
+  updateMapMarker: (id, data) => electron.ipcRenderer.invoke("db:update-map-marker", { id, data }),
+  deleteMapMarker: (id) => electron.ipcRenderer.invoke("db:delete-map-marker", id),
+  getMapElements: (mapId) => electron.ipcRenderer.invoke("db:get-map-elements", mapId),
+  createMapElement: (data) => electron.ipcRenderer.invoke("db:create-map-element", data),
+  updateMapElement: (id, data) => electron.ipcRenderer.invoke("db:update-map-element", { id, data }),
+  deleteMapElement: (id) => electron.ipcRenderer.invoke("db:delete-map-element", id)
 });
 electron.contextBridge.exposeInMainWorld("electron", {
   toggleFullScreen: () => electron.ipcRenderer.invoke("app:toggle-fullscreen"),
+  getUserDataPath: () => electron.ipcRenderer.invoke("app:get-user-data-path"),
   onFullScreenChange: (callback) => {
     const listener = (_event, state) => callback(state);
     electron.ipcRenderer.on("app:fullscreen-change", listener);

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { clsx } from 'clsx';
 import { Plus, Trash2, ChevronRight, Globe, Mountain, Sparkles, Users as UsersIcon, Cpu, HelpCircle, Edit3 } from 'lucide-react';
@@ -47,6 +47,27 @@ export default function WorldSettingList({ novelId, theme }: WorldSettingListPro
     const [editingSetting, setEditingSetting] = useState<WorldSetting | null>(null);
     const [isEditorOpen, setIsEditorOpen] = useState(false);
     const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+    const containerRef = useRef<HTMLDivElement>(null);
+
+    // Listen for navigate-to-world-setting event
+    useEffect(() => {
+        const handleNavigate = (e: CustomEvent<{ entityId: string }>) => {
+            const { entityId } = e.detail;
+            setTimeout(() => {
+                if (!containerRef.current) return;
+                const el = containerRef.current.querySelector(`[data-setting-id="${entityId}"]`) as HTMLElement;
+                if (el) {
+                    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    el.style.transition = 'background-color 0.3s';
+                    el.style.backgroundColor = isDark ? 'rgba(99, 102, 241, 0.15)' : 'rgba(99, 102, 241, 0.1)';
+                    setTimeout(() => { el.style.backgroundColor = ''; }, 2000);
+                }
+            }, 50);
+        };
+
+        window.addEventListener('navigate-to-world-setting', handleNavigate as unknown as EventListener);
+        return () => window.removeEventListener('navigate-to-world-setting', handleNavigate as unknown as EventListener);
+    }, [isDark]);
 
     const loadSettings = useCallback(async () => {
         try {
@@ -116,7 +137,7 @@ export default function WorldSettingList({ novelId, theme }: WorldSettingListPro
             </div>
 
             {/* List */}
-            <div className="px-2 space-y-1">
+            <div ref={containerRef} className="px-2 space-y-1">
                 {settings.length === 0 ? (
                     <div className={clsx("text-center py-12", isDark ? "text-neutral-600" : "text-neutral-400")}>
                         <Globe className="w-8 h-8 mx-auto mb-2 opacity-50" />
@@ -136,6 +157,7 @@ export default function WorldSettingList({ novelId, theme }: WorldSettingListPro
                         return (
                             <div
                                 key={setting.id}
+                                data-setting-id={setting.id}
                                 role="button"
                                 tabIndex={0}
                                 onClick={() => { setEditingSetting(setting); setIsEditorOpen(true); }}

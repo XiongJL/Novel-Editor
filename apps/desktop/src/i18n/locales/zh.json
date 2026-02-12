@@ -101,7 +101,7 @@
     "explorer": "目录",
     "outline": "大纲",
     "characters": "角色与世界观",
-    "map": "思维导图",
+    "map": "地图",
     "idea": "灵感",
     "newVolume": "新建卷",
     "addChapter": "添加章节",
@@ -144,7 +144,8 @@
       "idea": "灵感",
       "character": "角色",
       "item": "物品",
-      "world": "世界观"
+      "world": "世界观",
+      "map": "地图"
     }
   },
     "idea": {
@@ -334,5 +335,30 @@
     "storyTimeline": "故事性生平",
     "noChapterAppearances": "该角色未在任何章节中出现",
     "noChapterAppearancesHint": "角色名称出现在章节正文中时自动标记"
+  },
+  "map": {
+    "title": "地图",
+    "addMap": "新建地图",
+    "noMaps": "暂无地图",
+    "noMapsHint": "点击右上角 + 创建",
+    "newMap": "新地图",
+    "rename": "重命名",
+    "deleteConfirm": "确定要删除这张地图吗？所有标记也将被删除。",
+    "uploadBg": "上传底图",
+    "changeBg": "更换底图",
+    "noBg": "暂无底图",
+    "noBgHint": "点击「上传底图」添加地图图片",
+    "dragCharacter": "拖拽角色到地图上放置标记",
+    "markerLabel": "标记名称",
+    "removeMarker": "移除标记",
+    "characters": "角色列表",
+    "type": {
+      "world": "世界地图",
+      "region": "区域地图",
+      "scene": "场景地图"
+    },
+    "zoomIn": "放大",
+    "zoomOut": "缩小",
+    "resetView": "重置视图"
   }
 }

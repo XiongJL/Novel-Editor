@@ -4,6 +4,7 @@ import clsx from 'clsx';
 import { createPortal } from 'react-dom';
 import { X, Edit, User, Box, MapPin, Zap } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { getAvatarColors } from '../../utils/avatarUtils';
 
 interface CharacterPreviewCardProps {
     id: string;
@@ -133,12 +134,13 @@ export const CharacterPreviewCard: React.FC<CharacterPreviewCardProps> = ({
                 {/* Header with Avatar/Icon */}
                 <div className={clsx("p-4 border-b flex items-start gap-3", isDark ? "border-white/5" : "border-gray-100")}>
                     <div className={clsx(
-                        "w-12 h-12 rounded-full flex items-center justify-center text-xl shadow-sm shrink-0",
-                        type === 'character' ? "bg-indigo-100 text-indigo-600 dark:bg-indigo-900/30 dark:text-indigo-400" : "bg-emerald-100 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400"
+                        "w-12 h-12 rounded-full flex items-center justify-center text-xl shadow-sm shrink-0 overflow-hidden bg-gradient-to-br",
+                        type === 'character'
+                            ? (() => { const c = getAvatarColors(data.id || '', data.name, isDark); return `${c[0]} ${c[1]} ${c[2]}`; })()
+                            : "bg-emerald-100 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400"
                     )}>
-                        {(data as any).avatar ? (
-                            // Assuming avatar is text/emoji for now, or use <img /> if URL
-                            (data as any).avatar.length < 5 ? (data as any).avatar : <img src={(data as any).avatar} alt={data.name} className="w-full h-full object-cover rounded-full" />
+                        {type === 'character' && (data as any).avatar ? (
+                            <img src={`local-resource://${(data as any).avatar}`} alt={data.name} className="w-full h-full object-cover rounded-full" />
                         ) : (
                             data.name[0]?.toUpperCase()
                         )}
@@ -180,6 +182,28 @@ export const CharacterPreviewCard: React.FC<CharacterPreviewCardProps> = ({
                             ))}
                         </div>
                     )}
+
+                    {/* Full Body Image Preview (first image for character) */}
+                    {type === 'character' && (() => {
+                        const char = data as Character;
+                        try {
+                            const imgs = JSON.parse(char.fullBodyImages || '[]');
+                            if (imgs.length > 0) {
+                                return (
+                                    <div className="mb-4">
+                                        <img
+                                            src={`local-resource://${imgs[0]}`}
+                                            alt={char.name}
+                                            className={clsx("w-full max-h-40 object-contain rounded-lg border",
+                                                isDark ? "border-white/10" : "border-gray-200"
+                                            )}
+                                        />
+                                    </div>
+                                );
+                            }
+                        } catch { }
+                        return null;
+                    })()}
 
                     {/* Items possessed (for Character) */}
                     {type === 'character' && (data as Character).items && (data as Character).items!.length > 0 && (

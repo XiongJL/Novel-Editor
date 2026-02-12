@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ProjectCard } from '../components/ProjectCard';
-import { Plus, Settings } from 'lucide-react';
+import { Plus, Settings, Upload, X } from 'lucide-react';
 import Editor from './Editor';
 import SettingsModal from '../components/SettingsModal';
 import { useTranslation } from 'react-i18next';
@@ -179,17 +179,47 @@ export default function Home() {
                                             />
                                         </div>
                                         <div>
-                                            <label className={clsx("block text-xs uppercase mb-1", isDark ? "text-neutral-500" : "text-gray-400")}>{t('home.coverUrl')}</label>
-                                            <input
-                                                value={editForm.coverUrl}
-                                                onChange={e => setEditForm({ ...editForm, coverUrl: e.target.value })}
-                                                placeholder="https://..."
-                                                className={clsx(
-                                                    "w-full border rounded p-2 outline-none focus:border-indigo-500 transition-colors",
-                                                    isDark ? "bg-black/50 border-white/10" : "bg-gray-50 border-gray-200"
+                                            <label className={clsx("block text-xs uppercase mb-2", isDark ? "text-neutral-500" : "text-gray-400")}>{t('home.coverUrl')}</label>
+                                            <div className="flex items-center gap-3">
+                                                {editForm.coverUrl ? (
+                                                    <div className="relative group">
+                                                        <img
+                                                            src={editForm.coverUrl.startsWith('covers/') ? `local-resource://${editForm.coverUrl}` : editForm.coverUrl}
+                                                            alt="cover"
+                                                            className={clsx("w-16 h-24 object-cover rounded-lg border", isDark ? "border-white/10" : "border-gray-200")}
+                                                        />
+                                                        <button
+                                                            onClick={() => setEditForm({ ...editForm, coverUrl: '' })}
+                                                            className="absolute -top-1 -right-1 p-0.5 rounded-full bg-red-500 text-white opacity-0 group-hover:opacity-100 transition-opacity"
+                                                        >
+                                                            <X className="w-3 h-3" />
+                                                        </button>
+                                                    </div>
+                                                ) : (
+                                                    <div className={clsx(
+                                                        "w-16 h-24 rounded-lg border border-dashed flex items-center justify-center",
+                                                        isDark ? "border-white/10 text-neutral-600" : "border-gray-300 text-gray-400"
+                                                    )}>
+                                                        <Upload className="w-5 h-5 opacity-40" />
+                                                    </div>
                                                 )}
-                                            />
-                                            <p className={clsx("text-[10px] mt-1", isDark ? "text-neutral-600" : "text-gray-400")}>{t('home.autoCover')}</p>
+                                                <button
+                                                    onClick={async () => {
+                                                        if (!editingNovel) return;
+                                                        const result = await window.db.uploadNovelCover(editingNovel.id);
+                                                        if (result) {
+                                                            setEditForm({ ...editForm, coverUrl: result.path });
+                                                        }
+                                                    }}
+                                                    className={clsx(
+                                                        "text-xs px-3 py-1.5 rounded-lg border transition-colors flex items-center gap-1.5",
+                                                        isDark ? "border-white/10 hover:bg-white/5 text-neutral-300" : "border-gray-200 hover:bg-gray-50 text-gray-600"
+                                                    )}
+                                                >
+                                                    <Upload className="w-3.5 h-3.5" />
+                                                    {t('home.uploadCover', '上传封面')}
+                                                </button>
+                                            </div>
                                         </div>
                                     </div>
 

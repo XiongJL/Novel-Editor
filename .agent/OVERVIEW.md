@@ -2,7 +2,7 @@
 
 This document provides a high-level summary of the Novel Editor project to help AI agents quickly establish context.
 
-**Last Updated**: 2026-02-11
+**Last Updated**: 2026-02-12
 
 ## 1. Essentials
 *   **Project**: Novel Editor (Monorepo)
@@ -85,11 +85,16 @@ This document provides a high-level summary of the Novel Editor project to help 
         *   **Text -> Plot**: Click anchor in text to highlight plot point in sidebar.
         *   **Plot -> Text**: Click "Jump" icon on plot card to scroll to text anchor (with shake feedback if missing).
     *   **Unified Visuals**: Consistent icons (Mystery/Promise/Foreshadowing/Event) across Matrix and Sidebar.
-    *   **Character Mentions (@)**:
+    *   **@ Mentions**:
         *   **Smart Mention Recognition**: Regular expression based parsing in textareas and matrix views.
+        *   **Extended Types**: Supports character, item, world setting, and map mentions with category filter tabs.
+        *   **Dual Mention Systems**: Lexical editor uses `MentionsPlugin.tsx`; PlotPointModal uses independent textarea-based implementation. Both support all 4 entity types.
         *   **Transparent Textarea Overlay**: Solved text overlapping by making native textarea text transparent (maintaining cursor visibility) and rendering highlighted mentions on a perfectly aligned backdrop layer.
-        *   **Entity Info Card**: Global click-outside detection for automatic closure of character/item detail cards.
+        *   **Entity Info Card**: Click-outside detection for auto-closing. Dynamic positioning to prevent overflow beyond viewport.
         *   **i18n Support**: Full localization for entity data cards and mention labels.
+    *   **Global Search (Map Integration)**:
+        *   Search sidebar supports map name searching alongside chapters, ideas, characters, items, and world settings.
+        *   Click search results to navigate and highlight corresponding entities.
 
 ## 5. Current Status & Known Issues
 *   **Status**: 
@@ -101,10 +106,12 @@ This document provides a high-level summary of the Novel Editor project to help 
     *   **Global search with FTS5 indexing complete.**
     *   **Narrative Matrix view implemented.**
     *   **Plot System fully interactive (Anchors, Jump, Sync).**
-    *   **Character Mentions (@) fully functional** in PlotPointModal and NarrativeMatrix with integrated EntityInfoCard.
+    *   **@ Mentions fully functional** in PlotPointModal, NarrativeMatrix, and Lexical editor with support for character, item, world, and map types.
+    *   **Global Search extended** with map name search category.
+    *   **EntityInfoCard optimized** with dynamic positioning and cleaned UI.
     *   **System-wide Delete Confirmation unified** using `ConfirmModal`.
 *   **Planned**:
-    *   **Lexical Mention Node**: Real-time `@` autocomplete within the Lexical editor itself (currently implemented in Modals/Matrix).
+    *   Cloud sync integration.
 *   **Critical Notes**:
     *   `packages/core` MUST be built (`pnpm build`) for Electron to load it.
     *   Old `EditorToolbar.tsx` component is deprecated (replaced by Lexical `ToolbarPlugin`).

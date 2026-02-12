@@ -246,5 +246,30 @@
       "traits": "Traits",
       "verified": "Verified Link"
     }
+  },
+  "map": {
+    "title": "Maps",
+    "addMap": "New Map",
+    "noMaps": "No maps yet",
+    "noMapsHint": "Click + to create one",
+    "newMap": "New Map",
+    "rename": "Rename",
+    "deleteConfirm": "Delete this map? All markers will be removed.",
+    "uploadBg": "Upload Background",
+    "changeBg": "Change Background",
+    "noBg": "No background",
+    "noBgHint": "Click 'Upload Background' to add a map image",
+    "dragCharacter": "Drag characters onto the map to place markers",
+    "markerLabel": "Marker Label",
+    "removeMarker": "Remove Marker",
+    "characters": "Characters",
+    "type": {
+      "world": "World Map",
+      "region": "Regional Map",
+      "scene": "Scene Map"
+    },
+    "zoomIn": "Zoom In",
+    "zoomOut": "Zoom Out",
+    "resetView": "Reset View"
   }
 }
