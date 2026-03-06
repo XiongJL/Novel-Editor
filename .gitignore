@@ -21,3 +21,5 @@ target
 # SQLite database
 *.db
 *.db-journal
+功能借鉴/*
+.gitignore

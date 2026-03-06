@@ -123,3 +123,28 @@ contextBridge.exposeInMainWorld('backup', {
     getAutoBackups: () => ipcRenderer.invoke('backup:get-auto'),
     restoreAutoBackup: (filename: string) => ipcRenderer.invoke('backup:restore-auto', filename),
 })
+
+contextBridge.exposeInMainWorld('ai', {
+    getSettings: () => ipcRenderer.invoke('ai:get-settings'),
+    getMapImageStats: () => ipcRenderer.invoke('ai:get-map-image-stats'),
+    updateSettings: (partial: any) => ipcRenderer.invoke('ai:update-settings', partial),
+    testConnection: () => ipcRenderer.invoke('ai:test-connection'),
+    testMcp: () => ipcRenderer.invoke('ai:test-mcp'),
+    testProxy: () => ipcRenderer.invoke('ai:test-proxy'),
+    testGenerate: (prompt?: string) => ipcRenderer.invoke('ai:test-generate', { prompt }),
+    generateTitle: (payload: any) => ipcRenderer.invoke('ai:generate-title', payload),
+    continueWriting: (payload: any) => ipcRenderer.invoke('ai:continue-writing', payload),
+    previewContinuePrompt: (payload: any) => ipcRenderer.invoke('ai:preview-continue-prompt', payload),
+    checkConsistency: (payload: any) => ipcRenderer.invoke('ai:check-consistency', payload),
+    generateCreativeAssets: (payload: any) => ipcRenderer.invoke('ai:generate-creative-assets', payload),
+    previewCreativeAssetsPrompt: (payload: any) => ipcRenderer.invoke('ai:preview-creative-assets-prompt', payload),
+    validateCreativeAssetsDraft: (payload: any) => ipcRenderer.invoke('ai:validate-creative-assets', payload),
+    confirmCreativeAssets: (payload: any) => ipcRenderer.invoke('ai:confirm-creative-assets', payload),
+    generateMapImage: (payload: any) => ipcRenderer.invoke('ai:generate-map-image', payload),
+    previewMapPrompt: (payload: any) => ipcRenderer.invoke('ai:preview-map-prompt', payload),
+    rebuildChapterSummary: (chapterId: string) => ipcRenderer.invoke('ai:rebuild-chapter-summary', { chapterId }),
+    executeAction: (actionId: string, payload?: unknown) => ipcRenderer.invoke('ai:execute-action', { actionId, payload }),
+    openClawInvoke: (name: string, args?: unknown) => ipcRenderer.invoke('ai:openclaw-invoke', { name, arguments: args }),
+    openClawMcpInvoke: (name: string, args?: unknown) => ipcRenderer.invoke('ai:openclaw-mcp-invoke', { name, arguments: args }),
+    openClawSkillInvoke: (name: string, input?: unknown) => ipcRenderer.invoke('ai:openclaw-skill-invoke', { name, input }),
+})

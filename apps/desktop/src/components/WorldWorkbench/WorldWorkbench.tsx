@@ -57,6 +57,17 @@ export default function WorldWorkbench({ novelId, theme }: WorldWorkbenchProps) 
         Promise.all([loadCharacters(), loadItems()]).finally(() => setIsLoading(false));
     }, [loadCharacters, loadItems]);
 
+    useEffect(() => {
+        const handleRefresh = async (event: Event) => {
+            const detail = (event as CustomEvent<{ novelId?: string }>).detail;
+            if (detail?.novelId && detail.novelId !== novelId) return;
+            await Promise.all([loadCharacters(), loadItems()]);
+        };
+
+        window.addEventListener('world-assets-updated', handleRefresh as EventListener);
+        return () => window.removeEventListener('world-assets-updated', handleRefresh as EventListener);
+    }, [loadCharacters, loadItems, novelId]);
+
     // Listen for navigation events from search
     useEffect(() => {
         const handleNavigate = async (e: CustomEvent<{ category: 'character' | 'item' | 'world' | 'map'; entityId: string }>) => {

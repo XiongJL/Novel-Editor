@@ -6,8 +6,11 @@
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "vite",
+    "dev:8080": "vite --host 127.0.0.1 --port 8080 --strictPort",
+    "dev:local": "vite --host 127.0.0.1 --strictPort",
     "predev": "npm run copy-prisma",
     "copy-prisma": "node scripts/copy-prisma.js",
+    "ai:diag": "node scripts/ai-dev-diagnostics.mjs",
     "prebuild": "npm run copy-prisma",
     "build": "tsc && vite build && electron-builder",
     "preview": "vite preview"

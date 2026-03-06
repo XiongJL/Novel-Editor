@@ -1,34 +1,46 @@
-# Tasks
+﻿# Tasks
 
-- [ ] 灵感搜索与过滤功能 (Idea Search & Filtering)
-    - [x] **Phase 1: 统一搜索工作台基础框架**
-    - [x] **Phase 2: 灵感工作台深度功能**
-    - [x] **Phase 2.5: 功能整合 (IdeaList -> UnifiedSearchWorkbench)**
-    - [x] **Git 初始化与备份 (Git Init)**
-    - [x] **Phase 3: 全局搜索集成**
-- [x] **数据备份与恢复 (Backup & Restore System)**
-    - [x] 核心功能实现
-    - [x] 备份设置面板
-- [x] **Bug Fix: 备份恢复错误处理 (Backup Restore Error Handling)**
-    - [x] **IPC Refactoring**: 重构 `backup:import` IPC 接口，使其返回结构化结果对象 (`{ success, code }`) 而非抛出异常。
-    - [x] **Frontend Update**: 更新 `BackupRestorePanel.tsx` 适配新的返回值，修复密码弹窗逻辑。
-    - [x] **Type Definition**: 更新 `vite-env.d.ts` 类型定义。
-- [ ] 云同步功能开发
-- [ ] **故事结构管理系统 (Story Structure System)**
-    - [x] **Phase 1: 后端核心 (Backend Core)**
-        - [x] Schema Update: 添加 PlotLine, PlotPoint, Anchor 表
-        - [x] IPC Handlers: 实现大纲与情节要点的 CRUD
-    - [x] **Phase 2: 前端数据层 (Frontend Data)**
-        - [x] Types & Hooks: `usePlotSystem` 状态管理
-    - [x] **Phase 3: 工作台 UI (Workbench UI)**
-        - [x] Sidebar Integration: 侧边栏集成
-        - [x] Plot Line Manager: 情节线管理器
-        - [x] Narrative Matrix View: 叙事矩阵视图 (已集成全量提及与交互)
-    - [x] **Phase 4: 编辑器集成 (Editor Integration)**
-        - [x] Lexical Node: `PlotAnchorNode`
-        - [x] Context Menu: `PlotContextMenuPlugin` & UI
-        - [x] Editor State Integration
-    - [x] **Phase 10: 角色系统与 UI 统一 (Character & UI Unification)**
-        - [x] @Mentions: 实现剧情要点与矩阵的智能联想
-        - [x] Entity Cards: 实现档案详情卡片与自动关闭交互
-        - [x] Deletion Confirmation: 全系统集成 `ConfirmModal` 确认机制
+## AI 能力主线（2026-03-04）
+
+- [ ] **Phase C: 标题 AI 生成体验收尾**
+  - [ ] 标题生成阶段进度（请求中/生成中/解析中）
+  - [ ] 标题生成状态与失败提示 i18n 统一
+
+- [ ] **Phase D: 续写能力稳态化**
+  - [x] 统一入口：UI 续写 + `chapter.generate`
+  - [x] 新建章节与现有章节分流
+  - [x] 续写预览后确认写入
+  - [ ] 续写重复段落控制策略继续优化（仅处理 AI 新增段，不影响用户原文）
+
+- [ ] **Phase E: AI 创作工坊入库闭环**
+  - [x] ActivityBar 入口：`ai_workbench`
+  - [x] 草稿编辑/删除/勾选
+  - [x] 入库前校验：`validateCreativeAssetsDraft`
+  - [x] 原子事务入库：`confirmCreativeAssets`（失败整批回滚）
+  - [x] 工坊成功/失败态文案补齐与交互细节优化
+
+- [ ] **Phase F: 摘要与上下文策略**
+  - [x] `ChapterSummary` 异步更新流程
+  - [x] 本地摘要/AI 摘要双模式
+  - [x] AI 摘要默认非自动触发（手动或完稿）
+  - [x] ContextBuilder 摘要优先 + 正文回退
+  - [x] 卷级/全书级摘要聚合落地
+
+- [ ] **Phase H: AI 全域能力平台**
+  - [x] 统一动作总线与能力注册基础
+  - [x] MCP/Skill 通道与 manifest 导出
+  - [x] 开发诊断收口至终端 `ai:diag`
+  - [ ] 覆盖矩阵缺口补齐（搜索、备份恢复等）
+
+- [ ] **Phase I: AI 启用式输入入口（未来）**
+  - [ ] 首屏提示：`Space` 启用 AI 输入、`/` 打开命令
+  - [ ] 编辑器快捷键触发 AI 输入条与命令面板
+  - [ ] 输入条发送与关闭交互（Enter/Shift+Enter/ESC）
+  - [ ] 样式按参考图落地（暗色、圆角、左右图标）
+  - [ ] i18n 与主题适配
+
+## 文档同步任务（本批）
+- [x] 内部文档一致：`.agent/*` 与 `DEVELOPMENT.md` 状态对齐
+- [x] 用户文档中英一致：`README.md`、`USER_GUIDE.md`、`USER_GUIDE_EN.md`
+- [x] 用户文档不包含开发诊断细节（smoke/coverage/list actions 等）
+- [x] 文档中的 `ai:diag` 命令与参数、退出码说明一致

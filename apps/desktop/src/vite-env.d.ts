@@ -303,6 +303,206 @@ interface SyncAPI {
     push: () => Promise<{ success: boolean; count: number }>
 }
 
+interface AISettings {
+    providerType: 'http' | 'mcp-cli'
+    http: {
+        baseUrl: string
+        apiKey: string
+        model: string
+        imageModel: string
+        imageSize: string
+        imageOutputFormat: 'png' | 'jpeg' | 'webp'
+        imageWatermark: boolean
+        timeoutMs: number
+        maxTokens: number
+        temperature: number
+    }
+    mcpCli: {
+        cliPath: string
+        argsTemplate: string
+        workingDir: string
+        envJson: string
+        startupTimeoutMs: number
+    }
+    proxy: {
+        mode: 'system' | 'off' | 'custom'
+        httpProxy?: string
+        httpsProxy?: string
+        allProxy?: string
+        noProxy?: string
+    }
+    summary: {
+        summaryMode: 'local' | 'ai'
+        summaryTriggerPolicy: 'auto' | 'manual' | 'finalized'
+        summaryDebounceMs: number
+        summaryMinIntervalMs: number
+        summaryMinWordDelta: number
+        summaryFinalizeStableMs: number
+        summaryFinalizeMinWords: number
+        recentChapterRawCount: number
+    }
+}
+
+interface AIAPI {
+    previewContinuePrompt: (payload: {
+        locale?: string
+        mode?: 'new_chapter' | 'continue_chapter'
+        novelId: string
+        chapterId: string
+        currentContent: string
+        ideaIds?: string[]
+        contextChapterCount?: number
+        recentRawChapterCount?: number
+        targetLength?: number
+        style?: string
+        tone?: string
+        pace?: string
+        temperature?: number
+        userIntent?: string
+        currentLocation?: string
+        overrideUserPrompt?: string
+    }) => Promise<{
+        structured: {
+            goal: string
+            contextRefs: string[]
+            params: Record<string, unknown>
+            constraints: string[]
+        }
+        rawPrompt: string
+        editableUserPrompt: string
+        usedContext?: string[]
+        warnings?: string[]
+    }>
+    getSettings: () => Promise<AISettings>
+    getMapImageStats: () => Promise<{
+        totalCalls: number
+        successCalls: number
+        failedCalls: number
+        rateLimitFailures: number
+        lastFailureCode?: string
+        lastFailureAt?: string
+        updatedAt: string
+    }>
+    updateSettings: (partial: Partial<AISettings>) => Promise<AISettings>
+    testConnection: () => Promise<{ ok: boolean; detail?: string }>
+    testMcp: () => Promise<{ ok: boolean; detail?: string }>
+    testProxy: () => Promise<{ ok: boolean; detail?: string }>
+    testGenerate: (prompt?: string) => Promise<{ ok: boolean; text?: string; detail?: string }>
+    generateTitle: (payload: {
+        novelId: string
+        chapterId: string
+        content: string
+        style?: 'stable' | 'literary' | 'viral'
+        count?: number
+    }) => Promise<{
+        candidates: Array<{ title: string; styleTag: string }>
+    }>
+    continueWriting: (payload: {
+        locale?: string
+        novelId: string
+        chapterId: string
+        currentContent: string
+        ideaIds?: string[]
+        contextChapterCount?: number
+        recentRawChapterCount?: number
+        targetLength?: number
+        style?: string
+        tone?: string
+        pace?: string
+        temperature?: number
+        userIntent?: string
+        currentLocation?: string
+        overrideUserPrompt?: string
+    }) => Promise<{
+        text: string
+        usedContext: string[]
+        warnings?: string[]
+        consistency: {
+            ok: boolean
+            issues: string[]
+        }
+    }>
+    checkConsistency: (payload: { novelId: string; text: string }) => Promise<{ ok: boolean; issues: string[] }>
+    previewCreativeAssetsPrompt: (payload: {
+        brief: string;
+        novelId: string;
+        overrideUserPrompt?: string;
+        targetSections?: Array<'plotLines' | 'plotPoints' | 'characters' | 'items' | 'skills' | 'maps'>;
+    }) => Promise<{
+        structured: {
+            goal: string
+            contextRefs: string[]
+            params: Record<string, unknown>
+            constraints: string[]
+        }
+        rawPrompt: string
+        editableUserPrompt: string
+        usedContext?: string[]
+    }>
+    generateCreativeAssets: (payload: {
+        brief: string;
+        novelId: string;
+        overrideUserPrompt?: string;
+        targetSections?: Array<'plotLines' | 'plotPoints' | 'characters' | 'items' | 'skills' | 'maps'>;
+    }) => Promise<{
+        draft: Record<string, unknown>
+    }>
+    validateCreativeAssetsDraft: (payload: { novelId: string; draft: Record<string, unknown> }) => Promise<{
+        ok: boolean
+        errors: Array<{ scope: string; name?: string; code: string; detail: string }>
+        warnings: string[]
+        normalizedDraft: Record<string, unknown>
+    }>
+    confirmCreativeAssets: (payload: { novelId: string; draft: Record<string, unknown> }) => Promise<{
+        success: boolean
+        created: Record<string, number>
+        warnings: string[]
+        errors?: Array<{ scope: string; name?: string; code: string; detail: string }>
+        transactionMode: 'atomic'
+    }>
+    previewMapPrompt: (payload: {
+        novelId: string
+        prompt: string
+        mapId?: string
+        mapName?: string
+        mapType?: 'world' | 'region' | 'scene'
+        imageSize?: string
+        styleTemplate?: 'realistic' | 'fantasy' | 'ancient' | 'scifi'
+        overrideUserPrompt?: string
+    }) => Promise<{
+        structured: {
+            goal: string
+            contextRefs: string[]
+            params: Record<string, unknown>
+            constraints: string[]
+        }
+        rawPrompt: string
+        editableUserPrompt: string
+        usedWorldLore?: Array<{ id: string; title: string; excerpt: string }>
+    }>
+    generateMapImage: (payload: {
+        novelId: string
+        prompt: string
+        mapId?: string
+        mapName?: string
+        mapType?: 'world' | 'region' | 'scene'
+        imageSize?: string
+        styleTemplate?: 'realistic' | 'fantasy' | 'ancient' | 'scifi'
+        overrideUserPrompt?: string
+    }) => Promise<{
+        ok: boolean
+        detail: string
+        code?: string
+        mapId?: string
+        path?: string
+    }>
+    rebuildChapterSummary: (chapterId: string) => Promise<{ ok: boolean; detail?: string }>
+    executeAction: (actionId: string, payload?: unknown) => Promise<unknown>
+    openClawInvoke: (name: string, args?: unknown) => Promise<{ ok: boolean; data?: unknown; error?: string; code?: string }>
+    openClawMcpInvoke: (name: string, args?: unknown) => Promise<{ ok: boolean; data?: unknown; error?: string; code?: string }>
+    openClawSkillInvoke: (name: string, input?: unknown) => Promise<{ ok: boolean; data?: unknown; error?: string; code?: string }>
+}
+
 interface Window {
     ipcRenderer: import('electron').IpcRenderer
     db: DBAPI
@@ -318,4 +518,5 @@ interface Window {
         getAutoBackups: () => Promise<Array<{ filename: string; createdAt: number; size: number }>>;
         restoreAutoBackup: (filename: string) => Promise<void>;
     }
+    ai: AIAPI
 }

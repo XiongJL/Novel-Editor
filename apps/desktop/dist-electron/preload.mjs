@@ -102,3 +102,27 @@ electron.contextBridge.exposeInMainWorld("backup", {
   getAutoBackups: () => electron.ipcRenderer.invoke("backup:get-auto"),
   restoreAutoBackup: (filename) => electron.ipcRenderer.invoke("backup:restore-auto", filename)
 });
+electron.contextBridge.exposeInMainWorld("ai", {
+  getSettings: () => electron.ipcRenderer.invoke("ai:get-settings"),
+  getMapImageStats: () => electron.ipcRenderer.invoke("ai:get-map-image-stats"),
+  updateSettings: (partial) => electron.ipcRenderer.invoke("ai:update-settings", partial),
+  testConnection: () => electron.ipcRenderer.invoke("ai:test-connection"),
+  testMcp: () => electron.ipcRenderer.invoke("ai:test-mcp"),
+  testProxy: () => electron.ipcRenderer.invoke("ai:test-proxy"),
+  testGenerate: (prompt) => electron.ipcRenderer.invoke("ai:test-generate", { prompt }),
+  generateTitle: (payload) => electron.ipcRenderer.invoke("ai:generate-title", payload),
+  continueWriting: (payload) => electron.ipcRenderer.invoke("ai:continue-writing", payload),
+  previewContinuePrompt: (payload) => electron.ipcRenderer.invoke("ai:preview-continue-prompt", payload),
+  checkConsistency: (payload) => electron.ipcRenderer.invoke("ai:check-consistency", payload),
+  generateCreativeAssets: (payload) => electron.ipcRenderer.invoke("ai:generate-creative-assets", payload),
+  previewCreativeAssetsPrompt: (payload) => electron.ipcRenderer.invoke("ai:preview-creative-assets-prompt", payload),
+  validateCreativeAssetsDraft: (payload) => electron.ipcRenderer.invoke("ai:validate-creative-assets", payload),
+  confirmCreativeAssets: (payload) => electron.ipcRenderer.invoke("ai:confirm-creative-assets", payload),
+  generateMapImage: (payload) => electron.ipcRenderer.invoke("ai:generate-map-image", payload),
+  previewMapPrompt: (payload) => electron.ipcRenderer.invoke("ai:preview-map-prompt", payload),
+  rebuildChapterSummary: (chapterId) => electron.ipcRenderer.invoke("ai:rebuild-chapter-summary", { chapterId }),
+  executeAction: (actionId, payload) => electron.ipcRenderer.invoke("ai:execute-action", { actionId, payload }),
+  openClawInvoke: (name, args) => electron.ipcRenderer.invoke("ai:openclaw-invoke", { name, arguments: args }),
+  openClawMcpInvoke: (name, args) => electron.ipcRenderer.invoke("ai:openclaw-mcp-invoke", { name, arguments: args }),
+  openClawSkillInvoke: (name, input) => electron.ipcRenderer.invoke("ai:openclaw-skill-invoke", { name, input })
+});

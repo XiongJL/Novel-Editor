@@ -148,8 +148,10 @@ const VolumeItem = memo(({
         <div className="mb-4">
             <div
                 className={clsx(
-                    "flex items-center justify-between p-2 rounded cursor-pointer group outline-none focus:ring-1 focus:ring-purple-500 sticky top-0 z-10",
-                    isDark ? "bg-[#0F0F13] text-neutral-300 hover:bg-white/5" : "bg-gray-50 text-neutral-700 hover:bg-black/5"
+                    "relative isolate flex items-center justify-between p-2 rounded cursor-pointer group outline-none focus:ring-1 focus:ring-purple-500 sticky top-0 z-10 border-b",
+                    isDark
+                        ? "bg-[#0F0F13] text-neutral-300 hover:bg-[#16161d] border-white/10"
+                        : "bg-gray-50 text-neutral-700 hover:bg-gray-100 border-gray-200"
                 )}
                 tabIndex={0}
                 onDoubleClick={startEdit}
@@ -160,7 +162,7 @@ const VolumeItem = memo(({
                 <span className="flex items-center gap-2 text-sm font-medium flex-1">
                     <button
                         onClick={(e) => { e.stopPropagation(); onToggle(volume.id); }}
-                        className={clsx("p-0.5 rounded", isDark ? "hover:bg-white/10" : "hover:bg-black/5")}
+                        className={clsx("p-0.5 rounded", isDark ? "hover:bg-[#20202a]" : "hover:bg-gray-200")}
                     >
                         {isExpanded ? <ChevronDown className="w-3 h-3 flex-shrink-0" /> : <ChevronRight className="w-3 h-3 flex-shrink-0" />}
                     </button>
@@ -192,7 +194,7 @@ const VolumeItem = memo(({
                             e.stopPropagation();
                             onCreateChapter(volume.id);
                         }}
-                        className={clsx("opacity-0 group-hover:opacity-100 p-1 rounded transition-opacity", isDark ? "hover:bg-white/10" : "hover:bg-black/5")}
+                        className={clsx("opacity-0 group-hover:opacity-100 p-1 rounded transition-opacity", isDark ? "hover:bg-[#20202a]" : "hover:bg-gray-200")}
                         title={t('sidebar.addChapter')}
                     >
                         <Plus className="w-3 h-3" />

@@ -32,9 +32,10 @@ interface ToolbarPluginProps {
     recentFiles?: RecentFile[];
     onDeleteRecent?: (id: string) => void;
     onRecentFileSelect?: (id: string) => void;
+    rightActions?: React.ReactNode;
 }
 
-export default function ToolbarPlugin({ preferences, onUpdatePreference, recentFiles = [], onDeleteRecent, onRecentFileSelect }: ToolbarPluginProps) {
+export default function ToolbarPlugin({ preferences, onUpdatePreference, recentFiles = [], onDeleteRecent, onRecentFileSelect, rightActions }: ToolbarPluginProps) {
     const [editor] = useLexicalComposerContext();
     const { t } = useTranslation();
     const isDark = preferences.theme === 'dark';
@@ -184,6 +185,11 @@ export default function ToolbarPlugin({ preferences, onUpdatePreference, recentF
                 label={isCopied ? t('toolbar.copied') : t('toolbar.copy')}
                 active={isCopied}
             />
+            {rightActions && (
+                <div className="ml-auto flex items-center gap-2 pl-2">
+                    {rightActions}
+                </div>
+            )}
         </div>
     );
 }

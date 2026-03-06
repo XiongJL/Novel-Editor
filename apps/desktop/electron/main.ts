@@ -1,10 +1,13 @@
-import { app, BrowserWindow, ipcMain, dialog, nativeImage, protocol, net } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog, nativeImage, protocol, net, session } from 'electron'
 import { initDb, db } from '@novel-editor/core'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import { execSync } from 'child_process'
 import fs from 'fs'
 import * as searchIndex from './search/searchIndex'
+import { AiService } from './ai/AiService'
+import { scheduleChapterSummaryRebuild } from './ai/summary/chapterSummary'
+import { formatAiErrorForDisplay, normalizeAiError } from './ai/errors'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -32,6 +35,179 @@ process.on('unhandledRejection', (reason, promise) => {
 });
 
 let win: BrowserWindow | null
+
+type AiDiagCommand =
+    | { action: 'smoke'; kind: 'mcp' | 'skill'; json: boolean; dbPath?: string; userDataPath?: string }
+    | { action: 'coverage'; json: boolean; dbPath?: string; userDataPath?: string };
+
+function parseAiDiagCommand(argv: string[]): { command?: AiDiagCommand; error?: string } {
+    const markerIndex = argv.indexOf('--ai-diag');
+    if (markerIndex < 0) return {};
+
+    const tokens = argv.slice(markerIndex + 1);
+    if (tokens.length === 0) {
+        return { error: 'Missing diagnostic action. Use: --ai-diag smoke <mcp|skill> [--json] [--db <path>] [--user-data <path>] or --ai-diag coverage [--json] [--db <path>] [--user-data <path>]' };
+    }
+
+    const positionals: string[] = [];
+    let json = false;
+    let dbPath: string | undefined;
+    let userDataPath: string | undefined;
+
+    for (let index = 0; index < tokens.length; index += 1) {
+        const token = tokens[index];
+        if (token === '--json') {
+            json = true;
+            continue;
+        }
+        if (token === '--db') {
+            const value = tokens[index + 1];
+            if (!value) return { error: 'Missing value for --db' };
+            dbPath = value;
+            index += 1;
+            continue;
+        }
+        if (token === '--user-data') {
+            const value = tokens[index + 1];
+            if (!value) return { error: 'Missing value for --user-data' };
+            userDataPath = value;
+            index += 1;
+            continue;
+        }
+        if (token.startsWith('--')) {
+            return { error: `Unknown option: ${token}` };
+        }
+        positionals.push(token);
+    }
+
+    const [action, kind] = positionals;
+    if (action === 'coverage') {
+        return { command: { action: 'coverage', json, dbPath, userDataPath } };
+    }
+    if (action === 'smoke') {
+        if (kind !== 'mcp' && kind !== 'skill') {
+            return { error: 'Smoke mode requires kind: mcp | skill' };
+        }
+        return { command: { action: 'smoke', kind, json, dbPath, userDataPath } };
+    }
+    return { error: `Unknown diagnostic action: ${action}` };
+}
+
+function formatAiDiagReadable(result: unknown, command: AiDiagCommand): string {
+    if (command.action === 'coverage') {
+        const output = result as {
+            overallCoverage: number;
+            totalSupported: number;
+            totalRequired: number;
+            modules: Array<{ title: string; coverage: number; supportedActions: string[]; requiredActions: string[]; missingActions: string[] }>;
+        };
+        const lines = [
+            `[AI-Diag] Coverage ${output.overallCoverage}% (${output.totalSupported}/${output.totalRequired})`,
+            ...output.modules.map((module) => {
+                const missing = module.missingActions.length ? ` missing=[${module.missingActions.join(', ')}]` : '';
+                return `- ${module.title}: ${module.coverage}% (${module.supportedActions.length}/${module.requiredActions.length})${missing}`;
+            }),
+        ];
+        return lines.join('\n');
+    }
+
+    const output = result as {
+        ok: boolean;
+        kind: 'mcp' | 'skill';
+        detail: string;
+        missingActions: string[];
+        checks: Array<{ actionId: string; ok: boolean; skipped?: boolean; detail: string }>;
+    };
+    const lines = [
+        `[AI-Diag] Smoke ${output.kind.toUpperCase()} ${output.ok ? 'PASSED' : 'FAILED'}`,
+        `detail: ${output.detail}`,
+        output.missingActions.length ? `missingActions: ${output.missingActions.join(', ')}` : 'missingActions: none',
+        ...output.checks.map((check) => {
+            const tag = check.skipped ? 'SKIPPED' : (check.ok ? 'OK' : 'FAILED');
+            return `- [${tag}] ${check.actionId}: ${check.detail}`;
+        }),
+    ];
+    return lines.join('\n');
+}
+
+async function runAiDiagCommand(aiService: AiService, command: AiDiagCommand): Promise<number> {
+    const result = command.action === 'coverage'
+        ? aiService.getCapabilityCoverage()
+        : await aiService.testOpenClawSmoke({ kind: command.kind });
+
+    if (command.json) {
+        console.log(JSON.stringify(result, null, 2));
+    } else {
+        console.log(formatAiDiagReadable(result, command));
+    }
+
+    if (command.action === 'smoke' && !(result as { ok: boolean }).ok) {
+        return 1;
+    }
+    return 0;
+}
+
+const aiDiagParse = parseAiDiagCommand(process.argv);
+
+async function applyProxySettings(settings: any): Promise<void> {
+    const proxy = settings?.proxy;
+    if (!proxy || !session.defaultSession) return;
+
+    const clearEnvProxy = () => {
+        delete process.env.HTTP_PROXY;
+        delete process.env.http_proxy;
+        delete process.env.HTTPS_PROXY;
+        delete process.env.https_proxy;
+        delete process.env.ALL_PROXY;
+        delete process.env.all_proxy;
+        delete process.env.NO_PROXY;
+        delete process.env.no_proxy;
+    };
+
+    const setEnvProxy = () => {
+        if (proxy.httpProxy) {
+            process.env.HTTP_PROXY = proxy.httpProxy;
+            process.env.http_proxy = proxy.httpProxy;
+        }
+        if (proxy.httpsProxy) {
+            process.env.HTTPS_PROXY = proxy.httpsProxy;
+            process.env.https_proxy = proxy.httpsProxy;
+        }
+        if (proxy.allProxy) {
+            process.env.ALL_PROXY = proxy.allProxy;
+            process.env.all_proxy = proxy.allProxy;
+        }
+        if (proxy.noProxy) {
+            process.env.NO_PROXY = proxy.noProxy;
+            process.env.no_proxy = proxy.noProxy;
+        }
+    };
+
+    if (proxy.mode === 'off') {
+        await session.defaultSession.setProxy({ mode: 'direct' });
+        clearEnvProxy();
+        return;
+    }
+
+    if (proxy.mode === 'custom') {
+        const rules = [proxy.allProxy, proxy.httpsProxy, proxy.httpProxy]
+            .filter((value: string | undefined) => Boolean(value))
+            .join(';');
+
+        await session.defaultSession.setProxy({
+            mode: rules ? 'fixed_servers' : 'direct',
+            proxyRules: rules,
+            proxyBypassRules: proxy.noProxy || '',
+        });
+        clearEnvProxy();
+        setEnvProxy();
+        return;
+    }
+
+    // system mode
+    await session.defaultSession.setProxy({ mode: 'system' });
+    clearEnvProxy();
+}
 
 function createWindow() {
     win = new BrowserWindow({
@@ -396,6 +572,9 @@ ipcMain.handle('db:save-chapter', async (_, { chapterId, content }: { chapterId:
             await searchIndex.indexChapter({ ...chapterData, novelId });
         }
 
+        // Async chapter summary refresh (non-blocking)
+        scheduleChapterSummaryRebuild(chapterId);
+
         return updatedChapter;
     } catch (e) {
         console.error('[Main] db:save-chapter failed:', e);
@@ -561,6 +740,301 @@ ipcMain.handle('db:check-index-status', async (_, novelId: string) => {
 // --- Sync IPC ---
 import { SyncManager } from './sync/SyncManager';
 const syncManager = new SyncManager();
+let aiService!: AiService;
+
+// --- AI IPC ---
+ipcMain.handle('ai:get-settings', async () => {
+    try {
+        return aiService.getSettings();
+    } catch (e) {
+        console.error('[Main] ai:get-settings failed:', e);
+        throw e;
+    }
+});
+
+ipcMain.handle('ai:get-map-image-stats', async () => {
+    try {
+        return aiService.getMapImageStats();
+    } catch (e) {
+        console.error('[Main] ai:get-map-image-stats failed:', e);
+        throw e;
+    }
+});
+
+ipcMain.handle('ai:list-actions', async () => {
+    try {
+        return aiService.listActions();
+    } catch (e) {
+        console.error('[Main] ai:list-actions failed:', e);
+        throw e;
+    }
+});
+
+ipcMain.handle('ai:get-capability-coverage', async () => {
+    try {
+        return aiService.getCapabilityCoverage();
+    } catch (e) {
+        console.error('[Main] ai:get-capability-coverage failed:', e);
+        throw e;
+    }
+});
+
+ipcMain.handle('ai:get-mcp-manifest', async () => {
+    try {
+        return aiService.getMcpToolsManifest();
+    } catch (e) {
+        console.error('[Main] ai:get-mcp-manifest failed:', e);
+        throw e;
+    }
+});
+
+ipcMain.handle('ai:get-openclaw-manifest', async () => {
+    try {
+        return aiService.getOpenClawManifest();
+    } catch (e) {
+        console.error('[Main] ai:get-openclaw-manifest failed:', e);
+        throw e;
+    }
+});
+
+ipcMain.handle('ai:get-openclaw-skill-manifest', async () => {
+    try {
+        return aiService.getOpenClawSkillManifest();
+    } catch (e) {
+        console.error('[Main] ai:get-openclaw-skill-manifest failed:', e);
+        throw e;
+    }
+});
+
+ipcMain.handle('ai:update-settings', async (_, partial: any) => {
+    try {
+        const updated = aiService.updateSettings(partial || {});
+        await applyProxySettings(updated);
+        return updated;
+    } catch (e) {
+        console.error('[Main] ai:update-settings failed:', e);
+        throw e;
+    }
+});
+
+ipcMain.handle('ai:test-connection', async () => {
+    try {
+        return await aiService.testConnection();
+    } catch (e) {
+        console.error('[Main] ai:test-connection failed:', e);
+        throw e;
+    }
+});
+
+ipcMain.handle('ai:test-mcp', async () => {
+    try {
+        return await aiService.testMcp();
+    } catch (e) {
+        console.error('[Main] ai:test-mcp failed:', e);
+        throw e;
+    }
+});
+
+ipcMain.handle('ai:test-openclaw-mcp', async () => {
+    try {
+        return await aiService.testOpenClawMcp();
+    } catch (e) {
+        console.error('[Main] ai:test-openclaw-mcp failed:', e);
+        throw e;
+    }
+});
+
+ipcMain.handle('ai:test-openclaw-skill', async () => {
+    try {
+        return await aiService.testOpenClawSkill();
+    } catch (e) {
+        console.error('[Main] ai:test-openclaw-skill failed:', e);
+        throw e;
+    }
+});
+
+ipcMain.handle('ai:test-openclaw-smoke', async (_, payload: { kind?: 'mcp' | 'skill' } | undefined) => {
+    try {
+        const kind = payload?.kind === 'skill' ? 'skill' : 'mcp';
+        return await aiService.testOpenClawSmoke({ kind });
+    } catch (e) {
+        console.error('[Main] ai:test-openclaw-smoke failed:', e);
+        throw e;
+    }
+});
+
+ipcMain.handle('ai:test-proxy', async () => {
+    try {
+        return await aiService.testProxy();
+    } catch (e) {
+        console.error('[Main] ai:test-proxy failed:', e);
+        throw e;
+    }
+});
+
+ipcMain.handle('ai:test-generate', async (_, payload: { prompt?: string } | undefined) => {
+    try {
+        return await aiService.testGenerate(payload?.prompt);
+    } catch (e) {
+        console.error('[Main] ai:test-generate failed:', e);
+        throw e;
+    }
+});
+
+ipcMain.handle('ai:generate-title', async (_, payload: any) => {
+    try {
+        return await aiService.generateTitle(payload);
+    } catch (e) {
+        console.error('[Main] ai:generate-title failed:', e);
+        throw e;
+    }
+});
+
+ipcMain.handle('ai:continue-writing', async (_, payload: any) => {
+    try {
+        return await aiService.continueWriting(payload);
+    } catch (e) {
+        console.error('[Main] ai:continue-writing failed:', e);
+        throw e;
+    }
+});
+
+ipcMain.handle('ai:preview-continue-prompt', async (_, payload: any) => {
+    try {
+        return await aiService.previewContinuePrompt(payload);
+    } catch (e) {
+        console.error('[Main] ai:preview-continue-prompt failed:', e);
+        throw e;
+    }
+});
+
+ipcMain.handle('ai:check-consistency', async (_, payload: any) => {
+    try {
+        return await aiService.checkConsistency(payload);
+    } catch (e) {
+        console.error('[Main] ai:check-consistency failed:', e);
+        throw e;
+    }
+});
+
+ipcMain.handle('ai:generate-creative-assets', async (_, payload: any) => {
+    try {
+        return await aiService.generateCreativeAssets(payload);
+    } catch (e) {
+        console.error('[Main] ai:generate-creative-assets failed:', e);
+        throw e;
+    }
+});
+
+ipcMain.handle('ai:preview-creative-assets-prompt', async (_, payload: any) => {
+    try {
+        return await aiService.previewCreativeAssetsPrompt(payload);
+    } catch (e) {
+        console.error('[Main] ai:preview-creative-assets-prompt failed:', e);
+        throw e;
+    }
+});
+
+ipcMain.handle('ai:validate-creative-assets', async (_, payload: any) => {
+    try {
+        return await aiService.validateCreativeAssetsDraft(payload);
+    } catch (e) {
+        console.error('[Main] ai:validate-creative-assets failed:', e);
+        throw e;
+    }
+});
+
+ipcMain.handle('ai:confirm-creative-assets', async (_, payload: any) => {
+    try {
+        return await aiService.confirmCreativeAssets(payload);
+    } catch (e) {
+        console.error('[Main] ai:confirm-creative-assets failed:', e);
+        throw e;
+    }
+});
+
+ipcMain.handle('ai:generate-map-image', async (_, payload: any) => {
+    try {
+        return await aiService.generateMapImage(payload);
+    } catch (e) {
+        console.error('[Main] ai:generate-map-image failed:', e);
+        const message = e instanceof Error ? e.message : String(e);
+        return { ok: false, code: 'UNKNOWN', detail: message };
+    }
+});
+
+ipcMain.handle('ai:preview-map-prompt', async (_, payload: any) => {
+    try {
+        return await aiService.previewMapPrompt(payload);
+    } catch (e) {
+        console.error('[Main] ai:preview-map-prompt failed:', e);
+        throw e;
+    }
+});
+
+ipcMain.handle('ai:rebuild-chapter-summary', async (_, payload: { chapterId?: string }) => {
+    try {
+        if (!payload?.chapterId) {
+            return { ok: false, detail: 'chapterId is required' };
+        }
+        scheduleChapterSummaryRebuild(payload.chapterId, 'manual');
+        return { ok: true, detail: 'summary rebuild scheduled' };
+    } catch (e) {
+        console.error('[Main] ai:rebuild-chapter-summary failed:', e);
+        return { ok: false, detail: e instanceof Error ? e.message : String(e) };
+    }
+});
+
+ipcMain.handle('ai:execute-action', async (_, payload: { actionId: string; payload?: unknown }) => {
+    try {
+        return await aiService.executeAction(payload);
+    } catch (e) {
+        console.error('[Main] ai:execute-action failed:', e);
+        throw e;
+    }
+});
+
+ipcMain.handle('ai:openclaw-invoke', async (_, payload: { name: string; arguments?: unknown }) => {
+    try {
+        return await aiService.invokeOpenClawTool(payload);
+    } catch (e) {
+        console.error('[Main] ai:openclaw-invoke failed:', e);
+        const normalized = normalizeAiError(e);
+        return {
+            ok: false,
+            code: normalized.code,
+            error: formatAiErrorForDisplay(normalized.code, normalized.message),
+        };
+    }
+});
+
+ipcMain.handle('ai:openclaw-mcp-invoke', async (_, payload: { name: string; arguments?: unknown }) => {
+    try {
+        return await aiService.invokeOpenClawTool(payload);
+    } catch (e) {
+        console.error('[Main] ai:openclaw-mcp-invoke failed:', e);
+        const normalized = normalizeAiError(e);
+        return {
+            ok: false,
+            code: normalized.code,
+            error: formatAiErrorForDisplay(normalized.code, normalized.message),
+        };
+    }
+});
+
+ipcMain.handle('ai:openclaw-skill-invoke', async (_, payload: { name: string; input?: unknown }) => {
+    try {
+        return await aiService.invokeOpenClawSkill(payload);
+    } catch (e) {
+        console.error('[Main] ai:openclaw-skill-invoke failed:', e);
+        const normalized = normalizeAiError(e);
+        return {
+            ok: false,
+            code: normalized.code,
+            error: formatAiErrorForDisplay(normalized.code, normalized.message),
+        };
+    }
+});
 
 ipcMain.handle('sync:pull', async () => {
     try {
@@ -1606,6 +2080,24 @@ app.on('activate', () => {
 app.whenReady().then(async () => {
     console.log('[Main] App Ready. Starting DB Setup...');
 
+    if (aiDiagParse.error) {
+        console.error(`[AI-Diag] Invalid arguments: ${aiDiagParse.error}`);
+        app.exit(2);
+        return;
+    }
+
+    if (aiDiagParse.command && app.isPackaged) {
+        console.error('[AI-Diag] --ai-diag is only available in development mode.');
+        app.exit(1);
+        return;
+    }
+
+    if (aiDiagParse.command?.userDataPath) {
+        const resolvedUserDataPath = path.resolve(aiDiagParse.command.userDataPath);
+        app.setPath('userData', resolvedUserDataPath);
+        console.log('[AI-Diag] userData override:', resolvedUserDataPath);
+    }
+
     // Register custom protocol for serving local files (map backgrounds etc.)
     protocol.handle('local-resource', (request) => {
         const relativePath = decodeURIComponent(request.url.replace('local-resource://', ''));
@@ -1627,13 +2119,15 @@ app.whenReady().then(async () => {
         dataPath = app.getPath('userData');
     }
 
-    const dbPath = path.join(dataPath, 'novel_editor.db');
+    const dbPath = aiDiagParse.command?.dbPath
+        ? path.resolve(aiDiagParse.command.dbPath)
+        : path.join(dataPath, 'novel_editor.db');
     const dbUrl = `file:${dbPath}`;
 
     console.log('[Main] Database Path:', dbPath);
 
-    if (!fs.existsSync(dataPath)) {
-        fs.mkdirSync(dataPath, { recursive: true });
+    if (!fs.existsSync(path.dirname(dbPath))) {
+        fs.mkdirSync(path.dirname(dbPath), { recursive: true });
     }
 
     // 2. Initialize Core Database (Moved after migration)
@@ -1698,10 +2192,32 @@ app.whenReady().then(async () => {
 
     // 4. Initialize Core Database (Re-connect/Use instance)
     initDb(dbUrl);
+    aiService = new AiService(() => app.getPath('userData'));
+
+    if (aiDiagParse.command) {
+        try {
+            const exitCode = await runAiDiagCommand(aiService, aiDiagParse.command);
+            await (db as any).$disconnect();
+            app.exit(exitCode);
+            return;
+        } catch (error) {
+            console.error('[AI-Diag] Execution failed:', error);
+            await (db as any).$disconnect();
+            app.exit(1);
+            return;
+        }
+    }
 
     // 5. Initialize Search Index
     await searchIndex.initSearchIndex();
     console.log('[Main] Search index initialized');
+
+    // 5.5 Apply AI proxy settings before networked AI calls
+    try {
+        await applyProxySettings(aiService.getSettings());
+    } catch (e) {
+        console.warn('[Main] Failed to apply AI proxy settings:', e);
+    }
 
     // 6. Create Window
     createWindow();

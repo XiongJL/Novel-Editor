@@ -28,6 +28,8 @@ model Novel {
   plotLines  PlotLine[]
   plotPoints PlotPoint[]
   worldSettings WorldSetting[]
+  chapterSummaries ChapterSummary[]
+  narrativeSummaries NarrativeSummary[]
 }
 
 model Volume {
@@ -43,6 +45,8 @@ model Volume {
   updatedAt   DateTime @updatedAt
 
   chapters Chapter[]
+  chapterSummaries ChapterSummary[]
+  narrativeSummaries NarrativeSummary[]
 }
 
 model Chapter {
@@ -61,6 +65,7 @@ model Chapter {
   
   ideas Idea[]
   anchors PlotPointAnchor[]
+  summaries ChapterSummary[]
 }
 
 model SyncState {
@@ -285,4 +290,102 @@ model CharacterMapMarker {
   map         MapCanvas @relation(fields: [mapId], references: [id], onDelete: Cascade)
 
   @@unique([characterId, mapId])
+}
+
+// 鈹€鈹€ AI Summary / Memory 鈹€鈹€
+
+model ChapterSummary {
+  id                String   @id @default(cuid())
+  novelId           String
+  volumeId          String
+  chapterId         String
+
+  // Summary payload
+  summaryType       String   @default("standard") // standard | concise | facts | style
+  summaryText       String
+  compressedMemory  String?  // Prompt-ready compressed memory text
+  keyFacts          String   @default("[]") // JSON array
+  entitiesSnapshot  String   @default("{}") // JSON object
+  timelineHints     String   @default("[]") // JSON array
+  openQuestions     String   @default("[]") // JSON array
+
+  // Source snapshot
+  sourceContentHash String
+  sourceWordCount   Int      @default(0)
+  sourceUpdatedAt   DateTime
+  chapterOrder      Int?
+
+  // Generation metadata
+  provider          String?
+  model             String?
+  promptVersion     String?
+  temperature       Float?
+  maxTokens         Int?
+  inputTokens       Int?
+  outputTokens      Int?
+  latencyMs         Int?
+  qualityScore      Float?
+
+  // Lifecycle / diagnostics
+  status            String   @default("active") // active | stale | archived | failed
+  errorCode         String?
+  errorDetail       String?
+  isLatest          Boolean  @default(true)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  novel             Novel    @relation(fields: [novelId], references: [id], onDelete: Cascade)
+  volume            Volume   @relation(fields: [volumeId], references: [id], onDelete: Cascade)
+  chapter           Chapter  @relation(fields: [chapterId], references: [id], onDelete: Cascade)
+
+  @@unique([chapterId, sourceContentHash, summaryType])
+  @@index([chapterId, isLatest])
+  @@index([novelId, status, createdAt])
+  @@index([volumeId, createdAt])
+  @@index([sourceContentHash])
+}
+
+model NarrativeSummary {
+  id                  String   @id @default(cuid())
+  novelId             String
+  volumeId            String?
+
+  // Aggregate layer: volume or novel
+  level               String   @default("novel") // volume | novel
+  title               String?
+  summaryText         String
+  keyFacts            String   @default("[]") // JSON array
+  unresolvedThreads   String   @default("[]") // JSON array
+  styleGuide          String   @default("[]") // JSON array
+  hardConstraints     String   @default("[]") // JSON array
+  coverageChapterIds  String   @default("[]") // JSON array
+  chapterRangeStart   Int?
+  chapterRangeEnd     Int?
+  sourceFingerprint   String
+
+  // Generation metadata
+  provider            String?
+  model               String?
+  promptVersion       String?
+  temperature         Float?
+  maxTokens           Int?
+  inputTokens         Int?
+  outputTokens        Int?
+  latencyMs           Int?
+  qualityScore        Float?
+
+  // Lifecycle / diagnostics
+  status              String   @default("active") // active | stale | archived | failed
+  errorCode           String?
+  errorDetail         String?
+  isLatest            Boolean  @default(true)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  novel               Novel    @relation(fields: [novelId], references: [id], onDelete: Cascade)
+  volume              Volume?  @relation(fields: [volumeId], references: [id], onDelete: Cascade)
+
+  @@unique([novelId, volumeId, level, sourceFingerprint])
+  @@index([novelId, level, status, createdAt])
+  @@index([volumeId, status, createdAt])
 }

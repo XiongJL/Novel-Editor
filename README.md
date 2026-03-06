@@ -1,104 +1,58 @@
-# 小说编辑器 (Novel Editor)
+﻿# 小说编辑器（Novel Editor）
 
-一个现代化、跨平台的小说创作工具。基于 Monorepo 架构，优先支持 Windows 桌面端。
+一个面向长篇创作的桌面写作工具，支持离线写作、结构化创作管理与 AI 辅助。
 
-## 🚀 快速开始 (Quick Start)
+## 快速开始
 
-### 1. 环境准备
-*   **Node.js**: v18+
-*   **包管理器**: pnpm (`npm install -g pnpm`)
-*   **数据库**: MariaDB (推荐 WSL2 环境，仅后端同步需要)
+### 环境
+- Node.js 18+
+- pnpm
 
-### 2. 数据库配置
-1.  确保 MariaDB 服务已启动（仅云同步功能需要）。
-2.  检查 `packages/core/.env` 中的连接字符串：
-    ```bash
-    DATABASE_URL="mysql://dev:dev123@localhost:3306/novel_editor"
-    ```
-    *(请根据实际情况修改用户名密码)*
-3.  初始化数据库表结构：
-    ```bash
-    # 在根目录执行
-    pnpm db:push
-    ```
-    *(注: `db:push` 是 `turbo run db:push` 的简写，实际执行的是 `packages/core` 下的 `prisma db push`)*
-
-### 3. 启动开发环境
+### 启动
 ```bash
-# 安装依赖
 pnpm install
-
-# 启动所有应用 (Desktop Core + UI)
 pnpm dev
 ```
 
-### 4. 常见问题
-*   **Prisma Client Error**: 如果遇到 `PrismaClient` 未初始化，请运行 `pnpm db:generate`。
-*   **Electron 弹窗无反应**: 检查终端是否有数据库连接报错。
+### 常用命令
+```bash
+pnpm db:push
+pnpm db:generate
+pnpm build
+```
 
-## 📂 项目结构 (Monorepo)
-*   **`apps/desktop`**: Electron + Vite + React 桌面端应用。
-    *   `electron/`: 主进程 (Main Process)，负责系统交互和数据库通信 (IPC)。
-    *   `src/`: 渲染进程 (Renderer)，基于 TailwindCSS + Framer Motion 的现代化 UI。
-    *   `src/components/LexicalEditor/`: **Lexical 富文本编辑器**及其插件。
-*   **`apps/backend`**: Spring Boot 云同步服务端。
-    *   提供增量数据同步 API (Push/Pull)。
-    *   基于 MariaDB 存储。
-*   **`packages/core`**: 核心数据层。
-    *   `prisma/`: 客户端数据库 Schema 定义 (SQLite)。
-    *   `dist/`: 编译后的 ESM 模块 (供 Desktop 引用)。
+## 项目结构
+- `apps/desktop`：Electron 桌面端（主应用）
+- `apps/backend`：Spring Boot 同步服务
+- `packages/core`：Prisma 数据模型与核心逻辑
 
-## ✨ 功能特性
+## 当前功能
 
-### 编辑器功能 (基于 Meta Lexical)
-- [x] 富文本编辑 (加粗、斜体、下划线、删除线)
-- [x] 文字对齐 (左对齐、居中、右对齐、两端对齐)
-- [x] 字体设置 (宋体、黑体、楷体)
-- [x] 字号调节 (滑块控制)
-- [x] 首行缩进 (2字符，适配中文排版)
-- [x] 一键排版 (删除多余空格、智能标点转换、句首大写)
-- [x] 手机预览模式 (iPhone 15 风格外框)
-- [x] 宽屏/窄屏切换
-- [x] 国际化 (中英文切换)
-- [x] 字数统计 (实时显示，高性能防抖)
-- [x] 最近编辑文件 (工具栏快捷入口，支持滚动)
-- [x] 故事结构管理 (情节线、情节要点)
-- [x] 叙事矩阵 (Narrative Matrix) 视图
-- [x] 文本锚点 (情节要点锚定到编辑器文本)
+### 编辑器与结构化创作
+- Lexical 富文本编辑（常用格式、排版、快捷键）
+- 卷/章管理
+- 灵感系统（标注、跳转、收藏）
+- 故事线/情节点/锚点
+- 叙事矩阵（章节 × 情节线）
+- 全局搜索（章节、灵感、角色、物品、世界观、地图）
 
-### 核心功能
-- [x] Monorepo 架构初始化 (Turbo)
-- [x] 本地数据库集成 (SQLite + Prisma)
-- [x] 桌面端基础框架 (Electron + Vite ESM)
-- [x] 主页 UI (Glassmorphism 风格)
-- [x] 小说创建流程 (IPC 通信打通)
-- [x] 应用打包 (支持安装版 Setup.exe 和 便携版 Portable.exe)
-- [x] 云同步后端基础 (Spring Boot)
-- [x] 章节编辑器 (Lexical 集成完成)
-- [x] 章节编辑器开发 (基础功能可用，字数统计已修复)
-- [x] 小说、卷和章节要支持删除--注意删除逻辑。最好用逻辑删除，提供恢复功能（优先级不高）。
-- [x] 增加手机排版格式预览
-- [ ] 导出功能，方便发表到各个小说平台
-- [ ] 导入功能
-- [x] 角色卡片功能，在正文中增加角色下划线，可以快速查看角色信息
-- [x] @ 提及系统 (角色/物品/世界观/地图，支持类别筛选标签)
-- [x] 全局搜索地图名称集成 (搜索结果跳转+高亮)
-- [x] 全系统删除确认 UI 统一 (支持二次确认保护)
-- [x] 灵感系统 (选中文字创建、Ctrl+I 全局创建、收藏、跳转)
-- [x] 全局搜索 (FTS5 全文索引、章节/灵感搜索、跳转高亮与精准定位)
-- [x] 灵感搜索与过滤 (章节过滤、内容搜索、时间区间)
-- [x] 章节大纲
-- [x] 故事结构系统 (情节线管理、要点编辑、文本锚点关联)
-- [x] 叙事矩阵集成 (章节 x 情节线 全局视图，支持行列切换)
-- [x] 交互优化 (ESC 关闭弹窗、侧边栏键盘导航、Flex 布局稳定性)
+### AI 能力（用户可见）
+- 标题生成：基于当前章节上下文生成候选标题并可一键替换
+- 章节续写：支持参数配置与预览确认后插入
+- AI 创作工坊：生成大纲/角色/物品/技能/地图草稿，编辑勾选后确认入库
+- 地图 AI 生成：支持提示词生成图片并关联地图资产
+- 摘要策略：支持本地摘要与 AI 摘要；AI 摘要建议手动或完稿时触发
 
-### 进行中
-- [ ] 云端同步功能对接
-- [ ] 导出功能 (TXT/EPUB/PDF)
-- [ ] AI 写作辅助
+## 开发进度（摘要）
+- [x] AI 创作工坊入口与草稿编辑流程
+- [x] 创作资产入库前校验 + 原子事务写入
+- [x] 续写配置 + 预览确认写入
+- [x] 章节摘要更新与上下文回填
+- [ ] 标题生成进度条（与续写一致的阶段反馈）
+- [ ] 云同步完整对接
 
-## 📖 开发文档
-*   **架构设计**: 参见 `SyncDesign.md`
-*   **搜索设计**: 参见 `searchDesign.md`
-*   **开发指南**: 参见 `DEVELOPMENT.md`
-*   **后端说明**: 参见 `apps/backend/README.md`
+## 文档
+- 开发文档：`DEVELOPMENT.md`
+- 用户指南（中文）：`USER_GUIDE.md`
+- User Guide (English)：`USER_GUIDE_EN.md`
+- 后端说明：`apps/backend/README.md`

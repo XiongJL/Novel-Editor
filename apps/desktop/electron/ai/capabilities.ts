@@ -1,0 +1,519 @@
+import { db } from '@novel-editor/core';
+import * as searchIndex from '../search/searchIndex';
+import { AiActionError, normalizeAiError } from './errors';
+import { scheduleChapterSummaryRebuild } from './summary/chapterSummary';
+
+export type CapabilityPermission = 'read' | 'write' | 'destructive';
+export type CapabilityHandler = (payload?: unknown) => Promise<unknown>;
+
+export interface CapabilityDefinition {
+    actionId: string;
+    title: string;
+    description: string;
+    permission: CapabilityPermission;
+    inputSchema: Record<string, unknown>;
+    outputSchema: Record<string, unknown>;
+    handler: CapabilityHandler;
+}
+
+export interface CapabilityDeps {
+    continueWriting: (payload: {
+        locale?: string;
+        mode?: 'new_chapter' | 'continue_chapter';
+        novelId: string;
+        chapterId: string;
+        currentContent: string;
+        ideaIds?: string[];
+        contextChapterCount?: number;
+        recentRawChapterCount?: number;
+        targetLength?: number;
+        style?: string;
+        tone?: string;
+        pace?: string;
+        temperature?: number;
+        userIntent?: string;
+        currentLocation?: string;
+        overrideUserPrompt?: string;
+    }) => Promise<{ text: string; usedContext: string[]; consistency: { ok: boolean; issues: string[] } }>;
+}
+
+export function createCapabilityDefinitions(deps: CapabilityDeps): CapabilityDefinition[] {
+    return [
+        {
+            actionId: 'novel.list',
+            title: 'List novels',
+            description: 'Return novels sorted by update time.',
+            permission: 'read',
+            inputSchema: { type: 'object', properties: {} },
+            outputSchema: { type: 'array' },
+            handler: async () => db.novel.findMany({ orderBy: { updatedAt: 'desc' } }),
+        },
+        {
+            actionId: 'volume.list',
+            title: 'List volumes',
+            description: 'Return all volumes and chapter summaries under a novel.',
+            permission: 'read',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    novelId: { type: 'string' },
+                },
+                required: ['novelId'],
+            },
+            outputSchema: { type: 'array' },
+            handler: async (payload) => {
+                const input = payload as { novelId?: string };
+                if (!input?.novelId) {
+                    throw new AiActionError('INVALID_INPUT', 'novelId is required');
+                }
+
+                return db.volume.findMany({
+                    where: { novelId: input.novelId },
+                    include: {
+                        chapters: {
+                            select: { id: true, title: true, order: true, wordCount: true, updatedAt: true },
+                            orderBy: { order: 'asc' },
+                        },
+                    },
+                    orderBy: { order: 'asc' },
+                });
+            },
+        },
+        {
+            actionId: 'novel.create',
+            title: 'Create novel',
+            description: 'Create a novel with default volume/chapter.',
+            permission: 'write',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    title: { type: 'string' },
+                },
+                required: [],
+            },
+            outputSchema: { type: 'object' },
+            handler: async (payload) => {
+                const input = payload as { title?: string };
+                const title = input?.title?.trim() || `新作品 ${new Date().toLocaleTimeString()}`;
+
+                return db.novel.create({
+                    data: {
+                        title,
+                        wordCount: 0,
+                        volumes: {
+                            create: {
+                                title: '',
+                                order: 1,
+                                chapters: {
+                                    create: {
+                                        title: '',
+                                        content: '',
+                                        order: 1,
+                                        wordCount: 0,
+                                    },
+                                },
+                            },
+                        },
+                    },
+                });
+            },
+        },
+        {
+            actionId: 'chapter.list',
+            title: 'List chapters',
+            description: 'Return chapters under a volume in ascending order.',
+            permission: 'read',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    volumeId: { type: 'string' },
+                },
+                required: ['volumeId'],
+            },
+            outputSchema: { type: 'array' },
+            handler: async (payload) => {
+                const input = payload as { volumeId?: string };
+                if (!input?.volumeId) {
+                    throw new AiActionError('INVALID_INPUT', 'volumeId is required');
+                }
+
+                return db.chapter.findMany({
+                    where: { volumeId: input.volumeId },
+                    orderBy: { order: 'asc' },
+                });
+            },
+        },
+        {
+            actionId: 'chapter.create',
+            title: 'Create chapter',
+            description: 'Create a chapter under volume with auto order fallback.',
+            permission: 'write',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    volumeId: { type: 'string' },
+                    title: { type: 'string' },
+                    order: { type: 'number' },
+                },
+                required: ['volumeId'],
+            },
+            outputSchema: { type: 'object' },
+            handler: async (payload) => {
+                const input = payload as { volumeId?: string; title?: string; order?: number };
+                if (!input?.volumeId) {
+                    throw new AiActionError('INVALID_INPUT', 'volumeId is required');
+                }
+
+                let finalOrder = input.order;
+                if (!Number.isFinite(finalOrder)) {
+                    const lastChapter = await db.chapter.findFirst({
+                        where: { volumeId: input.volumeId },
+                        orderBy: { order: 'desc' },
+                    });
+                    finalOrder = (lastChapter?.order || 0) + 1;
+                }
+
+                return db.chapter.create({
+                    data: {
+                        volumeId: input.volumeId,
+                        title: input.title?.trim() || '',
+                        order: finalOrder!,
+                        content: '',
+                        wordCount: 0,
+                    },
+                });
+            },
+        },
+        {
+            actionId: 'chapter.get',
+            title: 'Get chapter',
+            description: 'Return chapter content by chapter id.',
+            permission: 'read',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    chapterId: { type: 'string' },
+                },
+                required: ['chapterId'],
+            },
+            outputSchema: { type: 'object' },
+            handler: async (payload) => {
+                const input = payload as { chapterId?: string };
+                if (!input?.chapterId) {
+                    throw new AiActionError('INVALID_INPUT', 'chapterId is required');
+                }
+
+                return db.chapter.findUnique({
+                    where: { id: input.chapterId },
+                    include: { volume: { select: { novelId: true } } },
+                });
+            },
+        },
+        {
+            actionId: 'chapter.save',
+            title: 'Save chapter content',
+            description: 'Persist chapter content and keep novel word count in sync.',
+            permission: 'write',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    chapterId: { type: 'string' },
+                    content: { type: 'string' },
+                    source: {
+                        type: 'string',
+                        enum: ['ai_agent', 'ai_ui'],
+                    },
+                },
+                required: ['chapterId', 'content'],
+            },
+            outputSchema: { type: 'object' },
+            handler: async (payload) => {
+                const input = payload as { chapterId?: string; content?: string; source?: 'ai_agent' | 'ai_ui' };
+                if (!input?.chapterId) {
+                    throw new AiActionError('INVALID_INPUT', 'chapterId is required');
+                }
+                if (typeof input.content !== 'string') {
+                    throw new AiActionError('INVALID_INPUT', 'content is required');
+                }
+                const saveSource: 'ai_agent' | 'ai_ui' = input.source === 'ai_ui' ? 'ai_ui' : 'ai_agent';
+
+                const chapter = await db.chapter.findUnique({
+                    where: { id: input.chapterId },
+                    select: { id: true, content: true, updatedAt: true, wordCount: true, volume: { select: { novelId: true } } },
+                });
+                if (!chapter || !chapter.volume) {
+                    throw new AiActionError('NOT_FOUND', 'Chapter or volume not found');
+                }
+
+                const newWordCount = input.content.length;
+                const delta = newWordCount - chapter.wordCount;
+
+                try {
+                    const [, updatedChapter] = await db.$transaction([
+                        db.novel.update({
+                            where: { id: chapter.volume.novelId },
+                            data: { wordCount: { increment: delta }, updatedAt: new Date() },
+                        }),
+                        db.chapter.update({
+                            where: { id: input.chapterId },
+                            data: { content: input.content, wordCount: newWordCount, updatedAt: new Date() },
+                        }),
+                    ]);
+
+                    scheduleChapterSummaryRebuild(input.chapterId);
+
+                    return {
+                        chapter: updatedChapter,
+                        saveMeta: {
+                            source: saveSource,
+                            rollbackPoint: {
+                                chapterId: chapter.id,
+                                content: chapter.content,
+                                updatedAt: chapter.updatedAt,
+                            },
+                        },
+                    };
+                } catch (error) {
+                    const normalized = normalizeAiError(error);
+                    throw new AiActionError('PERSISTENCE_ERROR', normalized.message);
+                }
+            },
+        },
+        {
+            actionId: 'chapter.generate',
+            title: 'Generate chapter draft',
+            description: 'Generate chapter continuation with strict lore/outline context via configured model provider.',
+            permission: 'write',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    locale: { type: 'string' },
+                    mode: {
+                        type: 'string',
+                        enum: ['new_chapter', 'continue_chapter'],
+                    },
+                    novelId: { type: 'string' },
+                    chapterId: { type: 'string' },
+                    currentContent: { type: 'string' },
+                    ideaIds: {
+                        type: 'array',
+                        items: { type: 'string' },
+                    },
+                    contextChapterCount: { type: 'number' },
+                    recentRawChapterCount: { type: 'number' },
+                    targetLength: { type: 'number' },
+                    style: { type: 'string' },
+                    tone: { type: 'string' },
+                    pace: { type: 'string' },
+                    temperature: { type: 'number' },
+                    userIntent: { type: 'string' },
+                    currentLocation: { type: 'string' },
+                    overrideUserPrompt: { type: 'string' },
+                },
+                required: ['novelId', 'chapterId', 'currentContent'],
+            },
+            outputSchema: { type: 'object' },
+            handler: async (payload) => {
+                const input = payload as {
+                    locale?: string;
+                    mode?: 'new_chapter' | 'continue_chapter';
+                    novelId?: string;
+                    chapterId?: string;
+                    currentContent?: string;
+                    ideaIds?: string[];
+                    contextChapterCount?: number;
+                    recentRawChapterCount?: number;
+                    targetLength?: number;
+                    style?: string;
+                    tone?: string;
+                    pace?: string;
+                    temperature?: number;
+                    userIntent?: string;
+                    currentLocation?: string;
+                    overrideUserPrompt?: string;
+                };
+                if (!input?.novelId || !input.chapterId || typeof input.currentContent !== 'string') {
+                    throw new AiActionError('INVALID_INPUT', 'novelId, chapterId, currentContent are required');
+                }
+                try {
+                    return await deps.continueWriting({
+                        locale: input.locale,
+                        mode: input.mode,
+                        novelId: input.novelId,
+                        chapterId: input.chapterId,
+                        currentContent: input.currentContent,
+                        ideaIds: Array.isArray(input.ideaIds) ? input.ideaIds : undefined,
+                        contextChapterCount: input.contextChapterCount,
+                        recentRawChapterCount: input.recentRawChapterCount,
+                        targetLength: input.targetLength,
+                        style: input.style,
+                        tone: input.tone,
+                        pace: input.pace,
+                        temperature: input.temperature,
+                        userIntent: input.userIntent,
+                        currentLocation: input.currentLocation,
+                        overrideUserPrompt: input.overrideUserPrompt,
+                    });
+                } catch (error) {
+                    throw normalizeAiError(error);
+                }
+            },
+        },
+        {
+            actionId: 'plotline.list',
+            title: 'List plot lines',
+            description: 'Return all plot lines and points for a novel.',
+            permission: 'read',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    novelId: { type: 'string' },
+                },
+                required: ['novelId'],
+            },
+            outputSchema: { type: 'array' },
+            handler: async (payload) => {
+                const input = payload as { novelId?: string };
+                if (!input?.novelId) {
+                    throw new AiActionError('INVALID_INPUT', 'novelId is required');
+                }
+
+                return (db as any).plotLine.findMany({
+                    where: { novelId: input.novelId },
+                    include: {
+                        points: {
+                            include: { anchors: true },
+                            orderBy: { order: 'asc' },
+                        },
+                    },
+                    orderBy: { sortOrder: 'asc' },
+                });
+            },
+        },
+        {
+            actionId: 'worldsetting.list',
+            title: 'List world settings',
+            description: 'Return all world settings under a novel.',
+            permission: 'read',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    novelId: { type: 'string' },
+                },
+                required: ['novelId'],
+            },
+            outputSchema: { type: 'array' },
+            handler: async (payload) => {
+                const input = payload as { novelId?: string };
+                if (!input?.novelId) {
+                    throw new AiActionError('INVALID_INPUT', 'novelId is required');
+                }
+
+                return (db as any).worldSetting.findMany({
+                    where: { novelId: input.novelId },
+                    orderBy: { sortOrder: 'asc' },
+                });
+            },
+        },
+        {
+            actionId: 'character.list',
+            title: 'List characters',
+            description: 'Return all characters under a novel.',
+            permission: 'read',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    novelId: { type: 'string' },
+                },
+                required: ['novelId'],
+            },
+            outputSchema: { type: 'array' },
+            handler: async (payload) => {
+                const input = payload as { novelId?: string };
+                if (!input?.novelId) {
+                    throw new AiActionError('INVALID_INPUT', 'novelId is required');
+                }
+
+                return (db as any).character.findMany({
+                    where: { novelId: input.novelId },
+                    orderBy: { sortOrder: 'asc' },
+                });
+            },
+        },
+        {
+            actionId: 'item.list',
+            title: 'List items',
+            description: 'Return all items and skills under a novel.',
+            permission: 'read',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    novelId: { type: 'string' },
+                },
+                required: ['novelId'],
+            },
+            outputSchema: { type: 'array' },
+            handler: async (payload) => {
+                const input = payload as { novelId?: string };
+                if (!input?.novelId) {
+                    throw new AiActionError('INVALID_INPUT', 'novelId is required');
+                }
+
+                return (db as any).item.findMany({
+                    where: { novelId: input.novelId },
+                    orderBy: { sortOrder: 'asc' },
+                });
+            },
+        },
+        {
+            actionId: 'map.list',
+            title: 'List maps',
+            description: 'Return all maps under a novel.',
+            permission: 'read',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    novelId: { type: 'string' },
+                },
+                required: ['novelId'],
+            },
+            outputSchema: { type: 'array' },
+            handler: async (payload) => {
+                const input = payload as { novelId?: string };
+                if (!input?.novelId) {
+                    throw new Error('novelId is required');
+                }
+
+                return (db as any).mapCanvas.findMany({
+                    where: { novelId: input.novelId },
+                    orderBy: { sortOrder: 'asc' },
+                });
+            },
+        },
+        {
+            actionId: 'search.query',
+            title: 'Search novel content',
+            description: 'Run global search against chapter and idea index.',
+            permission: 'read',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    novelId: { type: 'string' },
+                    keyword: { type: 'string' },
+                    limit: { type: 'number' },
+                    offset: { type: 'number' },
+                },
+                required: ['novelId', 'keyword'],
+            },
+            outputSchema: { type: 'array' },
+            handler: async (payload) => {
+                const input = payload as { novelId?: string; keyword?: string; limit?: number; offset?: number };
+                if (!input?.novelId || !input?.keyword) {
+                    throw new AiActionError('INVALID_INPUT', 'novelId and keyword are required');
+                }
+
+                return searchIndex.search(input.novelId, input.keyword, input.limit ?? 20, input.offset ?? 0);
+            },
+        },
+    ];
+}

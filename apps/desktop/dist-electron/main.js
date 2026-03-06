@@ -1,10 +1,19 @@
-import { app, dialog, ipcMain, nativeImage, BrowserWindow, protocol, net } from "electron";
+var __defProp = Object.defineProperty;
+var __defNormalProp = (obj, key, value) => key in obj ? __defProp(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
+var __publicField = (obj, key, value) => {
+  __defNormalProp(obj, typeof key !== "symbol" ? key + "" : key, value);
+  return value;
+};
+import { app, dialog, ipcMain, nativeImage, BrowserWindow, protocol, net, session } from "electron";
 import { db, initDb } from "@novel-editor/core";
 import { fileURLToPath } from "node:url";
-import path$1 from "node:path";
+import path from "node:path";
 import { execSync } from "child_process";
-import fs from "fs";
-import path from "path";
+import fs$1 from "fs";
+import fs from "node:fs";
+import { createHash, randomUUID } from "node:crypto";
+import { spawn } from "node:child_process";
+import path$1 from "path";
 import require$$0 from "zlib";
 import crypto from "crypto";
 async function initSearchIndex() {
@@ -315,6 +324,3230 @@ async function getIndexStats(novelId) {
   } catch (error) {
     console.error("[SearchIndex] Failed to get stats:", error);
     return { chapters: 0, ideas: 0 };
+  }
+}
+class AiActionError extends Error {
+  constructor(code, message, detail) {
+    super(message);
+    __publicField(this, "code");
+    __publicField(this, "detail");
+    this.code = code;
+    this.detail = detail;
+    this.name = "AiActionError";
+  }
+}
+function fromMessage(message) {
+  const text = message.toLowerCase();
+  if (text.includes("timed out") || text.includes("timeout") || text.includes("aborterror") || text.includes("aborted")) {
+    return new AiActionError("PROVIDER_TIMEOUT", message);
+  }
+  if (text.includes("401") || text.includes("403") || text.includes("unauthorized") || text.includes("forbidden") || text.includes("api key")) {
+    return new AiActionError("PROVIDER_AUTH", message);
+  }
+  if (text.includes("content_filter") || text.includes("safety") || text.includes("filtered")) {
+    return new AiActionError("PROVIDER_FILTERED", message);
+  }
+  if (text.includes("429") || text.includes("503") || text.includes("model") || text.includes("unavailable")) {
+    return new AiActionError("PROVIDER_UNAVAILABLE", message);
+  }
+  if (text.includes("fetch") || text.includes("network") || text.includes("econn")) {
+    return new AiActionError("NETWORK_ERROR", message);
+  }
+  return new AiActionError("UNKNOWN", message);
+}
+function normalizeAiError(error) {
+  if (error instanceof AiActionError) {
+    return error;
+  }
+  const msg = error instanceof Error ? error.message : String(error ?? "unknown error");
+  return fromMessage(msg);
+}
+function formatAiErrorForDisplay(code, fallback) {
+  switch (code) {
+    case "INVALID_INPUT":
+      return "参数不完整或格式错误，请检查输入。";
+    case "NOT_FOUND":
+      return "目标数据不存在，可能已被删除。";
+    case "CONFLICT":
+      return "当前操作与现有数据冲突，请调整后重试。";
+    case "PROVIDER_AUTH":
+      return "模型鉴权失败，请检查 API Key 或权限。";
+    case "PROVIDER_TIMEOUT":
+      return "模型请求超时，请稍后重试。";
+    case "PROVIDER_UNAVAILABLE":
+      return "模型暂不可用，请稍后重试或切换模型。";
+    case "PROVIDER_FILTERED":
+      return "请求触发内容策略限制，请调整提示词。";
+    case "NETWORK_ERROR":
+      return "网络连接失败，请检查网络或代理设置。";
+    case "PERSISTENCE_ERROR":
+      return "写入失败，数据未成功保存。";
+    case "UNKNOWN":
+    default:
+      return fallback || "未知错误，请稍后重试。";
+  }
+}
+function joinUrl(baseUrl, path2) {
+  return `${baseUrl.replace(/\/+$/, "")}/${path2.replace(/^\/+/, "")}`;
+}
+function parseJsonSafe(text) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+class HttpProvider {
+  constructor(settings) {
+    __publicField(this, "name", "http");
+    this.settings = settings;
+  }
+  async healthCheck() {
+    const { baseUrl, apiKey, timeoutMs } = this.settings.http;
+    if (!baseUrl.trim()) {
+      return { ok: false, detail: "HTTP baseUrl is empty" };
+    }
+    try {
+      new URL(baseUrl);
+    } catch {
+      return { ok: false, detail: "HTTP baseUrl is invalid" };
+    }
+    if (!apiKey.trim()) {
+      return { ok: false, detail: "API key is empty" };
+    }
+    const controller = new AbortController();
+    let didTimeout = false;
+    const timer = setTimeout(() => {
+      didTimeout = true;
+      controller.abort();
+    }, Math.max(1e3, timeoutMs));
+    try {
+      const res = await fetch(joinUrl(baseUrl, "models"), {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${apiKey}`
+        },
+        signal: controller.signal
+      });
+      if (!res.ok) {
+        return { ok: false, detail: `HTTP provider rejected: ${res.status}` };
+      }
+      return { ok: true, detail: "HTTP provider is reachable" };
+    } catch (error) {
+      if (didTimeout) {
+        return { ok: false, detail: `HTTP health check timed out after ${Math.max(1e3, timeoutMs)}ms` };
+      }
+      return { ok: false, detail: `HTTP health check failed: ${(error == null ? void 0 : error.message) || "unknown error"}` };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  async generate(req) {
+    var _a, _b, _c, _d, _e, _f;
+    const prompt = req.prompt.trim();
+    if (!prompt) {
+      return { text: "", model: this.settings.http.model };
+    }
+    const controller = new AbortController();
+    let didTimeout = false;
+    const timeout = Math.max(1e3, this.settings.http.timeoutMs);
+    const timer = setTimeout(() => {
+      didTimeout = true;
+      controller.abort();
+    }, timeout);
+    const body = {
+      model: this.settings.http.model,
+      messages: [
+        ...req.systemPrompt ? [{ role: "system", content: req.systemPrompt }] : [],
+        { role: "user", content: prompt }
+      ],
+      max_tokens: req.maxTokens ?? this.settings.http.maxTokens,
+      temperature: req.temperature ?? this.settings.http.temperature
+    };
+    try {
+      const res = await fetch(joinUrl(this.settings.http.baseUrl, "chat/completions"), {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${this.settings.http.apiKey}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(body),
+        signal: controller.signal
+      });
+      const text = await res.text();
+      const json = parseJsonSafe(text);
+      if (!res.ok) {
+        throw new Error(((_a = json == null ? void 0 : json.error) == null ? void 0 : _a.message) || `HTTP ${res.status}: ${text.slice(0, 300)}`);
+      }
+      const output = ((_d = (_c = (_b = json == null ? void 0 : json.choices) == null ? void 0 : _b[0]) == null ? void 0 : _c.message) == null ? void 0 : _d.content) || (json == null ? void 0 : json.output_text) || ((_f = (_e = json == null ? void 0 : json.content) == null ? void 0 : _e[0]) == null ? void 0 : _f.text) || "";
+      return {
+        text: typeof output === "string" ? output : JSON.stringify(output),
+        model: (json == null ? void 0 : json.model) || this.settings.http.model
+      };
+    } catch (error) {
+      if (didTimeout || (error == null ? void 0 : error.name) === "AbortError") {
+        throw new Error(`HTTP request timeout after ${timeout}ms`);
+      }
+      throw error;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  async generateImage(req) {
+    var _a, _b;
+    const prompt = req.prompt.trim();
+    if (!prompt) {
+      return {};
+    }
+    const controller = new AbortController();
+    let didTimeout = false;
+    const timeout = Math.max(1e3, this.settings.http.timeoutMs);
+    const timer = setTimeout(() => {
+      didTimeout = true;
+      controller.abort();
+    }, timeout);
+    try {
+      const res = await fetch(joinUrl(this.settings.http.baseUrl, "images/generations"), {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${this.settings.http.apiKey}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          model: req.model || this.settings.http.model,
+          prompt,
+          size: req.size || "1024x1024",
+          output_format: req.outputFormat || "png",
+          watermark: req.watermark ?? true
+        }),
+        signal: controller.signal
+      });
+      const text = await res.text();
+      const json = parseJsonSafe(text);
+      if (!res.ok) {
+        throw new Error(((_a = json == null ? void 0 : json.error) == null ? void 0 : _a.message) || `HTTP ${res.status}: ${text.slice(0, 300)}`);
+      }
+      const first = ((_b = json == null ? void 0 : json.data) == null ? void 0 : _b[0]) || {};
+      return {
+        imageUrl: first.url,
+        imageBase64: first.b64_json,
+        mimeType: "image/png"
+      };
+    } catch (error) {
+      if (didTimeout || (error == null ? void 0 : error.name) === "AbortError") {
+        throw new Error(`HTTP request timeout after ${timeout}ms`);
+      }
+      throw error;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+}
+const LOG_PREFIX = "[Summary]";
+const DEFAULT_SUMMARY_SETTINGS = {
+  summaryMode: "local",
+  summaryTriggerPolicy: "manual",
+  summaryDebounceMs: 3e4,
+  summaryMinIntervalMs: 18e4,
+  summaryMinWordDelta: 120,
+  summaryFinalizeStableMs: 6e5,
+  summaryFinalizeMinWords: 1200,
+  recentChapterRawCount: 2
+};
+const DEFAULT_AI_SETTINGS$1 = {
+  providerType: "http",
+  http: {
+    baseUrl: "",
+    apiKey: "",
+    model: "gpt-4.1-mini",
+    imageModel: "doubao-seedream-5-0-260128",
+    imageSize: "2K",
+    imageOutputFormat: "png",
+    imageWatermark: false,
+    timeoutMs: 6e4,
+    maxTokens: 2048,
+    temperature: 0.7
+  },
+  mcpCli: {
+    cliPath: "",
+    argsTemplate: "",
+    workingDir: "",
+    envJson: "{}",
+    startupTimeoutMs: 6e4
+  },
+  proxy: {
+    mode: "system",
+    httpProxy: "",
+    httpsProxy: "",
+    allProxy: "",
+    noProxy: ""
+  },
+  summary: DEFAULT_SUMMARY_SETTINGS
+};
+const pendingTimers = /* @__PURE__ */ new Map();
+const aiPendingCounters = /* @__PURE__ */ new Map();
+const finalizeTimers = /* @__PURE__ */ new Map();
+const narrativeTimers = /* @__PURE__ */ new Map();
+let dbPathLogged = false;
+function extractPlainTextFromLexical$2(content) {
+  if (!(content == null ? void 0 : content.trim()))
+    return "";
+  try {
+    const parsed = JSON.parse(content);
+    const texts = [];
+    const walk = (node) => {
+      if (!node || typeof node !== "object")
+        return;
+      if (typeof node.text === "string") {
+        texts.push(node.text);
+      }
+      if (Array.isArray(node.children)) {
+        node.children.forEach(walk);
+      }
+    };
+    walk((parsed == null ? void 0 : parsed.root) || parsed);
+    return texts.join(" ").replace(/\s+/g, " ").trim();
+  } catch {
+    return content.replace(/\s+/g, " ").trim();
+  }
+}
+function buildKeyFacts(plainText) {
+  if (!plainText)
+    return [];
+  const sentences = plainText.split(/[。！？!?]/).map((item) => item.trim()).filter(Boolean);
+  return sentences.slice(0, 5).map((item, index) => `fact_${index + 1}: ${item.slice(0, 80)}`);
+}
+function buildOpenQuestions(plainText) {
+  if (!plainText)
+    return [];
+  return plainText.split(/[。！？!?]/).map((item) => item.trim()).filter((item) => item.includes("？") || item.includes("?")).slice(0, 5);
+}
+function buildCompressedMemory(title, chapterOrder, summaryText, keyFacts) {
+  const orderPart = Number.isFinite(chapterOrder) ? `第${chapterOrder}章` : "章节";
+  const factPart = keyFacts.length > 0 ? keyFacts.join(" | ") : "无明显关键事实";
+  return `${orderPart}《${title || "未命名章节"}》摘要：${summaryText}
+关键事实：${factPart}`;
+}
+function safeParseJsonArray(value) {
+  if (typeof value !== "string" || !value.trim())
+    return [];
+  try {
+    const parsed = JSON.parse(value);
+    if (!Array.isArray(parsed))
+      return [];
+    return parsed.map((item) => String(item || "").trim()).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+function computeNarrativeFingerprint(parts) {
+  return createHash("sha256").update(parts.join("|")).digest("hex");
+}
+function buildNarrativeSummaryText(scope, itemCount, summarySnippets) {
+  const header = scope === "volume" ? `卷级摘要（覆盖${itemCount}章）` : `全书摘要（覆盖${itemCount}章）`;
+  const merged = summarySnippets.map((item, index) => `${index + 1}. ${item}`).join("\n");
+  return `${header}
+${merged}`.slice(0, 2400);
+}
+function getAiSettingsFilePath() {
+  return path.join(app.getPath("userData"), "ai-settings.json");
+}
+function loadAiSettings() {
+  try {
+    const filePath = getAiSettingsFilePath();
+    if (!fs.existsSync(filePath))
+      return DEFAULT_AI_SETTINGS$1;
+    const raw = fs.readFileSync(filePath, "utf8");
+    const parsed = JSON.parse(raw);
+    return {
+      ...DEFAULT_AI_SETTINGS$1,
+      ...parsed,
+      http: { ...DEFAULT_AI_SETTINGS$1.http, ...parsed.http ?? {} },
+      mcpCli: { ...DEFAULT_AI_SETTINGS$1.mcpCli, ...parsed.mcpCli ?? {} },
+      proxy: { ...DEFAULT_AI_SETTINGS$1.proxy, ...parsed.proxy ?? {} },
+      summary: { ...DEFAULT_SUMMARY_SETTINGS, ...parsed.summary ?? {} }
+    };
+  } catch (error) {
+    console.warn(`${LOG_PREFIX} failed to load ai-settings.json, fallback to defaults:`, error);
+    return DEFAULT_AI_SETTINGS$1;
+  }
+}
+async function buildLocalSummary(plainText, chapterOrder) {
+  const summaryText = plainText.slice(0, 220) || "章节内容为空，暂无可提炼摘要。";
+  return {
+    summaryText,
+    keyFacts: buildKeyFacts(plainText),
+    openQuestions: buildOpenQuestions(plainText),
+    timelineHints: [`chapter_order:${chapterOrder ?? "unknown"}`],
+    provider: "local",
+    model: "heuristic-v1",
+    promptVersion: "chapter-summary-v1",
+    temperature: 0,
+    maxTokens: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    latencyMs: 0
+  };
+}
+async function buildAiSummary(chapterId, plainText, settings, chapterOrder) {
+  var _a, _b;
+  const canUseHttp = settings.providerType === "http" && Boolean((_a = settings.http.baseUrl) == null ? void 0 : _a.trim()) && Boolean((_b = settings.http.apiKey) == null ? void 0 : _b.trim());
+  if (!canUseHttp) {
+    throw new Error("AI summary mode requires HTTP provider with baseUrl and apiKey");
+  }
+  console.log(`${LOG_PREFIX} [${chapterId}] AI summary start (model=${settings.http.model})`);
+  const provider = new HttpProvider(settings);
+  const startedAt = Date.now();
+  const response = await provider.generate({
+    systemPrompt: [
+      "You summarize novel chapters for continuity memory.",
+      "Return strict JSON only.",
+      'Schema: {"summaryText":"...","keyFacts":["..."],"openQuestions":["..."],"timelineHints":["..."]}'
+    ].join(" "),
+    prompt: JSON.stringify({
+      task: "chapter_memory_summary",
+      chapterOrder,
+      content: plainText.slice(0, 8e3),
+      constraints: [
+        "summaryText should be concise and neutral",
+        "keyFacts at most 6 items",
+        "openQuestions at most 4 items"
+      ]
+    }),
+    maxTokens: Math.min(1024, settings.http.maxTokens),
+    temperature: Math.min(0.3, settings.http.temperature)
+  });
+  const parsed = JSON.parse(response.text || "{}");
+  const summaryText = String(parsed.summaryText || "").trim();
+  if (!summaryText) {
+    throw new Error("AI summary returned empty summaryText");
+  }
+  const latencyMs = Date.now() - startedAt;
+  console.log(`${LOG_PREFIX} [${chapterId}] AI summary success (${latencyMs}ms)`);
+  return {
+    summaryText: summaryText.slice(0, 400),
+    keyFacts: Array.isArray(parsed.keyFacts) ? parsed.keyFacts.map((item) => String(item).trim()).filter(Boolean).slice(0, 6) : [],
+    openQuestions: Array.isArray(parsed.openQuestions) ? parsed.openQuestions.map((item) => String(item).trim()).filter(Boolean).slice(0, 4) : [],
+    timelineHints: Array.isArray(parsed.timelineHints) ? parsed.timelineHints.map((item) => String(item).trim()).filter(Boolean).slice(0, 6) : [`chapter_order:${chapterOrder ?? "unknown"}`],
+    provider: "http",
+    model: settings.http.model,
+    promptVersion: "chapter-summary-ai-v1",
+    temperature: Math.min(0.3, settings.http.temperature),
+    maxTokens: Math.min(1024, settings.http.maxTokens),
+    inputTokens: 0,
+    outputTokens: 0,
+    latencyMs
+  };
+}
+async function collectNarrativePayload(scope, novelId, volumeId) {
+  const where = scope === "volume" ? { novelId, volumeId: volumeId || "", isLatest: true, status: "active" } : { novelId, isLatest: true, status: "active" };
+  const chapterSummaries = await db.chapterSummary.findMany({
+    where,
+    select: {
+      id: true,
+      chapterId: true,
+      chapterOrder: true,
+      updatedAt: true,
+      summaryText: true,
+      keyFacts: true,
+      openQuestions: true
+    },
+    orderBy: [
+      { chapterOrder: "asc" },
+      { updatedAt: "asc" }
+    ],
+    take: scope === "volume" ? 120 : 300
+  });
+  if (chapterSummaries.length === 0) {
+    return null;
+  }
+  const coverageChapterIds = chapterSummaries.map((item) => item.chapterId);
+  const chapterOrders = chapterSummaries.map((item) => Number(item.chapterOrder)).filter((item) => Number.isFinite(item));
+  const chapterRangeStart = chapterOrders.length > 0 ? Math.min(...chapterOrders) : null;
+  const chapterRangeEnd = chapterOrders.length > 0 ? Math.max(...chapterOrders) : null;
+  const summarySnippets = chapterSummaries.map((item) => String(item.summaryText || "").trim()).filter(Boolean).slice(-10);
+  const keyFacts = [...new Set(
+    chapterSummaries.flatMap((item) => safeParseJsonArray(item.keyFacts))
+  )].map((item) => String(item || "").slice(0, 120)).filter(Boolean).slice(0, 24);
+  const unresolvedThreads = [...new Set(
+    chapterSummaries.flatMap((item) => safeParseJsonArray(item.openQuestions))
+  )].map((item) => String(item || "").slice(0, 120)).filter(Boolean).slice(0, 20);
+  const styleGuide = [
+    scope === "volume" ? "保持本卷叙事风格一致" : "保持全书叙事风格一致",
+    "优先遵循现有大纲与关键事实"
+  ];
+  const hardConstraints = [
+    "不得与已确认关键事实冲突",
+    "保持角色动机与关系连续"
+  ];
+  const sourceFingerprint = computeNarrativeFingerprint(
+    chapterSummaries.map((item) => `${item.id}:${new Date(item.updatedAt).toISOString()}`)
+  );
+  let title = null;
+  if (scope === "volume" && volumeId) {
+    const volume = await db.volume.findUnique({
+      where: { id: volumeId },
+      select: { title: true }
+    });
+    title = (volume == null ? void 0 : volume.title) || null;
+  }
+  return {
+    title,
+    summaryText: buildNarrativeSummaryText(scope, coverageChapterIds.length, summarySnippets),
+    keyFacts,
+    unresolvedThreads,
+    styleGuide,
+    hardConstraints,
+    coverageChapterIds,
+    chapterRangeStart,
+    chapterRangeEnd,
+    sourceFingerprint
+  };
+}
+async function upsertNarrativeSummary(scope, novelId, payload, volumeId) {
+  await db.$transaction(async (tx) => {
+    await tx.narrativeSummary.updateMany({
+      where: {
+        novelId,
+        level: scope,
+        volumeId: scope === "volume" ? volumeId || null : null,
+        isLatest: true
+      },
+      data: {
+        isLatest: false,
+        status: "stale"
+      }
+    });
+    const existing = await tx.narrativeSummary.findFirst({
+      where: {
+        novelId,
+        level: scope,
+        volumeId: scope === "volume" ? volumeId || null : null,
+        sourceFingerprint: payload.sourceFingerprint
+      }
+    });
+    const data = {
+      novelId,
+      volumeId: scope === "volume" ? volumeId || null : null,
+      level: scope,
+      title: payload.title || null,
+      summaryText: payload.summaryText,
+      keyFacts: JSON.stringify(payload.keyFacts),
+      unresolvedThreads: JSON.stringify(payload.unresolvedThreads),
+      styleGuide: JSON.stringify(payload.styleGuide),
+      hardConstraints: JSON.stringify(payload.hardConstraints),
+      coverageChapterIds: JSON.stringify(payload.coverageChapterIds),
+      chapterRangeStart: payload.chapterRangeStart,
+      chapterRangeEnd: payload.chapterRangeEnd,
+      sourceFingerprint: payload.sourceFingerprint,
+      provider: "local",
+      model: "heuristic-v1",
+      promptVersion: "narrative-summary-v1",
+      temperature: 0,
+      maxTokens: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      latencyMs: 0,
+      qualityScore: null,
+      status: "active",
+      errorCode: null,
+      errorDetail: null,
+      isLatest: true
+    };
+    if (existing == null ? void 0 : existing.id) {
+      await tx.narrativeSummary.update({
+        where: { id: existing.id },
+        data
+      });
+    } else {
+      await tx.narrativeSummary.create({ data });
+    }
+  });
+}
+async function rebuildNarrativeSummaries(novelId, volumeId) {
+  try {
+    const [volumePayload, novelPayload] = await Promise.all([
+      collectNarrativePayload("volume", novelId, volumeId),
+      collectNarrativePayload("novel", novelId, null)
+    ]);
+    if (volumePayload) {
+      await upsertNarrativeSummary("volume", novelId, volumePayload, volumeId);
+      console.log(`${LOG_PREFIX} [novel=${novelId}] narrative summary updated (level=volume, volume=${volumeId})`);
+    }
+    if (novelPayload) {
+      await upsertNarrativeSummary("novel", novelId, novelPayload, null);
+      console.log(`${LOG_PREFIX} [novel=${novelId}] narrative summary updated (level=novel)`);
+    }
+  } catch (error) {
+    console.error(`${LOG_PREFIX} [novel=${novelId}] narrative summary rebuild failed:`, error);
+  }
+}
+function scheduleNarrativeSummaryRebuild(novelId, volumeId) {
+  const key = `${novelId}:${volumeId}`;
+  const existing = narrativeTimers.get(key);
+  if (existing) {
+    clearTimeout(existing);
+  }
+  const timer = setTimeout(() => {
+    narrativeTimers.delete(key);
+    void rebuildNarrativeSummaries(novelId, volumeId);
+  }, 15e3);
+  narrativeTimers.set(key, timer);
+}
+async function rebuildChapterSummary(chapterId, options) {
+  var _a;
+  const settings = loadAiSettings();
+  const force = Boolean(options == null ? void 0 : options.force);
+  const reason = (options == null ? void 0 : options.reason) || "save";
+  const isAiMode = settings.summary.summaryMode === "ai";
+  const effectiveMinIntervalMs = isAiMode ? Math.max(18e5, settings.summary.summaryMinIntervalMs) : settings.summary.summaryMinIntervalMs;
+  const effectiveMinWordDelta = isAiMode ? Math.max(800, settings.summary.summaryMinWordDelta) : settings.summary.summaryMinWordDelta;
+  const chapter = await db.chapter.findUnique({
+    where: { id: chapterId },
+    select: {
+      id: true,
+      title: true,
+      content: true,
+      wordCount: true,
+      order: true,
+      updatedAt: true,
+      volumeId: true,
+      volume: { select: { novelId: true } }
+    }
+  });
+  if (!((_a = chapter == null ? void 0 : chapter.volume) == null ? void 0 : _a.novelId)) {
+    console.log(`${LOG_PREFIX} [${chapterId}] skip: chapter or novel relation missing`);
+    return;
+  }
+  if (!dbPathLogged) {
+    try {
+      const rows = await db.$queryRawUnsafe("PRAGMA database_list;");
+      const mainDb = Array.isArray(rows) ? rows.find((row) => (row == null ? void 0 : row.name) === "main") : null;
+      console.log(`${LOG_PREFIX} sqlite main db path: ${(mainDb == null ? void 0 : mainDb.file) || "unknown"}`);
+    } catch (e) {
+      console.warn(`${LOG_PREFIX} failed to read sqlite db path via PRAGMA database_list`);
+    } finally {
+      dbPathLogged = true;
+    }
+  }
+  const sourceContent = chapter.content || "";
+  const sourceContentHash = createHash("sha256").update(sourceContent).digest("hex");
+  const now = Date.now();
+  const latest = await db.chapterSummary.findFirst({
+    where: {
+      chapterId: chapter.id,
+      isLatest: true,
+      status: "active",
+      summaryType: "standard"
+    },
+    orderBy: { updatedAt: "desc" }
+  });
+  if (!force && (latest == null ? void 0 : latest.sourceContentHash) === sourceContentHash) {
+    console.log(`${LOG_PREFIX} [${chapterId}] skip: same content hash`);
+    return;
+  }
+  const wordDelta = Math.abs((chapter.wordCount || 0) - Number((latest == null ? void 0 : latest.sourceWordCount) || 0));
+  const latestTime = (latest == null ? void 0 : latest.updatedAt) ? new Date(latest.updatedAt).getTime() : 0;
+  const sinceLastMs = latestTime > 0 ? now - latestTime : Number.MAX_SAFE_INTEGER;
+  if (!force && latestTime > 0 && sinceLastMs < effectiveMinIntervalMs && wordDelta < effectiveMinWordDelta) {
+    console.log(
+      `${LOG_PREFIX} [${chapterId}] skip: throttled (deltaWords=${wordDelta}, sinceLastMs=${sinceLastMs}, minIntervalMs=${effectiveMinIntervalMs}, minWordDelta=${effectiveMinWordDelta})`
+    );
+    return;
+  }
+  const plainText = extractPlainTextFromLexical$2(sourceContent);
+  console.log(
+    `${LOG_PREFIX} [${chapterId}] start rebuild (reason=${reason}, mode=${settings.summary.summaryMode}, words=${chapter.wordCount || plainText.length}, deltaWords=${wordDelta}, force=${force})`
+  );
+  let summary = await buildLocalSummary(plainText, chapter.order ?? null);
+  if (settings.summary.summaryMode === "ai") {
+    try {
+      summary = await buildAiSummary(chapterId, plainText, settings, chapter.order ?? null);
+    } catch (error) {
+      console.warn(`${LOG_PREFIX} [${chapterId}] AI summary failed, fallback to local: ${(error == null ? void 0 : error.message) || "unknown error"}`);
+      const fallback = await buildLocalSummary(plainText, chapter.order ?? null);
+      summary = {
+        ...fallback,
+        errorCode: "AI_SUMMARY_FALLBACK",
+        errorDetail: (error == null ? void 0 : error.message) || "unknown ai summary error"
+      };
+    }
+  }
+  await db.$transaction(async (tx) => {
+    await tx.chapterSummary.updateMany({
+      where: { chapterId: chapter.id, isLatest: true },
+      data: { isLatest: false, status: "stale" }
+    });
+    const existing = await tx.chapterSummary.findFirst({
+      where: {
+        chapterId: chapter.id,
+        sourceContentHash,
+        summaryType: "standard"
+      }
+    });
+    const payload = {
+      novelId: chapter.volume.novelId,
+      volumeId: chapter.volumeId,
+      chapterId: chapter.id,
+      summaryType: "standard",
+      summaryText: summary.summaryText,
+      compressedMemory: buildCompressedMemory(chapter.title || "", chapter.order ?? null, summary.summaryText, summary.keyFacts),
+      keyFacts: JSON.stringify(summary.keyFacts),
+      entitiesSnapshot: JSON.stringify({}),
+      timelineHints: JSON.stringify(summary.timelineHints),
+      openQuestions: JSON.stringify(summary.openQuestions),
+      sourceContentHash,
+      sourceWordCount: chapter.wordCount || plainText.length,
+      sourceUpdatedAt: chapter.updatedAt,
+      chapterOrder: chapter.order ?? null,
+      provider: summary.provider,
+      model: summary.model,
+      promptVersion: summary.promptVersion,
+      temperature: summary.temperature,
+      maxTokens: summary.maxTokens,
+      inputTokens: summary.inputTokens,
+      outputTokens: summary.outputTokens,
+      latencyMs: summary.latencyMs,
+      qualityScore: null,
+      status: "active",
+      errorCode: summary.errorCode || null,
+      errorDetail: summary.errorDetail || null,
+      isLatest: true
+    };
+    if (existing == null ? void 0 : existing.id) {
+      await tx.chapterSummary.update({
+        where: { id: existing.id },
+        data: payload
+      });
+      console.log(`${LOG_PREFIX} [${chapterId}] done: updated existing summary`);
+      return;
+    }
+    await tx.chapterSummary.create({
+      data: payload
+    });
+    console.log(`${LOG_PREFIX} [${chapterId}] done: created new summary`);
+  });
+  scheduleNarrativeSummaryRebuild(chapter.volume.novelId, chapter.volumeId);
+}
+function scheduleChapterSummaryRebuild(chapterId, reason = "save") {
+  const settings = loadAiSettings();
+  if (reason === "manual") {
+    console.log(`${LOG_PREFIX} [${chapterId}] manual trigger received`);
+    void rebuildChapterSummary(chapterId, { force: true, reason: "manual" }).catch((error) => {
+      console.error(`${LOG_PREFIX} [${chapterId}] manual rebuild failed:`, error);
+    });
+    return;
+  }
+  if (settings.summary.summaryMode === "ai" && settings.summary.summaryTriggerPolicy === "manual") {
+    console.log(`${LOG_PREFIX} [${chapterId}] skip scheduling: ai mode manual-only policy`);
+    return;
+  }
+  if (settings.summary.summaryMode === "ai" && settings.summary.summaryTriggerPolicy === "finalized") {
+    const stableDelay = Math.max(6e4, settings.summary.summaryFinalizeStableMs);
+    const existingFinalize = finalizeTimers.get(chapterId);
+    if (existingFinalize)
+      clearTimeout(existingFinalize);
+    const timer2 = setTimeout(async () => {
+      finalizeTimers.delete(chapterId);
+      const chapter = await db.chapter.findUnique({
+        where: { id: chapterId },
+        select: { wordCount: true }
+      });
+      const wordCount = (chapter == null ? void 0 : chapter.wordCount) || 0;
+      if (wordCount < settings.summary.summaryFinalizeMinWords) {
+        console.log(
+          `${LOG_PREFIX} [${chapterId}] finalized trigger skipped (wordCount=${wordCount}, min=${settings.summary.summaryFinalizeMinWords})`
+        );
+        return;
+      }
+      console.log(`${LOG_PREFIX} [${chapterId}] finalized trigger fired after stable window ${stableDelay}ms`);
+      void rebuildChapterSummary(chapterId, { force: true, reason: "finalized" }).catch((error) => {
+        console.error(`${LOG_PREFIX} [${chapterId}] finalized rebuild failed:`, error);
+      });
+    }, stableDelay);
+    finalizeTimers.set(chapterId, timer2);
+    console.log(`${LOG_PREFIX} [${chapterId}] finalized trigger scheduled (${stableDelay}ms stable window)`);
+    return;
+  }
+  const isAiMode = settings.summary.summaryMode === "ai";
+  const delay = isAiMode ? Math.max(3e5, settings.summary.summaryDebounceMs) : Math.max(1e3, settings.summary.summaryDebounceMs);
+  const existing = pendingTimers.get(chapterId);
+  if (isAiMode) {
+    if (existing) {
+      const count = (aiPendingCounters.get(chapterId) || 0) + 1;
+      aiPendingCounters.set(chapterId, count);
+      if (count % 10 === 0) {
+        console.log(`${LOG_PREFIX} [${chapterId}] ai mode coalescing saves (${count} updates queued, timer unchanged)`);
+      }
+      return;
+    }
+    aiPendingCounters.set(chapterId, 1);
+    console.log(`${LOG_PREFIX} [${chapterId}] ai mode scheduled (${delay}ms, fixed window)`);
+  } else {
+    if (existing) {
+      clearTimeout(existing);
+      console.log(`${LOG_PREFIX} [${chapterId}] debounce reset (${delay}ms)`);
+    } else {
+      console.log(`${LOG_PREFIX} [${chapterId}] debounce scheduled (${delay}ms)`);
+    }
+  }
+  const timer = setTimeout(() => {
+    pendingTimers.delete(chapterId);
+    const queuedCount = aiPendingCounters.get(chapterId) || 0;
+    aiPendingCounters.delete(chapterId);
+    if (isAiMode) {
+      console.log(`${LOG_PREFIX} [${chapterId}] ai mode fired after coalescing ${queuedCount} saves`);
+    } else {
+      console.log(`${LOG_PREFIX} [${chapterId}] debounce fired, evaluating rebuild`);
+    }
+    void rebuildChapterSummary(chapterId).catch((error) => {
+      console.error(`${LOG_PREFIX} [${chapterId}] rebuild failed:`, error);
+    });
+  }, delay);
+  pendingTimers.set(chapterId, timer);
+}
+function createCapabilityDefinitions(deps) {
+  return [
+    {
+      actionId: "novel.list",
+      title: "List novels",
+      description: "Return novels sorted by update time.",
+      permission: "read",
+      inputSchema: { type: "object", properties: {} },
+      outputSchema: { type: "array" },
+      handler: async () => db.novel.findMany({ orderBy: { updatedAt: "desc" } })
+    },
+    {
+      actionId: "volume.list",
+      title: "List volumes",
+      description: "Return all volumes and chapter summaries under a novel.",
+      permission: "read",
+      inputSchema: {
+        type: "object",
+        properties: {
+          novelId: { type: "string" }
+        },
+        required: ["novelId"]
+      },
+      outputSchema: { type: "array" },
+      handler: async (payload) => {
+        const input = payload;
+        if (!(input == null ? void 0 : input.novelId)) {
+          throw new AiActionError("INVALID_INPUT", "novelId is required");
+        }
+        return db.volume.findMany({
+          where: { novelId: input.novelId },
+          include: {
+            chapters: {
+              select: { id: true, title: true, order: true, wordCount: true, updatedAt: true },
+              orderBy: { order: "asc" }
+            }
+          },
+          orderBy: { order: "asc" }
+        });
+      }
+    },
+    {
+      actionId: "novel.create",
+      title: "Create novel",
+      description: "Create a novel with default volume/chapter.",
+      permission: "write",
+      inputSchema: {
+        type: "object",
+        properties: {
+          title: { type: "string" }
+        },
+        required: []
+      },
+      outputSchema: { type: "object" },
+      handler: async (payload) => {
+        var _a;
+        const input = payload;
+        const title = ((_a = input == null ? void 0 : input.title) == null ? void 0 : _a.trim()) || `新作品 ${(/* @__PURE__ */ new Date()).toLocaleTimeString()}`;
+        return db.novel.create({
+          data: {
+            title,
+            wordCount: 0,
+            volumes: {
+              create: {
+                title: "",
+                order: 1,
+                chapters: {
+                  create: {
+                    title: "",
+                    content: "",
+                    order: 1,
+                    wordCount: 0
+                  }
+                }
+              }
+            }
+          }
+        });
+      }
+    },
+    {
+      actionId: "chapter.list",
+      title: "List chapters",
+      description: "Return chapters under a volume in ascending order.",
+      permission: "read",
+      inputSchema: {
+        type: "object",
+        properties: {
+          volumeId: { type: "string" }
+        },
+        required: ["volumeId"]
+      },
+      outputSchema: { type: "array" },
+      handler: async (payload) => {
+        const input = payload;
+        if (!(input == null ? void 0 : input.volumeId)) {
+          throw new AiActionError("INVALID_INPUT", "volumeId is required");
+        }
+        return db.chapter.findMany({
+          where: { volumeId: input.volumeId },
+          orderBy: { order: "asc" }
+        });
+      }
+    },
+    {
+      actionId: "chapter.create",
+      title: "Create chapter",
+      description: "Create a chapter under volume with auto order fallback.",
+      permission: "write",
+      inputSchema: {
+        type: "object",
+        properties: {
+          volumeId: { type: "string" },
+          title: { type: "string" },
+          order: { type: "number" }
+        },
+        required: ["volumeId"]
+      },
+      outputSchema: { type: "object" },
+      handler: async (payload) => {
+        var _a;
+        const input = payload;
+        if (!(input == null ? void 0 : input.volumeId)) {
+          throw new AiActionError("INVALID_INPUT", "volumeId is required");
+        }
+        let finalOrder = input.order;
+        if (!Number.isFinite(finalOrder)) {
+          const lastChapter = await db.chapter.findFirst({
+            where: { volumeId: input.volumeId },
+            orderBy: { order: "desc" }
+          });
+          finalOrder = ((lastChapter == null ? void 0 : lastChapter.order) || 0) + 1;
+        }
+        return db.chapter.create({
+          data: {
+            volumeId: input.volumeId,
+            title: ((_a = input.title) == null ? void 0 : _a.trim()) || "",
+            order: finalOrder,
+            content: "",
+            wordCount: 0
+          }
+        });
+      }
+    },
+    {
+      actionId: "chapter.get",
+      title: "Get chapter",
+      description: "Return chapter content by chapter id.",
+      permission: "read",
+      inputSchema: {
+        type: "object",
+        properties: {
+          chapterId: { type: "string" }
+        },
+        required: ["chapterId"]
+      },
+      outputSchema: { type: "object" },
+      handler: async (payload) => {
+        const input = payload;
+        if (!(input == null ? void 0 : input.chapterId)) {
+          throw new AiActionError("INVALID_INPUT", "chapterId is required");
+        }
+        return db.chapter.findUnique({
+          where: { id: input.chapterId },
+          include: { volume: { select: { novelId: true } } }
+        });
+      }
+    },
+    {
+      actionId: "chapter.save",
+      title: "Save chapter content",
+      description: "Persist chapter content and keep novel word count in sync.",
+      permission: "write",
+      inputSchema: {
+        type: "object",
+        properties: {
+          chapterId: { type: "string" },
+          content: { type: "string" },
+          source: {
+            type: "string",
+            enum: ["ai_agent", "ai_ui"]
+          }
+        },
+        required: ["chapterId", "content"]
+      },
+      outputSchema: { type: "object" },
+      handler: async (payload) => {
+        const input = payload;
+        if (!(input == null ? void 0 : input.chapterId)) {
+          throw new AiActionError("INVALID_INPUT", "chapterId is required");
+        }
+        if (typeof input.content !== "string") {
+          throw new AiActionError("INVALID_INPUT", "content is required");
+        }
+        const saveSource = input.source === "ai_ui" ? "ai_ui" : "ai_agent";
+        const chapter = await db.chapter.findUnique({
+          where: { id: input.chapterId },
+          select: { id: true, content: true, updatedAt: true, wordCount: true, volume: { select: { novelId: true } } }
+        });
+        if (!chapter || !chapter.volume) {
+          throw new AiActionError("NOT_FOUND", "Chapter or volume not found");
+        }
+        const newWordCount = input.content.length;
+        const delta = newWordCount - chapter.wordCount;
+        try {
+          const [, updatedChapter] = await db.$transaction([
+            db.novel.update({
+              where: { id: chapter.volume.novelId },
+              data: { wordCount: { increment: delta }, updatedAt: /* @__PURE__ */ new Date() }
+            }),
+            db.chapter.update({
+              where: { id: input.chapterId },
+              data: { content: input.content, wordCount: newWordCount, updatedAt: /* @__PURE__ */ new Date() }
+            })
+          ]);
+          scheduleChapterSummaryRebuild(input.chapterId);
+          return {
+            chapter: updatedChapter,
+            saveMeta: {
+              source: saveSource,
+              rollbackPoint: {
+                chapterId: chapter.id,
+                content: chapter.content,
+                updatedAt: chapter.updatedAt
+              }
+            }
+          };
+        } catch (error) {
+          const normalized = normalizeAiError(error);
+          throw new AiActionError("PERSISTENCE_ERROR", normalized.message);
+        }
+      }
+    },
+    {
+      actionId: "chapter.generate",
+      title: "Generate chapter draft",
+      description: "Generate chapter continuation with strict lore/outline context via configured model provider.",
+      permission: "write",
+      inputSchema: {
+        type: "object",
+        properties: {
+          locale: { type: "string" },
+          mode: {
+            type: "string",
+            enum: ["new_chapter", "continue_chapter"]
+          },
+          novelId: { type: "string" },
+          chapterId: { type: "string" },
+          currentContent: { type: "string" },
+          ideaIds: {
+            type: "array",
+            items: { type: "string" }
+          },
+          contextChapterCount: { type: "number" },
+          recentRawChapterCount: { type: "number" },
+          targetLength: { type: "number" },
+          style: { type: "string" },
+          tone: { type: "string" },
+          pace: { type: "string" },
+          temperature: { type: "number" },
+          userIntent: { type: "string" },
+          currentLocation: { type: "string" },
+          overrideUserPrompt: { type: "string" }
+        },
+        required: ["novelId", "chapterId", "currentContent"]
+      },
+      outputSchema: { type: "object" },
+      handler: async (payload) => {
+        const input = payload;
+        if (!(input == null ? void 0 : input.novelId) || !input.chapterId || typeof input.currentContent !== "string") {
+          throw new AiActionError("INVALID_INPUT", "novelId, chapterId, currentContent are required");
+        }
+        try {
+          return await deps.continueWriting({
+            locale: input.locale,
+            mode: input.mode,
+            novelId: input.novelId,
+            chapterId: input.chapterId,
+            currentContent: input.currentContent,
+            ideaIds: Array.isArray(input.ideaIds) ? input.ideaIds : void 0,
+            contextChapterCount: input.contextChapterCount,
+            recentRawChapterCount: input.recentRawChapterCount,
+            targetLength: input.targetLength,
+            style: input.style,
+            tone: input.tone,
+            pace: input.pace,
+            temperature: input.temperature,
+            userIntent: input.userIntent,
+            currentLocation: input.currentLocation,
+            overrideUserPrompt: input.overrideUserPrompt
+          });
+        } catch (error) {
+          throw normalizeAiError(error);
+        }
+      }
+    },
+    {
+      actionId: "plotline.list",
+      title: "List plot lines",
+      description: "Return all plot lines and points for a novel.",
+      permission: "read",
+      inputSchema: {
+        type: "object",
+        properties: {
+          novelId: { type: "string" }
+        },
+        required: ["novelId"]
+      },
+      outputSchema: { type: "array" },
+      handler: async (payload) => {
+        const input = payload;
+        if (!(input == null ? void 0 : input.novelId)) {
+          throw new AiActionError("INVALID_INPUT", "novelId is required");
+        }
+        return db.plotLine.findMany({
+          where: { novelId: input.novelId },
+          include: {
+            points: {
+              include: { anchors: true },
+              orderBy: { order: "asc" }
+            }
+          },
+          orderBy: { sortOrder: "asc" }
+        });
+      }
+    },
+    {
+      actionId: "worldsetting.list",
+      title: "List world settings",
+      description: "Return all world settings under a novel.",
+      permission: "read",
+      inputSchema: {
+        type: "object",
+        properties: {
+          novelId: { type: "string" }
+        },
+        required: ["novelId"]
+      },
+      outputSchema: { type: "array" },
+      handler: async (payload) => {
+        const input = payload;
+        if (!(input == null ? void 0 : input.novelId)) {
+          throw new AiActionError("INVALID_INPUT", "novelId is required");
+        }
+        return db.worldSetting.findMany({
+          where: { novelId: input.novelId },
+          orderBy: { sortOrder: "asc" }
+        });
+      }
+    },
+    {
+      actionId: "character.list",
+      title: "List characters",
+      description: "Return all characters under a novel.",
+      permission: "read",
+      inputSchema: {
+        type: "object",
+        properties: {
+          novelId: { type: "string" }
+        },
+        required: ["novelId"]
+      },
+      outputSchema: { type: "array" },
+      handler: async (payload) => {
+        const input = payload;
+        if (!(input == null ? void 0 : input.novelId)) {
+          throw new AiActionError("INVALID_INPUT", "novelId is required");
+        }
+        return db.character.findMany({
+          where: { novelId: input.novelId },
+          orderBy: { sortOrder: "asc" }
+        });
+      }
+    },
+    {
+      actionId: "item.list",
+      title: "List items",
+      description: "Return all items and skills under a novel.",
+      permission: "read",
+      inputSchema: {
+        type: "object",
+        properties: {
+          novelId: { type: "string" }
+        },
+        required: ["novelId"]
+      },
+      outputSchema: { type: "array" },
+      handler: async (payload) => {
+        const input = payload;
+        if (!(input == null ? void 0 : input.novelId)) {
+          throw new AiActionError("INVALID_INPUT", "novelId is required");
+        }
+        return db.item.findMany({
+          where: { novelId: input.novelId },
+          orderBy: { sortOrder: "asc" }
+        });
+      }
+    },
+    {
+      actionId: "map.list",
+      title: "List maps",
+      description: "Return all maps under a novel.",
+      permission: "read",
+      inputSchema: {
+        type: "object",
+        properties: {
+          novelId: { type: "string" }
+        },
+        required: ["novelId"]
+      },
+      outputSchema: { type: "array" },
+      handler: async (payload) => {
+        const input = payload;
+        if (!(input == null ? void 0 : input.novelId)) {
+          throw new Error("novelId is required");
+        }
+        return db.mapCanvas.findMany({
+          where: { novelId: input.novelId },
+          orderBy: { sortOrder: "asc" }
+        });
+      }
+    },
+    {
+      actionId: "search.query",
+      title: "Search novel content",
+      description: "Run global search against chapter and idea index.",
+      permission: "read",
+      inputSchema: {
+        type: "object",
+        properties: {
+          novelId: { type: "string" },
+          keyword: { type: "string" },
+          limit: { type: "number" },
+          offset: { type: "number" }
+        },
+        required: ["novelId", "keyword"]
+      },
+      outputSchema: { type: "array" },
+      handler: async (payload) => {
+        const input = payload;
+        if (!(input == null ? void 0 : input.novelId) || !(input == null ? void 0 : input.keyword)) {
+          throw new AiActionError("INVALID_INPUT", "novelId and keyword are required");
+        }
+        return search(input.novelId, input.keyword, input.limit ?? 20, input.offset ?? 0);
+      }
+    }
+  ];
+}
+function splitArgs(raw) {
+  if (!raw.trim())
+    return [];
+  const matches = raw.match(/"[^"]*"|'[^']*'|\S+/g) || [];
+  return matches.map((token) => token.replace(/^['"]|['"]$/g, ""));
+}
+class McpCliProvider {
+  constructor(settings) {
+    __publicField(this, "name", "mcp-cli");
+    this.settings = settings;
+  }
+  async healthCheck() {
+    const { cliPath } = this.settings.mcpCli;
+    if (!cliPath.trim()) {
+      return { ok: false, detail: "MCP CLI path is empty" };
+    }
+    if (!fs.existsSync(cliPath)) {
+      return { ok: false, detail: "MCP CLI path does not exist" };
+    }
+    try {
+      const { stdout } = await this.runProcess(["--version"], "", this.settings.mcpCli.startupTimeoutMs);
+      return { ok: true, detail: (stdout || "MCP CLI is executable").slice(0, 200) };
+    } catch (error) {
+      return { ok: false, detail: `MCP CLI check failed: ${(error == null ? void 0 : error.message) || "unknown error"}` };
+    }
+  }
+  async generate(req) {
+    const prompt = req.prompt.trim();
+    if (!prompt) {
+      return { text: "", model: "mcp-cli" };
+    }
+    const argsTemplate = this.settings.mcpCli.argsTemplate || "";
+    const hasPromptPlaceholder = argsTemplate.includes("{prompt}");
+    const parsedArgs = splitArgs(argsTemplate.replace("{prompt}", prompt));
+    const { stdout } = await this.runProcess(parsedArgs, hasPromptPlaceholder ? "" : prompt, this.settings.mcpCli.startupTimeoutMs);
+    return {
+      text: stdout.trim(),
+      model: "mcp-cli"
+    };
+  }
+  async runProcess(args, stdinText, timeoutMs) {
+    const { cliPath, workingDir, envJson } = this.settings.mcpCli;
+    const extraEnv = this.parseEnvJson(envJson);
+    return new Promise((resolve, reject) => {
+      const child = spawn(cliPath, args, {
+        cwd: workingDir || process.cwd(),
+        env: { ...process.env, ...extraEnv },
+        stdio: ["pipe", "pipe", "pipe"],
+        windowsHide: true
+      });
+      let stdout = "";
+      let stderr = "";
+      let done = false;
+      const timer = setTimeout(() => {
+        if (done)
+          return;
+        done = true;
+        child.kill("SIGTERM");
+        reject(new Error("MCP CLI process timeout"));
+      }, Math.max(1e3, timeoutMs));
+      child.stdout.on("data", (chunk) => {
+        stdout += chunk.toString();
+      });
+      child.stderr.on("data", (chunk) => {
+        stderr += chunk.toString();
+      });
+      child.on("error", (error) => {
+        if (done)
+          return;
+        done = true;
+        clearTimeout(timer);
+        reject(error);
+      });
+      child.on("close", (code) => {
+        if (done)
+          return;
+        done = true;
+        clearTimeout(timer);
+        if (code !== 0) {
+          reject(new Error(`MCP CLI exited with code ${code}: ${stderr.slice(0, 300)}`));
+          return;
+        }
+        resolve({ stdout, stderr });
+      });
+      if (stdinText) {
+        child.stdin.write(stdinText);
+      }
+      child.stdin.end();
+    });
+  }
+  parseEnvJson(raw) {
+    if (!raw.trim())
+      return {};
+    try {
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== "object")
+        return {};
+      const result = {};
+      for (const [key, value] of Object.entries(parsed)) {
+        result[key] = String(value ?? "");
+      }
+      return result;
+    } catch {
+      return {};
+    }
+  }
+}
+function uniqueArray(values) {
+  const seen = /* @__PURE__ */ new Set();
+  const output = [];
+  for (const raw of values) {
+    const item = String(raw || "").trim();
+    if (!item)
+      continue;
+    const key = item.toLowerCase();
+    if (seen.has(key))
+      continue;
+    seen.add(key);
+    output.push(item);
+  }
+  return output;
+}
+function extractPlainTextFromLexical$1(content) {
+  if (!(content == null ? void 0 : content.trim()))
+    return "";
+  try {
+    const parsed = JSON.parse(content);
+    const texts = [];
+    const walk = (node) => {
+      if (!node || typeof node !== "object")
+        return;
+      if (typeof node.text === "string") {
+        texts.push(node.text);
+      }
+      if (Array.isArray(node.children)) {
+        node.children.forEach(walk);
+      }
+    };
+    walk((parsed == null ? void 0 : parsed.root) || parsed);
+    return texts.join(" ").replace(/\s+/g, " ").trim();
+  } catch {
+    return content.replace(/\s+/g, " ").trim();
+  }
+}
+class ContextBuilder {
+  async buildForContinueWriting(payload) {
+    const contextChapterCount = Math.max(1, Math.min(8, payload.contextChapterCount ?? 3));
+    const recentRawChapterCount = Math.max(0, Math.min(contextChapterCount, payload.recentRawChapterCount ?? 2));
+    const [worldSettings, plotLines, characters, items, maps, recentChapters, currentChapter] = await Promise.all([
+      db.worldSetting.findMany({
+        where: { novelId: payload.novelId },
+        orderBy: { updatedAt: "desc" }
+      }),
+      db.plotLine.findMany({
+        where: { novelId: payload.novelId },
+        include: { points: { include: { anchors: true } } },
+        orderBy: { sortOrder: "asc" }
+      }),
+      db.character.findMany({
+        where: { novelId: payload.novelId },
+        select: { name: true, role: true, description: true },
+        orderBy: { updatedAt: "desc" },
+        take: 100
+      }),
+      db.item.findMany({
+        where: { novelId: payload.novelId },
+        select: { name: true, type: true, description: true },
+        orderBy: { updatedAt: "desc" },
+        take: 100
+      }),
+      db.mapCanvas.findMany({
+        where: { novelId: payload.novelId },
+        select: { name: true, type: true, description: true },
+        orderBy: { updatedAt: "desc" },
+        take: 50
+      }),
+      db.chapter.findMany({
+        where: {
+          id: { not: payload.chapterId },
+          volume: { novelId: payload.novelId }
+        },
+        select: {
+          id: true,
+          title: true,
+          content: true,
+          updatedAt: true
+        },
+        orderBy: { updatedAt: "desc" },
+        take: contextChapterCount
+      }),
+      db.chapter.findUnique({
+        where: { id: payload.chapterId },
+        select: { volumeId: true }
+      })
+    ]);
+    const requestedIdeaIds = Array.isArray(payload.ideaIds) ? payload.ideaIds.map((id) => String(id)).filter(Boolean) : [];
+    const selectedIdeasRaw = requestedIdeaIds.length > 0 ? await db.idea.findMany({
+      where: {
+        novelId: payload.novelId,
+        id: { in: requestedIdeaIds }
+      },
+      include: { tags: true },
+      orderBy: { updatedAt: "desc" },
+      take: 20
+    }) : [];
+    const recentChapterIds = recentChapters.map((chapter) => chapter.id);
+    const latestSummaries = recentChapterIds.length > 0 ? await db.chapterSummary.findMany({
+      where: {
+        chapterId: { in: recentChapterIds },
+        isLatest: true,
+        status: "active"
+      },
+      orderBy: { updatedAt: "desc" }
+    }) : [];
+    const summaryByChapterId = /* @__PURE__ */ new Map();
+    for (const summary of latestSummaries) {
+      if (!summaryByChapterId.has(summary.chapterId)) {
+        summaryByChapterId.set(summary.chapterId, summary);
+      }
+    }
+    const fallbackCount = { value: 0 };
+    const latestNarrativeSummaries = await db.narrativeSummary.findMany({
+      where: {
+        novelId: payload.novelId,
+        isLatest: true,
+        status: "active",
+        OR: [
+          { level: "novel", volumeId: null },
+          ...(currentChapter == null ? void 0 : currentChapter.volumeId) ? [{ level: "volume", volumeId: currentChapter.volumeId }] : []
+        ]
+      },
+      orderBy: { updatedAt: "desc" },
+      take: 2
+    });
+    const narrativeSummaries = latestNarrativeSummaries.map((item) => {
+      let keyFacts = [];
+      if (typeof item.keyFacts === "string" && item.keyFacts.trim()) {
+        try {
+          const parsed = JSON.parse(item.keyFacts);
+          if (Array.isArray(parsed)) {
+            keyFacts = uniqueArray(
+              parsed.map((fact) => String(fact || "").trim()).filter(Boolean).slice(0, 12)
+            ).slice(0, 5);
+          }
+        } catch {
+          keyFacts = [];
+        }
+      }
+      return {
+        level: item.level === "volume" ? "volume" : "novel",
+        title: String(item.title || ""),
+        summaryText: String(item.summaryText || "").slice(0, 1200),
+        keyFacts
+      };
+    });
+    const recentChapterItems = recentChapters.map((chapter, index) => ({
+      chapterId: chapter.id,
+      title: chapter.title || "",
+      excerpt: (() => {
+        if (index < recentRawChapterCount) {
+          return extractPlainTextFromLexical$1(chapter.content || "").slice(-1200);
+        }
+        const summary = summaryByChapterId.get(chapter.id);
+        const summaryText = (summary == null ? void 0 : summary.compressedMemory) || (summary == null ? void 0 : summary.summaryText);
+        if (typeof summaryText === "string" && summaryText.trim()) {
+          return summaryText.slice(-1200);
+        }
+        fallbackCount.value += 1;
+        return extractPlainTextFromLexical$1(chapter.content || "").slice(-1200);
+      })()
+    }));
+    const currentChapterBeforeCursor = extractPlainTextFromLexical$1(payload.currentContent || "").slice(-2400);
+    const selectedIdeas = selectedIdeasRaw.map((idea) => ({
+      ideaId: idea.id,
+      content: (idea.content || "").slice(0, 800),
+      quote: typeof idea.quote === "string" ? idea.quote.slice(0, 300) : void 0,
+      tags: Array.isArray(idea.tags) ? idea.tags.map((tag) => String(tag.name || "").trim()).filter(Boolean).slice(0, 12) : []
+    }));
+    const entityIndex = {
+      characters: new Set(
+        characters.map((item) => String((item == null ? void 0 : item.name) || "").trim()).filter(Boolean)
+      ),
+      items: new Set(
+        items.map((item) => String((item == null ? void 0 : item.name) || "").trim()).filter(Boolean)
+      ),
+      worldSettings: new Set(
+        worldSettings.map((item) => String((item == null ? void 0 : item.name) || "").trim()).filter(Boolean)
+      )
+    };
+    const entityMatches = [];
+    const mentionRegex = /@([^\s@，。！？,!.;；:："'“”‘’()[\]{}<>]+)/g;
+    for (const idea of selectedIdeas) {
+      const text = `${idea.content || ""}
+${idea.quote || ""}`;
+      const hits = Array.from(text.matchAll(mentionRegex));
+      for (const hit of hits) {
+        const name = String(hit[1] || "").trim();
+        if (!name)
+          continue;
+        if (entityIndex.characters.has(name)) {
+          entityMatches.push({ name, kind: "character" });
+        } else if (entityIndex.items.has(name)) {
+          entityMatches.push({ name, kind: "item" });
+        } else if (entityIndex.worldSettings.has(name)) {
+          entityMatches.push({ name, kind: "worldSetting" });
+        }
+      }
+    }
+    const selectedIdeaEntities = uniqueArray(entityMatches.map((item) => `${item.kind}:${item.name}`)).map((encoded) => {
+      const [kind, ...nameRest] = encoded.split(":");
+      const name = nameRest.join(":");
+      return {
+        name,
+        kind: kind === "character" || kind === "item" || kind === "worldSetting" ? kind : "character"
+      };
+    }).slice(0, 20);
+    const currentLocation = String(payload.currentLocation || "").trim().slice(0, 120);
+    const missingIdeaCount = Math.max(0, requestedIdeaIds.length - selectedIdeas.length);
+    const warnings = [];
+    if (fallbackCount.value > 0) {
+      warnings.push(`${fallbackCount.value} chapter summaries missing; fell back to chapter text excerpts.`);
+    }
+    if (missingIdeaCount > 0) {
+      warnings.push(`${missingIdeaCount} selected ideas not found; ignored.`);
+    }
+    return {
+      hardContext: {
+        worldSettings,
+        plotLines,
+        characters,
+        items,
+        maps
+      },
+      dynamicContext: {
+        recentChapters: recentChapterItems,
+        selectedIdeas,
+        selectedIdeaEntities,
+        currentChapterBeforeCursor,
+        ...currentLocation ? { currentLocation } : {},
+        narrativeSummaries
+      },
+      params: {
+        mode: payload.mode === "new_chapter" ? "new_chapter" : "continue_chapter",
+        contextChapterCount,
+        style: payload.style || "default",
+        tone: payload.tone || "balanced",
+        pace: payload.pace || "medium",
+        targetLength: payload.targetLength ?? 500
+      },
+      usedContext: [
+        "world_settings_full",
+        "plot_outline_full",
+        "characters_items_maps_snapshot",
+        `recent_chapter_summary_memory_preferred_${contextChapterCount}`,
+        `recent_chapter_raw_text_${recentRawChapterCount}`,
+        narrativeSummaries.length > 0 ? `narrative_summaries_${narrativeSummaries.length}` : "narrative_summaries_0",
+        selectedIdeas.length > 0 ? `selected_ideas_${selectedIdeas.length}` : "selected_ideas_0",
+        selectedIdeaEntities.length > 0 ? `selected_idea_entities_${selectedIdeaEntities.length}` : "selected_idea_entities_0",
+        ...currentLocation ? ["current_location"] : [],
+        "current_chapter_before_cursor"
+      ],
+      warnings
+    };
+  }
+}
+const MAX_IMAGE_SIZE_BYTES = 10 * 1024 * 1024;
+const DRAFT_MAX_FIELD_LENGTH = 2e3;
+const VALID_PLOT_POINT_TYPES = /* @__PURE__ */ new Set(["foreshadowing", "mystery", "promise", "event"]);
+const VALID_PLOT_POINT_STATUS = /* @__PURE__ */ new Set(["active", "resolved"]);
+const VALID_ITEM_TYPES = /* @__PURE__ */ new Set(["item", "skill", "location"]);
+const VALID_MAP_TYPES = /* @__PURE__ */ new Set(["world", "region", "scene"]);
+const CREATIVE_ASSET_SECTIONS = ["plotLines", "plotPoints", "characters", "items", "skills", "maps"];
+const CREATIVE_SECTION_KEYWORDS = {
+  plotLines: ["主线", "支线", "故事线", "剧情线", "plot line", "story line"],
+  plotPoints: ["要点", "情节点", "剧情点", "事件", "桥段", "转折", "冲突", "plot point", "scene beat"],
+  characters: ["角色", "龙套", "配角", "人物", "反派", "主角", "npc", "character"],
+  items: ["物品", "道具", "装备", "宝物", "武器", "法宝", "artifact", "item"],
+  skills: ["技能", "招式", "能力", "法术", "功法", "绝招", "spell", "skill"],
+  maps: ["地图", "场景", "地点", "区域", "城市", "宗门地图", "world map", "map", "location"]
+};
+const OPENCLAW_REQUIRED_ACTIONS = [
+  "novel.list",
+  "volume.list",
+  "chapter.list",
+  "chapter.create",
+  "chapter.save",
+  "chapter.generate"
+];
+const CAPABILITY_COVERAGE_BASELINE = [
+  {
+    moduleId: "novel_volume_chapter",
+    title: "小说/卷章管理",
+    requiredActions: [
+      "novel.list",
+      "novel.create",
+      "volume.list",
+      "chapter.list",
+      "chapter.get",
+      "chapter.create",
+      "chapter.save"
+    ]
+  },
+  {
+    moduleId: "editor_ops",
+    title: "编辑器操作（标题/续写/总结）",
+    requiredActions: [
+      "chapter.generate"
+    ]
+  },
+  {
+    moduleId: "global_search",
+    title: "全局搜索与跳转",
+    requiredActions: [
+      "search.query"
+    ]
+  },
+  {
+    moduleId: "outline_storyline_anchor",
+    title: "大纲/故事线/锚点",
+    requiredActions: [
+      "plotline.list"
+    ]
+  },
+  {
+    moduleId: "world_item_map",
+    title: "角色/物品/世界观/地图",
+    requiredActions: [
+      "character.list",
+      "item.list",
+      "worldsetting.list",
+      "map.list"
+    ]
+  },
+  {
+    moduleId: "backup_restore",
+    title: "备份恢复",
+    requiredActions: []
+  }
+];
+const DEFAULT_AI_SETTINGS = {
+  providerType: "http",
+  http: {
+    baseUrl: "",
+    apiKey: "",
+    model: "gpt-4.1-mini",
+    imageModel: "doubao-seedream-5-0-260128",
+    imageSize: "2K",
+    imageOutputFormat: "png",
+    imageWatermark: false,
+    timeoutMs: 6e4,
+    maxTokens: 2048,
+    temperature: 0.7
+  },
+  mcpCli: {
+    cliPath: "",
+    argsTemplate: "",
+    workingDir: "",
+    envJson: "{}",
+    startupTimeoutMs: 6e4
+  },
+  proxy: {
+    mode: "system",
+    httpProxy: "",
+    httpsProxy: "",
+    allProxy: "",
+    noProxy: ""
+  },
+  summary: {
+    summaryMode: "local",
+    summaryTriggerPolicy: "manual",
+    summaryDebounceMs: 3e4,
+    summaryMinIntervalMs: 18e4,
+    summaryMinWordDelta: 120,
+    summaryFinalizeStableMs: 6e5,
+    summaryFinalizeMinWords: 1200,
+    recentChapterRawCount: 2
+  }
+};
+function toProfileJson(profile) {
+  return JSON.stringify(profile ?? {});
+}
+function mimeToExt(mimeType) {
+  const mime = (mimeType || "").toLowerCase();
+  if (mime.includes("jpeg") || mime.includes("jpg"))
+    return "jpg";
+  if (mime.includes("webp"))
+    return "webp";
+  if (mime.includes("gif"))
+    return "gif";
+  if (mime.includes("bmp"))
+    return "bmp";
+  return "png";
+}
+function sanitizeFileName(name) {
+  return name.replace(/[^a-zA-Z0-9._-]/g, "_");
+}
+function extractPlainTextFromLexical(content) {
+  if (!(content == null ? void 0 : content.trim()))
+    return "";
+  try {
+    const parsed = JSON.parse(content);
+    const texts = [];
+    const walk = (node) => {
+      if (!node || typeof node !== "object")
+        return;
+      if (typeof node.text === "string") {
+        texts.push(node.text);
+      }
+      if (Array.isArray(node.children)) {
+        node.children.forEach(walk);
+      }
+    };
+    walk((parsed == null ? void 0 : parsed.root) || parsed);
+    return texts.join(" ").replace(/\s+/g, " ").trim();
+  } catch {
+    return content.replace(/\s+/g, " ").trim();
+  }
+}
+function resolveMapStylePrompt(style) {
+  switch (style) {
+    case "realistic":
+      return "Style: realistic cartography, natural terrain textures, high geographic plausibility.";
+    case "fantasy":
+      return "Style: epic fantasy world map, dramatic terrain, mystical landmarks, rich parchment aesthetics.";
+    case "ancient":
+      return "Style: ancient oriental ink-and-parchment map, hand-drawn strokes, classical motifs.";
+    case "scifi":
+      return "Style: sci-fi strategic map, futuristic terrain overlays, advanced civilization markers.";
+    default:
+      return "";
+  }
+}
+function buildRawPromptPreview(systemPrompt, userPrompt) {
+  const sections = [];
+  if (systemPrompt == null ? void 0 : systemPrompt.trim()) {
+    sections.push(`[System Prompt]
+${systemPrompt.trim()}`);
+  }
+  sections.push(`[User Prompt]
+${userPrompt.trim()}`);
+  return sections.join("\n\n");
+}
+function trimText(value, maxLen) {
+  const text = typeof value === "string" ? value.trim() : "";
+  if (!text)
+    return "";
+  return text.length > maxLen ? text.slice(0, maxLen) : text;
+}
+function dedupeStrings(values, maxCount) {
+  const seen = /* @__PURE__ */ new Set();
+  const output = [];
+  for (const value of values) {
+    const text = String(value || "").trim();
+    if (!text)
+      continue;
+    const key = text.toLowerCase();
+    if (seen.has(key))
+      continue;
+    seen.add(key);
+    output.push(text);
+    if (output.length >= maxCount)
+      break;
+  }
+  return output;
+}
+class AiService {
+  constructor(userDataPathGetter) {
+    __publicField(this, "userDataPath");
+    __publicField(this, "settingsFilePath");
+    __publicField(this, "mapImageStatsPath");
+    __publicField(this, "settingsCache");
+    __publicField(this, "mapImageStatsCache");
+    __publicField(this, "capabilityDefinitions");
+    __publicField(this, "capabilityRegistry");
+    __publicField(this, "contextBuilder");
+    this.userDataPath = userDataPathGetter();
+    this.settingsFilePath = path.join(this.userDataPath, "ai-settings.json");
+    this.mapImageStatsPath = path.join(this.userDataPath, "ai-map-image-stats.json");
+    this.settingsCache = this.loadSettings();
+    this.mapImageStatsCache = this.loadMapImageStats();
+    this.contextBuilder = new ContextBuilder();
+    this.capabilityDefinitions = createCapabilityDefinitions({
+      continueWriting: (payload) => this.continueWriting(payload)
+    });
+    this.capabilityRegistry = new Map(
+      this.capabilityDefinitions.map((definition) => [definition.actionId, definition.handler])
+    );
+  }
+  listActions() {
+    return this.capabilityDefinitions.map((definition) => ({
+      actionId: definition.actionId,
+      title: definition.title,
+      description: definition.description,
+      permission: definition.permission,
+      inputSchema: definition.inputSchema,
+      outputSchema: definition.outputSchema
+    }));
+  }
+  getCapabilityCoverage() {
+    const supportedActionSet = new Set(this.capabilityDefinitions.map((definition) => definition.actionId));
+    const modules = CAPABILITY_COVERAGE_BASELINE.map((module) => {
+      const missingActions = module.requiredActions.filter((actionId) => !supportedActionSet.has(actionId));
+      const supportedActions = module.requiredActions.filter((actionId) => supportedActionSet.has(actionId));
+      const coverage = module.requiredActions.length === 0 ? 0 : Math.round(supportedActions.length / module.requiredActions.length * 100);
+      return {
+        moduleId: module.moduleId,
+        title: module.title,
+        requiredActions: [...module.requiredActions],
+        supportedActions,
+        missingActions,
+        coverage
+      };
+    });
+    const totalRequired = modules.reduce((acc, item) => acc + item.requiredActions.length, 0);
+    const totalSupported = modules.reduce((acc, item) => acc + item.supportedActions.length, 0);
+    const overallCoverage = totalRequired === 0 ? 0 : Math.round(totalSupported / totalRequired * 100);
+    return {
+      overallCoverage,
+      totalRequired,
+      totalSupported,
+      modules
+    };
+  }
+  getMcpToolsManifest() {
+    const tools = this.capabilityDefinitions.map((definition) => ({
+      name: definition.actionId,
+      description: `${definition.title}. ${definition.description}`,
+      inputSchema: definition.inputSchema
+    }));
+    return { tools };
+  }
+  getOpenClawManifest() {
+    const tools = this.capabilityDefinitions.map((definition) => ({
+      name: definition.actionId,
+      description: `${definition.title}. ${definition.description}`,
+      parameters: definition.inputSchema
+    }));
+    return {
+      schemaVersion: "openclaw.tool.v1",
+      tools
+    };
+  }
+  getOpenClawSkillManifest() {
+    const skills = this.capabilityDefinitions.map((definition) => ({
+      name: definition.actionId,
+      title: definition.title,
+      description: definition.description,
+      inputSchema: definition.inputSchema
+    }));
+    return {
+      schemaVersion: "openclaw.skill.v1",
+      skills
+    };
+  }
+  getSettings() {
+    return this.settingsCache;
+  }
+  getMapImageStats() {
+    return this.mapImageStatsCache;
+  }
+  updateSettings(partial) {
+    this.settingsCache = {
+      ...this.settingsCache,
+      ...partial,
+      http: { ...this.settingsCache.http, ...partial.http ?? {} },
+      mcpCli: { ...this.settingsCache.mcpCli, ...partial.mcpCli ?? {} },
+      proxy: { ...this.settingsCache.proxy, ...partial.proxy ?? {} },
+      summary: { ...this.settingsCache.summary, ...partial.summary ?? {} }
+    };
+    this.persistSettings();
+    return this.settingsCache;
+  }
+  async testConnection() {
+    return this.getProvider().healthCheck();
+  }
+  async testMcp() {
+    const provider = new McpCliProvider(this.settingsCache);
+    return provider.healthCheck();
+  }
+  async testOpenClawMcp() {
+    const result = await this.testOpenClawSmoke({ kind: "mcp" });
+    return { ok: result.ok, detail: result.detail };
+  }
+  async testOpenClawSkill() {
+    const result = await this.testOpenClawSmoke({ kind: "skill" });
+    return { ok: result.ok, detail: result.detail };
+  }
+  async testOpenClawSmoke(payload) {
+    var _a, _b;
+    const kind = payload.kind === "skill" ? "skill" : "mcp";
+    const actionNames = kind === "mcp" ? this.getOpenClawManifest().tools.map((tool) => tool.name) : this.getOpenClawSkillManifest().skills.map((skill) => skill.name);
+    if (!actionNames.length) {
+      return {
+        ok: false,
+        kind,
+        detail: kind === "mcp" ? "No OpenClaw MCP tools available" : "No OpenClaw skills available",
+        missingActions: [...OPENCLAW_REQUIRED_ACTIONS],
+        checks: []
+      };
+    }
+    const missingActions = OPENCLAW_REQUIRED_ACTIONS.filter((actionId) => !actionNames.includes(actionId));
+    const checks = [];
+    const pushCheck = (actionId, ok2, detail, skipped) => {
+      checks.push({ actionId, ok: ok2, detail, ...skipped ? { skipped: true } : {} });
+    };
+    if (missingActions.length) {
+      pushCheck("manifest.coverage", false, `Missing required actions: ${missingActions.join(", ")}`);
+    } else {
+      pushCheck("manifest.coverage", true, `All required actions are covered (${OPENCLAW_REQUIRED_ACTIONS.length})`);
+    }
+    const invoke = (actionId, input) => kind === "mcp" ? this.invokeOpenClawTool({ name: actionId, arguments: input }) : this.invokeOpenClawSkill({ name: actionId, input });
+    const novelResult = await invoke("novel.list");
+    if (!novelResult.ok) {
+      pushCheck("novel.list", false, novelResult.error || "invoke failed");
+      return {
+        ok: false,
+        kind,
+        detail: `OpenClaw ${kind.toUpperCase()} smoke failed at novel.list: ${novelResult.error || "unknown error"}`,
+        missingActions,
+        checks
+      };
+    }
+    pushCheck("novel.list", true, "invoke ok");
+    const novels = Array.isArray(novelResult.data) ? novelResult.data : [];
+    const firstNovelId = (_a = novels.find((item) => typeof (item == null ? void 0 : item.id) === "string")) == null ? void 0 : _a.id;
+    if (!firstNovelId) {
+      pushCheck("volume.list", true, "no novels in database; skipped", true);
+      pushCheck("chapter.list", true, "no novels in database; skipped", true);
+      const ok2 = missingActions.length === 0;
+      return {
+        ok: ok2,
+        kind,
+        detail: ok2 ? `OpenClaw ${kind.toUpperCase()} smoke passed (manifest coverage ok, invoke ok, nested checks skipped due to empty data)` : `OpenClaw ${kind.toUpperCase()} smoke partial pass (invoke ok, but manifest missing required actions: ${missingActions.join(", ")})`,
+        missingActions,
+        checks
+      };
+    }
+    const volumeResult = await invoke("volume.list", { novelId: firstNovelId });
+    if (!volumeResult.ok) {
+      pushCheck("volume.list", false, volumeResult.error || "invoke failed");
+      return {
+        ok: false,
+        kind,
+        detail: `OpenClaw ${kind.toUpperCase()} smoke failed at volume.list: ${volumeResult.error || "unknown error"}`,
+        missingActions,
+        checks
+      };
+    }
+    pushCheck("volume.list", true, "invoke ok");
+    const volumes = Array.isArray(volumeResult.data) ? volumeResult.data : [];
+    const firstVolumeId = (_b = volumes.find((item) => typeof (item == null ? void 0 : item.id) === "string")) == null ? void 0 : _b.id;
+    if (!firstVolumeId) {
+      pushCheck("chapter.list", true, "no volumes under first novel; skipped", true);
+      const ok2 = missingActions.length === 0;
+      return {
+        ok: ok2,
+        kind,
+        detail: ok2 ? `OpenClaw ${kind.toUpperCase()} smoke passed (manifest coverage ok, read-chain invoke ok)` : `OpenClaw ${kind.toUpperCase()} smoke partial pass (read-chain ok, but manifest missing required actions: ${missingActions.join(", ")})`,
+        missingActions,
+        checks
+      };
+    }
+    const chapterResult = await invoke("chapter.list", { volumeId: firstVolumeId });
+    if (!chapterResult.ok) {
+      pushCheck("chapter.list", false, chapterResult.error || "invoke failed");
+      return {
+        ok: false,
+        kind,
+        detail: `OpenClaw ${kind.toUpperCase()} smoke failed at chapter.list: ${chapterResult.error || "unknown error"}`,
+        missingActions,
+        checks
+      };
+    }
+    pushCheck("chapter.list", true, "invoke ok");
+    const ok = missingActions.length === 0;
+    return {
+      ok,
+      kind,
+      detail: ok ? `OpenClaw ${kind.toUpperCase()} smoke passed (manifest coverage + read-chain invoke all ok)` : `OpenClaw ${kind.toUpperCase()} smoke partial pass (invoke ok, but manifest missing required actions: ${missingActions.join(", ")})`,
+      missingActions,
+      checks
+    };
+  }
+  async testProxy() {
+    const proxy = this.settingsCache.proxy;
+    if (proxy.mode !== "custom") {
+      return { ok: true, detail: `Proxy mode is ${proxy.mode}` };
+    }
+    const hasAnyProxy = Boolean(proxy.httpProxy || proxy.httpsProxy || proxy.allProxy);
+    if (!hasAnyProxy) {
+      return { ok: false, detail: "Custom proxy mode requires at least one proxy value" };
+    }
+    return { ok: true, detail: "Custom proxy configuration looks valid" };
+  }
+  async testGenerate(prompt) {
+    var _a;
+    try {
+      const provider = this.getProvider();
+      const result = await provider.generate({
+        systemPrompt: "You are a concise assistant.",
+        prompt: (prompt || "请用一句话回复：AI 生成测试成功").trim(),
+        maxTokens: 128,
+        temperature: 0.2
+      });
+      return { ok: true, text: ((_a = result.text) == null ? void 0 : _a.slice(0, 500)) || "" };
+    } catch (error) {
+      return { ok: false, detail: (error == null ? void 0 : error.message) || "test generate failed" };
+    }
+  }
+  async generateTitle(payload) {
+    var _a, _b;
+    const provider = this.getProvider();
+    const style = payload.style ?? "stable";
+    const count = Math.max(5, Math.min(10, payload.count ?? 6));
+    const currentPlain = extractPlainTextFromLexical(payload.content).slice(0, 3600);
+    const currentExcerpt = currentPlain.slice(-1400);
+    const novel = await db.novel.findUnique({
+      where: { id: payload.novelId },
+      select: { title: true, description: true }
+    });
+    const chapter = await db.chapter.findUnique({
+      where: { id: payload.chapterId },
+      select: {
+        id: true,
+        title: true,
+        order: true,
+        volumeId: true,
+        volume: {
+          select: {
+            id: true,
+            title: true,
+            order: true
+          }
+        }
+      }
+    });
+    const recentChapters = await db.chapter.findMany({
+      where: {
+        volume: { novelId: payload.novelId },
+        id: { not: payload.chapterId }
+      },
+      select: {
+        id: true,
+        title: true,
+        content: true,
+        updatedAt: true
+      },
+      orderBy: { updatedAt: "desc" },
+      take: 3
+    });
+    const recentSummaries = recentChapters.map((item, index) => {
+      const plain = extractPlainTextFromLexical(item.content);
+      return {
+        index: index + 1,
+        title: item.title || `Chapter-${index + 1}`,
+        summary: plain.slice(0, 180)
+      };
+    });
+    const systemPrompt = [
+      "You are a Chinese novel title assistant.",
+      "Generate concise chapter title candidates based on provided context.",
+      "Return STRICT JSON only. No markdown.",
+      'JSON shape: {"candidates":[{"title":"...","styleTag":"..."}]}',
+      "Each styleTag must be short Chinese phrase like: 稳健推进, 悬念强化, 意象抒情."
+    ].join(" ");
+    const response = await provider.generate({
+      systemPrompt,
+      prompt: JSON.stringify({
+        task: "chapter_title_generation",
+        style,
+        count,
+        novel: {
+          title: (novel == null ? void 0 : novel.title) || "",
+          description: (novel == null ? void 0 : novel.description) || ""
+        },
+        chapter: {
+          title: (chapter == null ? void 0 : chapter.title) || "",
+          order: (chapter == null ? void 0 : chapter.order) || 0,
+          volumeTitle: ((_a = chapter == null ? void 0 : chapter.volume) == null ? void 0 : _a.title) || "",
+          volumeOrder: ((_b = chapter == null ? void 0 : chapter.volume) == null ? void 0 : _b.order) || 0
+        },
+        recentChapterSummaries: recentSummaries,
+        currentChapterExcerpt: currentExcerpt,
+        constraints: [
+          "title length <= 16 Chinese characters preferred",
+          "avoid spoilers and proper nouns overuse",
+          "output 5-10 candidates"
+        ]
+      }),
+      maxTokens: this.settingsCache.http.maxTokens,
+      temperature: this.settingsCache.http.temperature
+    });
+    const parsed = (() => {
+      try {
+        return JSON.parse(response.text);
+      } catch {
+        return null;
+      }
+    })();
+    const normalizedFromJson = Array.isArray(parsed == null ? void 0 : parsed.candidates) ? parsed.candidates.map((item) => ({
+      title: String((item == null ? void 0 : item.title) || "").trim(),
+      styleTag: String((item == null ? void 0 : item.styleTag) || "").trim() || "稳健推进"
+    })).filter((item) => Boolean(item.title)).slice(0, count) : [];
+    if (normalizedFromJson.length > 0) {
+      return { candidates: normalizedFromJson };
+    }
+    const normalizedFromLines = response.text.split("\n").map((line) => line.replace(/^[-\d.\s]+/, "").trim()).filter(Boolean).slice(0, count).map((title) => ({ title, styleTag: "稳健推进" }));
+    if (normalizedFromLines.length > 0) {
+      return { candidates: normalizedFromLines };
+    }
+    const fallbackBase = ((chapter == null ? void 0 : chapter.title) || currentExcerpt.slice(0, 12) || "新章节").trim();
+    return {
+      candidates: Array.from({ length: count }, (_, i) => ({
+        title: `${fallbackBase} · ${i + 1}`,
+        styleTag: "稳健推进"
+      }))
+    };
+  }
+  async previewContinuePrompt(payload) {
+    const bundle = await this.buildContinuePromptBundle(payload);
+    return {
+      structured: bundle.structured,
+      rawPrompt: buildRawPromptPreview(bundle.systemPrompt, bundle.effectiveUserPrompt),
+      editableUserPrompt: bundle.defaultUserPrompt,
+      usedContext: bundle.usedContext,
+      warnings: bundle.warnings
+    };
+  }
+  async continueWriting(payload) {
+    const provider = this.getProvider();
+    const bundle = await this.buildContinuePromptBundle(payload);
+    const generationTemperature = Number.isFinite(payload.temperature) ? Math.max(0, Math.min(2, Number(payload.temperature))) : this.settingsCache.http.temperature;
+    const response = await provider.generate({
+      systemPrompt: bundle.systemPrompt,
+      prompt: bundle.effectiveUserPrompt,
+      maxTokens: this.settingsCache.http.maxTokens,
+      temperature: generationTemperature
+    });
+    const consistency = await this.checkConsistency({
+      novelId: payload.novelId,
+      text: response.text
+    });
+    return {
+      text: response.text,
+      usedContext: bundle.usedContext,
+      warnings: bundle.warnings,
+      consistency
+    };
+  }
+  async checkConsistency(payload) {
+    const issues = [];
+    const worldSettings = await db.worldSetting.findMany({ where: { novelId: payload.novelId } });
+    if (worldSettings.length === 0) {
+      issues.push("No world settings found for consistency baseline.");
+    }
+    if (payload.text.length < 20) {
+      issues.push("Generated text is too short.");
+    }
+    return { ok: issues.length === 0, issues };
+  }
+  async previewCreativeAssetsPrompt(payload) {
+    const bundle = await this.buildCreativeAssetsPromptBundle(payload);
+    return {
+      structured: bundle.structured,
+      rawPrompt: buildRawPromptPreview(bundle.systemPrompt, bundle.effectiveUserPrompt),
+      editableUserPrompt: bundle.defaultUserPrompt,
+      usedContext: bundle.usedContext
+    };
+  }
+  inferCreativeTargetSections(brief) {
+    const normalized = String(brief || "").trim().toLowerCase();
+    if (!normalized)
+      return [...CREATIVE_ASSET_SECTIONS];
+    const picked = [];
+    for (const section of CREATIVE_ASSET_SECTIONS) {
+      const keywords = CREATIVE_SECTION_KEYWORDS[section];
+      if (keywords.some((keyword) => normalized.includes(keyword.toLowerCase()))) {
+        picked.push(section);
+      }
+    }
+    return picked.length > 0 ? picked : [...CREATIVE_ASSET_SECTIONS];
+  }
+  resolveCreativeTargetSections(payload) {
+    const requested = Array.isArray(payload.targetSections) ? payload.targetSections : [];
+    const picked = requested.filter((value) => CREATIVE_ASSET_SECTIONS.includes(value));
+    return picked.length > 0 ? picked : this.inferCreativeTargetSections(payload.brief);
+  }
+  buildEmptyCreativeDraft(targetSections) {
+    const output = {};
+    for (const key of targetSections) {
+      output[key] = [];
+    }
+    return output;
+  }
+  async generateCreativeAssets(payload) {
+    const provider = this.getProvider();
+    const bundle = await this.buildCreativeAssetsPromptBundle(payload);
+    const targetSections = this.resolveCreativeTargetSections(payload);
+    const response = await provider.generate({
+      systemPrompt: bundle.systemPrompt,
+      prompt: bundle.effectiveUserPrompt,
+      maxTokens: this.settingsCache.http.maxTokens,
+      temperature: this.settingsCache.http.temperature
+    });
+    try {
+      const parsed = JSON.parse(response.text);
+      if (parsed && typeof parsed === "object") {
+        const filtered = this.buildEmptyCreativeDraft(targetSections);
+        for (const section of targetSections) {
+          const list = parsed == null ? void 0 : parsed[section];
+          filtered[section] = Array.isArray(list) ? list : [];
+        }
+        return { draft: filtered };
+      }
+    } catch {
+    }
+    const suffix = randomUUID().slice(0, 6);
+    const fallbackDraft = {
+      plotLines: [{
+        name: `主线-${suffix}`,
+        description: "AI 生成的主线草稿",
+        color: "#6366f1",
+        points: [{ title: "开端事件", description: "引发主线的关键事件", type: "event", status: "active" }]
+      }],
+      plotPoints: [{
+        title: "中段转折",
+        description: "推动章节冲突升级",
+        type: "event",
+        status: "active"
+      }],
+      characters: [{ name: `角色-${suffix}`, role: "protagonist", description: "AI 生成角色草稿", profile: { goal: "完成使命" } }],
+      items: [{ name: `物品-${suffix}`, type: "item", description: "AI 生成物品草稿", profile: { rarity: "rare" } }],
+      skills: [{ name: `技能-${suffix}`, description: "AI 生成技能草稿", profile: { rank: "A" } }],
+      maps: [{ name: `世界地图-${suffix}`, type: "world", description: "AI 生成地图草稿", imagePrompt: "fantasy world map" }]
+    };
+    const filteredFallback = this.buildEmptyCreativeDraft(targetSections);
+    for (const section of targetSections) {
+      filteredFallback[section] = fallbackDraft[section] ?? [];
+    }
+    return {
+      draft: filteredFallback
+    };
+  }
+  async validateCreativeAssetsDraft(payload) {
+    var _a, _b;
+    const errors2 = [];
+    const warnings = [];
+    const pushError = (issue) => errors2.push(issue);
+    const sanitizeText = (value, scope, maxLen = DRAFT_MAX_FIELD_LENGTH) => {
+      const text = typeof value === "string" ? value.trim() : "";
+      if (!text)
+        return "";
+      if (text.length <= maxLen)
+        return text;
+      warnings.push(`${scope} exceeds ${maxLen} chars and was truncated`);
+      return text.slice(0, maxLen);
+    };
+    const sanitizeProfile = (value, scope) => {
+      if (!value || typeof value !== "object" || Array.isArray(value))
+        return {};
+      const output = {};
+      for (const [key, val] of Object.entries(value)) {
+        const safeKey = sanitizeText(key, `${scope}.key`, 64);
+        const safeVal = sanitizeText(val, `${scope}.${key}`, 500);
+        if (safeKey && safeVal)
+          output[safeKey] = safeVal;
+      }
+      return output;
+    };
+    const normalized = {
+      plotLines: (payload.draft.plotLines ?? []).map((line, index) => ({
+        name: sanitizeText(line.name, `plotLines[${index}].name`, 120),
+        description: sanitizeText(line.description, `plotLines[${index}].description`),
+        color: sanitizeText(line.color, `plotLines[${index}].color`, 16) || "#6366f1",
+        points: (line.points ?? []).map((point, pointIndex) => {
+          const type = sanitizeText(point.type, `plotLines[${index}].points[${pointIndex}].type`, 32) || "event";
+          const status = sanitizeText(point.status, `plotLines[${index}].points[${pointIndex}].status`, 32) || "active";
+          return {
+            title: sanitizeText(point.title, `plotLines[${index}].points[${pointIndex}].title`, 120),
+            description: sanitizeText(point.description, `plotLines[${index}].points[${pointIndex}].description`),
+            type: VALID_PLOT_POINT_TYPES.has(type) ? type : "event",
+            status: VALID_PLOT_POINT_STATUS.has(status) ? status : "active"
+          };
+        })
+      })),
+      plotPoints: (payload.draft.plotPoints ?? []).map((point, index) => {
+        const type = sanitizeText(point.type, `plotPoints[${index}].type`, 32) || "event";
+        const status = sanitizeText(point.status, `plotPoints[${index}].status`, 32) || "active";
+        return {
+          title: sanitizeText(point.title, `plotPoints[${index}].title`, 120),
+          description: sanitizeText(point.description, `plotPoints[${index}].description`),
+          type: VALID_PLOT_POINT_TYPES.has(type) ? type : "event",
+          status: VALID_PLOT_POINT_STATUS.has(status) ? status : "active",
+          plotLineName: sanitizeText(point.plotLineName, `plotPoints[${index}].plotLineName`, 120)
+        };
+      }),
+      characters: (payload.draft.characters ?? []).map((item, index) => ({
+        name: sanitizeText(item.name, `characters[${index}].name`, 120),
+        role: sanitizeText(item.role, `characters[${index}].role`, 64),
+        description: sanitizeText(item.description, `characters[${index}].description`),
+        profile: sanitizeProfile(item.profile, `characters[${index}].profile`)
+      })),
+      items: (payload.draft.items ?? []).map((item, index) => {
+        const itemType = sanitizeText(item.type, `items[${index}].type`, 32) || "item";
+        return {
+          name: sanitizeText(item.name, `items[${index}].name`, 120),
+          type: VALID_ITEM_TYPES.has(itemType) ? itemType : "item",
+          description: sanitizeText(item.description, `items[${index}].description`),
+          profile: sanitizeProfile(item.profile, `items[${index}].profile`)
+        };
+      }),
+      skills: (payload.draft.skills ?? []).map((skill, index) => ({
+        name: sanitizeText(skill.name, `skills[${index}].name`, 120),
+        description: sanitizeText(skill.description, `skills[${index}].description`),
+        profile: sanitizeProfile(skill.profile, `skills[${index}].profile`)
+      })),
+      maps: (payload.draft.maps ?? []).map((map, index) => {
+        const mapType = sanitizeText(map.type, `maps[${index}].type`, 32) || "world";
+        return {
+          name: sanitizeText(map.name, `maps[${index}].name`, 120),
+          type: VALID_MAP_TYPES.has(mapType) ? mapType : "world",
+          description: sanitizeText(map.description, `maps[${index}].description`),
+          imagePrompt: sanitizeText(map.imagePrompt, `maps[${index}].imagePrompt`),
+          imageUrl: sanitizeText(map.imageUrl, `maps[${index}].imageUrl`, 2048),
+          imageBase64: sanitizeText(map.imageBase64, `maps[${index}].imageBase64`, 4 * 1024 * 1024),
+          mimeType: sanitizeText(map.mimeType, `maps[${index}].mimeType`, 64)
+        };
+      })
+    };
+    for (const [index, line] of (normalized.plotLines ?? []).entries()) {
+      if (!line.name) {
+        pushError({ scope: `plotLines[${index}]`, code: "INVALID_INPUT", detail: "Plot line name is required" });
+      }
+      for (const [pointIndex, point] of (line.points ?? []).entries()) {
+        if (!point.title) {
+          pushError({ scope: `plotLines[${index}].points[${pointIndex}]`, code: "INVALID_INPUT", detail: "Plot point title is required" });
+        }
+      }
+    }
+    for (const [index, point] of (normalized.plotPoints ?? []).entries()) {
+      if (!point.title) {
+        pushError({ scope: `plotPoints[${index}]`, code: "INVALID_INPUT", detail: "Plot point title is required" });
+      }
+    }
+    for (const [index, character] of (normalized.characters ?? []).entries()) {
+      if (!character.name) {
+        pushError({ scope: `characters[${index}]`, code: "INVALID_INPUT", detail: "Character name is required" });
+      }
+    }
+    for (const [index, item] of (normalized.items ?? []).entries()) {
+      if (!item.name) {
+        pushError({ scope: `items[${index}]`, code: "INVALID_INPUT", detail: "Item name is required" });
+      }
+    }
+    for (const [index, skill] of (normalized.skills ?? []).entries()) {
+      if (!skill.name) {
+        pushError({ scope: `skills[${index}]`, code: "INVALID_INPUT", detail: "Skill name is required" });
+      }
+    }
+    for (const [index, map] of (normalized.maps ?? []).entries()) {
+      if (!map.name) {
+        pushError({ scope: `maps[${index}]`, code: "INVALID_INPUT", detail: "Map name is required" });
+      }
+      const sourceCount = Number(Boolean(map.imageBase64)) + Number(Boolean(map.imageUrl)) + Number(Boolean(map.imagePrompt));
+      if (sourceCount > 1) {
+        pushError({
+          scope: `maps[${index}]`,
+          name: map.name,
+          code: "INVALID_INPUT",
+          detail: "Map image input must use only one source: imageBase64, imageUrl, or imagePrompt"
+        });
+      }
+      if (map.imageUrl && !/^https?:\/\//i.test(map.imageUrl)) {
+        pushError({
+          scope: `maps[${index}].imageUrl`,
+          name: map.name,
+          code: "INVALID_INPUT",
+          detail: "Map imageUrl must start with http:// or https://"
+        });
+      }
+      if (map.imageBase64) {
+        try {
+          const size = Buffer.from(map.imageBase64, "base64").length;
+          if (size === 0) {
+            pushError({
+              scope: `maps[${index}].imageBase64`,
+              name: map.name,
+              code: "INVALID_INPUT",
+              detail: "Map imageBase64 is invalid"
+            });
+          }
+          if (size > MAX_IMAGE_SIZE_BYTES) {
+            pushError({
+              scope: `maps[${index}].imageBase64`,
+              name: map.name,
+              code: "INVALID_INPUT",
+              detail: `Map imageBase64 exceeds ${MAX_IMAGE_SIZE_BYTES} bytes`
+            });
+          }
+        } catch {
+          pushError({
+            scope: `maps[${index}].imageBase64`,
+            name: map.name,
+            code: "INVALID_INPUT",
+            detail: "Map imageBase64 is invalid"
+          });
+        }
+      }
+    }
+    const checkDraftDuplicates = (items, scope) => {
+      const seen = /* @__PURE__ */ new Set();
+      for (const item of items) {
+        const normalizedName = (item.name || "").trim().toLowerCase();
+        if (!normalizedName)
+          continue;
+        if (seen.has(normalizedName)) {
+          pushError({
+            scope,
+            name: item.name,
+            code: "CONFLICT",
+            detail: `Duplicate name in current draft: ${item.name}`
+          });
+          continue;
+        }
+        seen.add(normalizedName);
+      }
+    };
+    checkDraftDuplicates(normalized.plotLines ?? [], "plotLines");
+    checkDraftDuplicates(normalized.characters ?? [], "characters");
+    checkDraftDuplicates(normalized.items ?? [], "items");
+    checkDraftDuplicates(normalized.skills ?? [], "skills");
+    checkDraftDuplicates(normalized.maps ?? [], "maps");
+    const [existingPlotLines, existingCharacters, existingItems, existingMaps] = await Promise.all([
+      db.plotLine.findMany({ where: { novelId: payload.novelId }, select: { name: true } }),
+      db.character.findMany({ where: { novelId: payload.novelId }, select: { name: true } }),
+      db.item.findMany({ where: { novelId: payload.novelId }, select: { name: true } }),
+      db.mapCanvas.findMany({ where: { novelId: payload.novelId }, select: { name: true } })
+    ]);
+    const existingNameSets = {
+      plotLines: new Set(existingPlotLines.map((row) => row.name.trim().toLowerCase())),
+      characters: new Set(existingCharacters.map((row) => row.name.trim().toLowerCase())),
+      items: new Set(existingItems.map((row) => row.name.trim().toLowerCase())),
+      maps: new Set(existingMaps.map((row) => row.name.trim().toLowerCase()))
+    };
+    const checkExistingConflicts = (items, category, scope) => {
+      for (const item of items) {
+        const normalizedName = (item.name || "").trim().toLowerCase();
+        if (!normalizedName)
+          continue;
+        if (existingNameSets[category].has(normalizedName)) {
+          pushError({
+            scope,
+            name: item.name,
+            code: "CONFLICT",
+            detail: `Name already exists in novel: ${item.name}`
+          });
+        }
+      }
+    };
+    checkExistingConflicts(normalized.plotLines ?? [], "plotLines", "plotLines");
+    checkExistingConflicts(normalized.characters ?? [], "characters", "characters");
+    checkExistingConflicts(normalized.items ?? [], "items", "items");
+    checkExistingConflicts(normalized.skills ?? [], "items", "skills");
+    checkExistingConflicts(normalized.maps ?? [], "maps", "maps");
+    if ((((_a = normalized.plotPoints) == null ? void 0 : _a.length) ?? 0) > 0 && (((_b = normalized.plotLines) == null ? void 0 : _b.length) ?? 0) === 0) {
+      warnings.push("Draft has plotPoints but no plotLines. System will create a default plot line when persisting.");
+    }
+    return {
+      ok: errors2.length === 0,
+      errors: errors2,
+      warnings,
+      normalizedDraft: normalized
+    };
+  }
+  async confirmCreativeAssets(payload) {
+    const validation = await this.validateCreativeAssetsDraft(payload);
+    const zeroCreated = {
+      plotLines: 0,
+      plotPoints: 0,
+      characters: 0,
+      items: 0,
+      skills: 0,
+      maps: 0,
+      mapImages: 0
+    };
+    if (!validation.ok) {
+      return {
+        success: false,
+        created: zeroCreated,
+        warnings: validation.warnings,
+        errors: validation.errors,
+        transactionMode: "atomic"
+      };
+    }
+    const draft = validation.normalizedDraft;
+    const provider = this.getProvider();
+    const createdFiles = [];
+    let committedCreated = { ...zeroCreated };
+    try {
+      await db.$transaction(async (tx) => {
+        const localCreated = { ...zeroCreated };
+        const plotLineIdByName = /* @__PURE__ */ new Map();
+        for (const plotLine of draft.plotLines ?? []) {
+          const createdLine = await tx.plotLine.create({
+            data: {
+              novelId: payload.novelId,
+              name: plotLine.name,
+              description: plotLine.description || null,
+              color: plotLine.color || "#6366f1",
+              sortOrder: Date.now() + localCreated.plotLines
+            }
+          });
+          plotLineIdByName.set(plotLine.name.toLowerCase(), createdLine.id);
+          localCreated.plotLines += 1;
+          for (const point of plotLine.points ?? []) {
+            await tx.plotPoint.create({
+              data: {
+                novelId: payload.novelId,
+                plotLineId: createdLine.id,
+                title: point.title,
+                description: point.description || null,
+                type: point.type || "event",
+                status: point.status || "active",
+                order: Date.now() + localCreated.plotPoints
+              }
+            });
+            localCreated.plotPoints += 1;
+          }
+        }
+        const resolvePlotLineIdForLoosePoint = async (plotLineName) => {
+          const lookupName = (plotLineName || "").trim().toLowerCase();
+          if (lookupName && plotLineIdByName.has(lookupName)) {
+            return plotLineIdByName.get(lookupName);
+          }
+          const firstLineId = plotLineIdByName.values().next().value;
+          if (firstLineId)
+            return firstLineId;
+          const defaultName = "AI 主线";
+          const autoLine = await tx.plotLine.create({
+            data: {
+              novelId: payload.novelId,
+              name: defaultName,
+              description: "Auto-created for loose plot points",
+              color: "#6366f1",
+              sortOrder: Date.now() + localCreated.plotLines
+            }
+          });
+          plotLineIdByName.set(defaultName.toLowerCase(), autoLine.id);
+          localCreated.plotLines += 1;
+          return autoLine.id;
+        };
+        for (const point of draft.plotPoints ?? []) {
+          const lineId = await resolvePlotLineIdForLoosePoint(point.plotLineName);
+          await tx.plotPoint.create({
+            data: {
+              novelId: payload.novelId,
+              plotLineId: lineId,
+              title: point.title,
+              description: point.description || null,
+              type: point.type || "event",
+              status: point.status || "active",
+              order: Date.now() + localCreated.plotPoints
+            }
+          });
+          localCreated.plotPoints += 1;
+        }
+        for (const character of draft.characters ?? []) {
+          await tx.character.create({
+            data: {
+              novelId: payload.novelId,
+              name: character.name,
+              role: character.role || null,
+              description: character.description || null,
+              profile: toProfileJson(character.profile),
+              sortOrder: Date.now() + localCreated.characters
+            }
+          });
+          localCreated.characters += 1;
+        }
+        for (const item of draft.items ?? []) {
+          await tx.item.create({
+            data: {
+              novelId: payload.novelId,
+              name: item.name,
+              type: item.type || "item",
+              description: item.description || null,
+              profile: toProfileJson(item.profile),
+              sortOrder: Date.now() + localCreated.items
+            }
+          });
+          localCreated.items += 1;
+        }
+        for (const skill of draft.skills ?? []) {
+          await tx.item.create({
+            data: {
+              novelId: payload.novelId,
+              name: skill.name,
+              type: "skill",
+              description: skill.description || null,
+              profile: toProfileJson(skill.profile),
+              sortOrder: Date.now() + localCreated.items + localCreated.skills
+            }
+          });
+          localCreated.skills += 1;
+        }
+        for (const mapDraft of draft.maps ?? []) {
+          const map = await tx.mapCanvas.create({
+            data: {
+              novelId: payload.novelId,
+              name: mapDraft.name,
+              type: mapDraft.type || "world",
+              description: mapDraft.description || null,
+              sortOrder: Date.now() + localCreated.maps
+            }
+          });
+          localCreated.maps += 1;
+          let imageInput = null;
+          if (mapDraft.imageBase64 || mapDraft.imageUrl) {
+            imageInput = {
+              imageBase64: mapDraft.imageBase64,
+              imageUrl: mapDraft.imageUrl,
+              mimeType: mapDraft.mimeType
+            };
+          } else if (mapDraft.imagePrompt) {
+            if (!provider.generateImage) {
+              throw new AiActionError("INVALID_INPUT", `Provider ${provider.name} does not support image generation`);
+            }
+            const generated = await provider.generateImage({ prompt: mapDraft.imagePrompt });
+            if (!(generated == null ? void 0 : generated.imageBase64) && !(generated == null ? void 0 : generated.imageUrl)) {
+              throw new AiActionError("PROVIDER_UNAVAILABLE", `Map image generation returned empty data for ${mapDraft.name}`);
+            }
+            imageInput = {
+              imageBase64: generated.imageBase64,
+              imageUrl: generated.imageUrl,
+              mimeType: generated.mimeType
+            };
+          }
+          if (imageInput) {
+            const saved = await this.saveImageAsset(payload.novelId, map.id, imageInput);
+            createdFiles.push(saved.absolutePath);
+            await tx.mapCanvas.update({
+              where: { id: map.id },
+              data: { background: saved.relativePath }
+            });
+            localCreated.mapImages += 1;
+          }
+        }
+        committedCreated = localCreated;
+      });
+      return {
+        success: true,
+        created: committedCreated,
+        warnings: validation.warnings,
+        transactionMode: "atomic"
+      };
+    } catch (error) {
+      for (const file of createdFiles) {
+        try {
+          if (fs.existsSync(file))
+            fs.unlinkSync(file);
+        } catch {
+        }
+      }
+      const normalized = normalizeAiError(error);
+      const issueCode = normalized.code === "INVALID_INPUT" ? "INVALID_INPUT" : normalized.code === "CONFLICT" ? "CONFLICT" : normalized.code === "UNKNOWN" ? "UNKNOWN" : "PERSISTENCE_ERROR";
+      return {
+        success: false,
+        created: zeroCreated,
+        warnings: validation.warnings,
+        errors: [
+          {
+            scope: "confirmCreativeAssets",
+            code: issueCode,
+            detail: normalized.message || "Creative assets persistence failed"
+          }
+        ],
+        transactionMode: "atomic"
+      };
+    }
+  }
+  async previewMapPrompt(payload) {
+    const bundle = await this.buildMapPromptBundle(payload);
+    return {
+      structured: bundle.structured,
+      rawPrompt: bundle.effectiveUserPrompt,
+      editableUserPrompt: bundle.defaultUserPrompt,
+      usedWorldLore: bundle.usedWorldLore
+    };
+  }
+  async generateMapImage(payload) {
+    var _a, _b, _c;
+    const startTime = Date.now();
+    const finalize = (result) => {
+      this.recordMapImageCall({
+        ok: result.ok,
+        code: result.code,
+        detail: result.detail,
+        latencyMs: Date.now() - startTime
+      });
+      return result;
+    };
+    try {
+      const hasBasePrompt = Boolean((_a = payload.prompt) == null ? void 0 : _a.trim());
+      const hasOverridePrompt = Boolean((_b = payload.overrideUserPrompt) == null ? void 0 : _b.trim());
+      if (!hasBasePrompt && !hasOverridePrompt) {
+        return finalize({ ok: false, code: "INVALID_INPUT", detail: "Map prompt is empty" });
+      }
+      const provider = this.getProvider();
+      if (!provider.generateImage) {
+        return finalize({ ok: false, code: "INVALID_INPUT", detail: `Provider ${provider.name} does not support image generation` });
+      }
+      const bundle = await this.buildMapPromptBundle(payload);
+      const generated = await provider.generateImage({
+        prompt: bundle.effectiveUserPrompt,
+        model: this.settingsCache.http.imageModel || void 0,
+        size: payload.imageSize || this.settingsCache.http.imageSize || void 0,
+        outputFormat: this.settingsCache.http.imageOutputFormat || void 0,
+        watermark: this.settingsCache.http.imageWatermark
+      });
+      if (!generated.imageBase64 && !generated.imageUrl) {
+        return finalize({ ok: false, code: "PROVIDER_UNAVAILABLE", detail: "Provider did not return any image data" });
+      }
+      let mapId = payload.mapId;
+      if (!mapId) {
+        const createdMap = await db.mapCanvas.create({
+          data: {
+            novelId: payload.novelId,
+            name: ((_c = payload.mapName) == null ? void 0 : _c.trim()) || `AI 地图 ${(/* @__PURE__ */ new Date()).toLocaleString()}`,
+            type: payload.mapType || "world",
+            description: `Generated by AI with prompt: ${payload.prompt}`,
+            sortOrder: Date.now()
+          }
+        });
+        mapId = createdMap.id;
+      }
+      if (!mapId) {
+        throw new AiActionError("PERSISTENCE_ERROR", "Map id is missing after map creation");
+      }
+      const saved = await this.saveImageAsset(payload.novelId, mapId, {
+        imageBase64: generated.imageBase64,
+        imageUrl: generated.imageUrl,
+        mimeType: generated.mimeType
+      });
+      await db.mapCanvas.update({
+        where: { id: mapId },
+        data: { background: saved.relativePath }
+      });
+      return finalize({
+        ok: true,
+        detail: "Map image generated and stored successfully",
+        mapId,
+        path: saved.relativePath
+      });
+    } catch (error) {
+      const normalized = normalizeAiError(error);
+      return finalize({
+        ok: false,
+        code: normalized.code,
+        detail: normalized.message || "Map generation failed"
+      });
+    }
+  }
+  async executeAction(input) {
+    const handler = this.capabilityRegistry.get(input.actionId);
+    if (!handler) {
+      throw new AiActionError("INVALID_INPUT", `Unknown actionId: ${input.actionId}`);
+    }
+    try {
+      return await handler(input.payload);
+    } catch (error) {
+      throw normalizeAiError(error);
+    }
+  }
+  async invokeOpenClawTool(input) {
+    try {
+      const data = await this.executeAction({
+        actionId: input.name,
+        payload: input.arguments
+      });
+      return { ok: true, data };
+    } catch (error) {
+      const normalized = normalizeAiError(error);
+      return {
+        ok: false,
+        error: formatAiErrorForDisplay(normalized.code, normalized.message || "OpenClaw invoke failed"),
+        code: normalized.code
+      };
+    }
+  }
+  async invokeOpenClawSkill(input) {
+    try {
+      const data = await this.executeAction({
+        actionId: input.name,
+        payload: input.input
+      });
+      return { ok: true, data };
+    } catch (error) {
+      const normalized = normalizeAiError(error);
+      return {
+        ok: false,
+        error: formatAiErrorForDisplay(normalized.code, normalized.message || "OpenClaw skill invoke failed"),
+        code: normalized.code
+      };
+    }
+  }
+  compactContinueHardContext(input) {
+    const worldSettings = Array.isArray(input.worldSettings) ? input.worldSettings : [];
+    const plotLines = Array.isArray(input.plotLines) ? input.plotLines : [];
+    const characters = Array.isArray(input.characters) ? input.characters : [];
+    const items = Array.isArray(input.items) ? input.items : [];
+    const maps = Array.isArray(input.maps) ? input.maps : [];
+    return {
+      worldSettings: worldSettings.slice(0, 60).map((item) => ({
+        name: trimText(item == null ? void 0 : item.name, 80),
+        type: trimText(item == null ? void 0 : item.type, 32) || "other",
+        content: trimText(item == null ? void 0 : item.content, 300) || trimText(item == null ? void 0 : item.description, 300)
+      })).filter((item) => item.content),
+      plotLines: plotLines.slice(0, 40).map((line) => ({
+        name: trimText(line == null ? void 0 : line.name, 100),
+        description: trimText(line == null ? void 0 : line.description, 260),
+        points: Array.isArray(line == null ? void 0 : line.points) ? line.points.filter((point) => String((point == null ? void 0 : point.status) || "").trim().toLowerCase() !== "resolved").slice(0, 12).map((point) => ({
+          title: trimText(point == null ? void 0 : point.title, 100),
+          description: trimText(point == null ? void 0 : point.description, 220),
+          type: trimText(point == null ? void 0 : point.type, 24) || "event",
+          status: trimText(point == null ? void 0 : point.status, 24) || "active"
+        })).filter((point) => point.title || point.description) : []
+      })).filter((line) => {
+        var _a;
+        return line.name || (((_a = line.points) == null ? void 0 : _a.length) ?? 0) > 0;
+      }),
+      characters: characters.slice(0, 120).map((item) => ({
+        name: trimText(item == null ? void 0 : item.name, 80),
+        role: trimText(item == null ? void 0 : item.role, 32),
+        description: trimText(item == null ? void 0 : item.description, 220)
+      })).filter((item) => item.name && (item.role || item.description)),
+      items: items.slice(0, 120).map((item) => ({
+        name: trimText(item == null ? void 0 : item.name, 80),
+        type: trimText(item == null ? void 0 : item.type, 32) || "item",
+        description: trimText(item == null ? void 0 : item.description, 220)
+      })).filter((item) => item.name && item.description),
+      maps: maps.slice(0, 60).map((item) => ({
+        name: trimText(item == null ? void 0 : item.name, 80),
+        type: trimText(item == null ? void 0 : item.type, 24) || "world",
+        description: trimText(item == null ? void 0 : item.description, 220)
+      })).filter((item) => item.name && item.description)
+    };
+  }
+  compactContinueDynamicContext(input) {
+    const recentChapters = Array.isArray(input.recentChapters) ? input.recentChapters : [];
+    const selectedIdeas = Array.isArray(input.selectedIdeas) ? input.selectedIdeas : [];
+    const selectedIdeaEntities = Array.isArray(input.selectedIdeaEntities) ? input.selectedIdeaEntities : [];
+    const narrativeSummaries = Array.isArray(input.narrativeSummaries) ? input.narrativeSummaries : [];
+    const currentLocation = trimText(input.currentLocation, 120);
+    return {
+      recentChapters: recentChapters.slice(0, 8).map((chapter) => ({
+        title: trimText(chapter == null ? void 0 : chapter.title, 120),
+        excerpt: trimText(chapter == null ? void 0 : chapter.excerpt, 1200)
+      })).filter((chapter) => chapter.title || chapter.excerpt),
+      selectedIdeas: selectedIdeas.slice(0, 20).map((idea) => ({
+        content: trimText(idea == null ? void 0 : idea.content, 800),
+        quote: trimText(idea == null ? void 0 : idea.quote, 300),
+        tags: Array.isArray(idea == null ? void 0 : idea.tags) ? idea.tags.slice(0, 12).map((tag) => trimText(tag, 32)).filter(Boolean) : []
+      })).filter((idea) => idea.content || idea.quote),
+      selectedIdeaEntities: selectedIdeaEntities.slice(0, 20).map((entity) => ({
+        name: trimText(entity == null ? void 0 : entity.name, 80),
+        kind: trimText(entity == null ? void 0 : entity.kind, 24)
+      })).filter((entity) => entity.name && entity.kind),
+      currentChapterBeforeCursor: trimText(input.currentChapterBeforeCursor, 2600),
+      ...currentLocation ? { currentLocation } : {},
+      narrativeSummaries: narrativeSummaries.slice(0, 4).map((item) => ({
+        level: (item == null ? void 0 : item.level) === "volume" ? "volume" : "novel",
+        title: trimText(item == null ? void 0 : item.title, 100),
+        summaryText: trimText(item == null ? void 0 : item.summaryText, 1200),
+        keyFacts: Array.isArray(item == null ? void 0 : item.keyFacts) ? dedupeStrings(item.keyFacts.map((fact) => trimText(fact, 160)).filter(Boolean), 5) : []
+      }))
+    };
+  }
+  async buildContinuePromptBundle(payload) {
+    var _a;
+    const isZh = /^zh/i.test(String(payload.locale || "").trim());
+    const writeMode = payload.mode === "new_chapter" ? "new_chapter" : "continue_chapter";
+    const context = await this.contextBuilder.buildForContinueWriting({
+      ...payload,
+      mode: writeMode,
+      recentRawChapterCount: payload.recentRawChapterCount ?? this.settingsCache.summary.recentChapterRawCount
+    });
+    const compactHardContext = this.compactContinueHardContext(context.hardContext);
+    const compactDynamicContext = this.compactContinueDynamicContext(context.dynamicContext);
+    const normalizedUserIntent = trimText(payload.userIntent, 800);
+    const normalizedCurrentLocation = trimText(payload.currentLocation, 120);
+    const writeParamsForPrompt = {
+      ...context.params,
+      targetLength: isZh ? `约${Math.max(100, Number(context.params.targetLength || 500))}汉字` : `about ${Math.max(100, Number(context.params.targetLength || 500))} Chinese characters`
+    };
+    const systemPrompt = isZh ? "你是中文小说续写助手。严格遵守世界观和大纲，不得破坏既有设定与人物行为逻辑。" : "Continue writing with strict consistency to world settings and plot outline. Do not break established lore.";
+    const promptSections = [
+      `WriteMode=${writeMode}`,
+      `HardContext=
+${JSON.stringify(compactHardContext, null, 2).slice(0, 18e3)}`,
+      `DynamicContext=
+${JSON.stringify(compactDynamicContext, null, 2).slice(0, 12e3)}`,
+      `WriteParams=
+${JSON.stringify(writeParamsForPrompt, null, 2)}`,
+      ...normalizedUserIntent ? [`UserIntent=${normalizedUserIntent}`] : [],
+      ...normalizedCurrentLocation ? [`CurrentLocation=${normalizedCurrentLocation}`] : [],
+      writeMode === "new_chapter" ? isZh ? "Constraint=基于大纲与世界观写出新章节开场，不得复述已有段落。" : "Constraint=Start a fresh chapter opening based on outline and world context. Do not echo prior chapter paragraphs." : isZh ? "Constraint=仅输出新增续写内容，不得重复当前章节或上下文已出现段落。" : "Constraint=Output must be NEW continuation content only. Do not restate prior paragraphs from current chapter or context.",
+      isZh ? "Constraint=@实体名 表示对上下文中同名角色/物品/地点/设定的引用，续写时应保持实体设定一致。" : "Constraint=@EntityName means referencing the same named entity from context; keep entity traits consistent.",
+      ...normalizedUserIntent ? [isZh ? "Constraint=尽量满足用户意图，但不得违反世界观与主线大纲。" : "Constraint=Prioritize the user intent when possible, but never violate established world settings and plot outline."] : [],
+      isZh ? "Constraint=请严格遵守 HardContext 中的世界观、角色性格和物品设定；情节推进需与已有情节点保持一致。" : "Constraint=Strictly follow HardContext lore, character traits, and item settings; keep progression aligned with existing plot points.",
+      isZh ? "Constraint=你的任务是续写光标后的新内容，不要重复 currentChapterBeforeCursor 里的任何句子。" : "Constraint=Write only the continuation after cursor; do not repeat any sentence from currentChapterBeforeCursor."
+    ];
+    const defaultUserPrompt = promptSections.join("\n\n");
+    const effectiveUserPrompt = ((_a = payload.overrideUserPrompt) == null ? void 0 : _a.trim()) ? payload.overrideUserPrompt.trim() : defaultUserPrompt;
+    const structuredParams = {
+      ...context.params,
+      ...normalizedUserIntent ? { userIntent: normalizedUserIntent } : {},
+      ...normalizedCurrentLocation ? { currentLocation: normalizedCurrentLocation } : {}
+    };
+    return {
+      systemPrompt,
+      defaultUserPrompt,
+      effectiveUserPrompt,
+      structured: {
+        goal: writeMode === "new_chapter" ? isZh ? "生成新章节开场内容。" : "Generate opening content for a new chapter." : isZh ? "仅生成续写新增内容。" : "Generate continuation content only.",
+        contextRefs: context.usedContext,
+        params: structuredParams,
+        constraints: [
+          ...isZh ? ["严格遵守世界观与大纲一致性。"] : ["Keep strict consistency with world settings and outline."],
+          ...normalizedUserIntent ? [isZh ? "在不冲突时优先满足用户意图。" : "Respect user intent when it does not conflict with hard context."] : [],
+          ...isZh ? ["不得重复已有段落。", "只输出生成的续写正文。"] : ["Do not repeat existing paragraphs.", "Output only generated chapter text."]
+        ]
+      },
+      usedContext: context.usedContext,
+      warnings: context.warnings
+    };
+  }
+  async buildCreativeAssetsPromptBundle(payload) {
+    var _a;
+    const targetSections = this.resolveCreativeTargetSections(payload);
+    const [novel, worldSettings, counts] = await Promise.all([
+      db.novel.findUnique({
+        where: { id: payload.novelId },
+        select: { id: true, title: true, description: true }
+      }),
+      db.worldSetting.findMany({
+        where: { novelId: payload.novelId },
+        orderBy: { updatedAt: "desc" },
+        take: 8,
+        select: { name: true, content: true }
+      }),
+      Promise.all([
+        db.plotLine.count({ where: { novelId: payload.novelId } }),
+        db.character.count({ where: { novelId: payload.novelId } }),
+        db.item.count({ where: { novelId: payload.novelId } }),
+        db.mapCanvas.count({ where: { novelId: payload.novelId } })
+      ])
+    ]);
+    const [plotLineCount, characterCount, itemCount, mapCount] = counts;
+    const usedContext = [
+      `Novel: ${(novel == null ? void 0 : novel.title) || payload.novelId}`,
+      `World settings referenced: ${worldSettings.length}`,
+      `Existing entities: plotLines=${plotLineCount}, characters=${characterCount}, items=${itemCount}, maps=${mapCount}`
+    ];
+    const systemPrompt = "Generate structured creative assets in strict JSON format. Output only requested sections.";
+    const outputSchema = {
+      plotLines: [{ name: "string", description: "string?" }],
+      plotPoints: [{ title: "string", description: "string?", plotLineName: "string?" }],
+      characters: [{ name: "string", role: "string?", description: "string?" }],
+      items: [{ name: "string", type: "item|skill|location", description: "string?" }],
+      skills: [{ name: "string", description: "string?" }],
+      maps: [{ name: "string", type: "world|region|scene", description: "string?", imagePrompt: "string?" }]
+    };
+    const defaultUserPrompt = JSON.stringify({
+      task: "creative_assets_generation",
+      brief: payload.brief,
+      novel: {
+        title: (novel == null ? void 0 : novel.title) || "",
+        description: (novel == null ? void 0 : novel.description) || ""
+      },
+      worldSettings: worldSettings.map((item) => ({
+        name: String(item.name || ""),
+        description: String(item.content || "").slice(0, 180)
+      })),
+      targetSections,
+      outputShape: targetSections,
+      outputSchema,
+      constraints: [
+        "return strict JSON only",
+        "output only requested sections; all unrequested sections must be empty arrays",
+        "avoid duplicate names against existing entities",
+        "fields should be concise and directly usable"
+      ]
+    });
+    const effectiveUserPrompt = ((_a = payload.overrideUserPrompt) == null ? void 0 : _a.trim()) ? payload.overrideUserPrompt.trim() : defaultUserPrompt;
+    return {
+      systemPrompt,
+      defaultUserPrompt,
+      effectiveUserPrompt,
+      structured: {
+        goal: "Generate editable draft assets for outline, world and map creation.",
+        contextRefs: usedContext,
+        params: {
+          briefLength: payload.brief.trim().length,
+          sections: targetSections
+        },
+        constraints: [
+          "Output strict JSON.",
+          "Return only selected sections.",
+          "Prefer concise, production-ready fields.",
+          "Avoid obvious name conflicts."
+        ]
+      },
+      usedContext
+    };
+  }
+  async buildMapPromptBundle(payload) {
+    var _a;
+    const worldSettings = await db.worldSetting.findMany({
+      where: { novelId: payload.novelId },
+      orderBy: { updatedAt: "desc" },
+      take: 8,
+      select: { id: true, name: true, content: true }
+    });
+    const usedWorldLore = worldSettings.map((item) => ({
+      id: item.id,
+      title: String(item.name || "Untitled"),
+      excerpt: String(item.content || "").slice(0, 180)
+    }));
+    const stylePrompt = resolveMapStylePrompt(payload.styleTemplate);
+    const loreBlock = usedWorldLore.length > 0 ? usedWorldLore.map((item, index) => `${index + 1}. ${item.title}: ${item.excerpt}`).join("\n") : "No explicit world lore provided.";
+    const defaultUserPrompt = [
+      stylePrompt || "Style: follow user requested style.",
+      `ImageSize=${payload.imageSize || this.settingsCache.http.imageSize || "2K"}`,
+      "Task: Generate a clean map background image.",
+      `UserRequest=${payload.prompt}`,
+      "WorldLore:",
+      loreBlock,
+      "Constraints:",
+      "- avoid text labels or UI marks",
+      "- keep high readability for map canvas editing",
+      "- preserve coherence with world lore"
+    ].join("\n");
+    const effectiveUserPrompt = ((_a = payload.overrideUserPrompt) == null ? void 0 : _a.trim()) ? payload.overrideUserPrompt.trim() : defaultUserPrompt;
+    return {
+      defaultUserPrompt,
+      effectiveUserPrompt,
+      structured: {
+        goal: "Generate map background image aligned with world lore.",
+        contextRefs: [
+          `Map type: ${payload.mapType || "world"}`,
+          `Map name: ${payload.mapName || "(new map)"}`,
+          `World lore refs: ${usedWorldLore.length}`
+        ],
+        params: {
+          imageSize: payload.imageSize || this.settingsCache.http.imageSize || "2K",
+          styleTemplate: payload.styleTemplate || "default"
+        },
+        constraints: [
+          "No labels or UI overlays in generated image.",
+          "Map should be readable for later annotation.",
+          "Use world lore when available."
+        ]
+      },
+      usedWorldLore
+    };
+  }
+  getProvider() {
+    return this.settingsCache.providerType === "mcp-cli" ? new McpCliProvider(this.settingsCache) : new HttpProvider(this.settingsCache);
+  }
+  async saveImageAsset(novelId, mapId, input) {
+    let mimeType = input.mimeType || "image/png";
+    let buffer;
+    if (input.imageBase64) {
+      buffer = Buffer.from(input.imageBase64, "base64");
+    } else if (input.imageUrl) {
+      const res = await fetch(input.imageUrl);
+      if (!res.ok) {
+        throw new Error(`Image download failed: ${res.status}`);
+      }
+      const headerMime = res.headers.get("content-type") || "";
+      if (headerMime)
+        mimeType = headerMime;
+      const arrayBuffer = await res.arrayBuffer();
+      buffer = Buffer.from(arrayBuffer);
+    } else {
+      throw new Error("No image data provided");
+    }
+    if (buffer.length === 0) {
+      throw new Error("Image data is empty");
+    }
+    if (buffer.length > MAX_IMAGE_SIZE_BYTES) {
+      throw new Error("Image exceeds maximum size limit");
+    }
+    if (!mimeType.startsWith("image/")) {
+      throw new Error(`Invalid mime type: ${mimeType}`);
+    }
+    const ext = mimeToExt(mimeType);
+    const mapsDir = path.join(this.userDataPath, "maps", novelId);
+    if (!fs.existsSync(mapsDir)) {
+      fs.mkdirSync(mapsDir, { recursive: true });
+    }
+    const filename = sanitizeFileName(`ai-${mapId}-${Date.now()}.${ext}`);
+    const absolutePath = path.join(mapsDir, filename);
+    fs.writeFileSync(absolutePath, buffer);
+    return {
+      relativePath: `maps/${novelId}/${filename}`,
+      absolutePath
+    };
+  }
+  loadSettings() {
+    try {
+      if (!fs.existsSync(this.settingsFilePath)) {
+        return DEFAULT_AI_SETTINGS;
+      }
+      const raw = fs.readFileSync(this.settingsFilePath, "utf8");
+      const parsed = JSON.parse(raw);
+      return {
+        ...DEFAULT_AI_SETTINGS,
+        ...parsed,
+        http: { ...DEFAULT_AI_SETTINGS.http, ...parsed.http ?? {} },
+        mcpCli: { ...DEFAULT_AI_SETTINGS.mcpCli, ...parsed.mcpCli ?? {} },
+        proxy: { ...DEFAULT_AI_SETTINGS.proxy, ...parsed.proxy ?? {} },
+        summary: { ...DEFAULT_AI_SETTINGS.summary, ...parsed.summary ?? {} }
+      };
+    } catch (error) {
+      console.error("[AI] Failed to load settings, fallback to defaults:", error);
+      return DEFAULT_AI_SETTINGS;
+    }
+  }
+  persistSettings() {
+    try {
+      const dir = path.dirname(this.settingsFilePath);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      fs.writeFileSync(this.settingsFilePath, JSON.stringify(this.settingsCache, null, 2), "utf8");
+    } catch (error) {
+      console.error("[AI] Failed to persist settings:", error);
+    }
+  }
+  loadMapImageStats() {
+    const fallback = {
+      totalCalls: 0,
+      successCalls: 0,
+      failedCalls: 0,
+      rateLimitFailures: 0,
+      updatedAt: (/* @__PURE__ */ new Date(0)).toISOString()
+    };
+    try {
+      if (!fs.existsSync(this.mapImageStatsPath)) {
+        return fallback;
+      }
+      const raw = fs.readFileSync(this.mapImageStatsPath, "utf8");
+      const parsed = JSON.parse(raw);
+      return {
+        totalCalls: parsed.totalCalls ?? 0,
+        successCalls: parsed.successCalls ?? 0,
+        failedCalls: parsed.failedCalls ?? 0,
+        rateLimitFailures: parsed.rateLimitFailures ?? 0,
+        lastFailureCode: parsed.lastFailureCode || void 0,
+        lastFailureAt: parsed.lastFailureAt || void 0,
+        updatedAt: parsed.updatedAt || fallback.updatedAt
+      };
+    } catch (error) {
+      console.warn("[AI] Failed to load map image stats, fallback to defaults:", error);
+      return fallback;
+    }
+  }
+  persistMapImageStats() {
+    try {
+      const dir = path.dirname(this.mapImageStatsPath);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      fs.writeFileSync(this.mapImageStatsPath, JSON.stringify(this.mapImageStatsCache, null, 2), "utf8");
+    } catch (error) {
+      console.warn("[AI] Failed to persist map image stats:", error);
+    }
+  }
+  recordMapImageCall(input) {
+    const codeText = (input.code || "").toLowerCase();
+    const detailText = (input.detail || "").toLowerCase();
+    const isRateLimit = codeText.includes("rate") || codeText.includes("429") || detailText.includes("429") || detailText.includes("rate limit") || detailText.includes("quota");
+    this.mapImageStatsCache = {
+      ...this.mapImageStatsCache,
+      totalCalls: this.mapImageStatsCache.totalCalls + 1,
+      successCalls: this.mapImageStatsCache.successCalls + (input.ok ? 1 : 0),
+      failedCalls: this.mapImageStatsCache.failedCalls + (input.ok ? 0 : 1),
+      rateLimitFailures: this.mapImageStatsCache.rateLimitFailures + (!input.ok && isRateLimit ? 1 : 0),
+      lastFailureCode: input.ok ? this.mapImageStatsCache.lastFailureCode : input.code || "UNKNOWN",
+      lastFailureAt: input.ok ? this.mapImageStatsCache.lastFailureAt : (/* @__PURE__ */ new Date()).toISOString(),
+      updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+    };
+    this.persistMapImageStats();
   }
 }
 const API_BASE = "http://localhost:8080/api/sync";
@@ -683,8 +3916,8 @@ var errors = {};
     exports$1[msg] = E(errors2[msg]);
   }
 })(errors);
-const fsystem = fs;
-const pth$2 = path;
+const fsystem = fs$1;
+const pth$2 = path$1;
 const Constants$3 = constants;
 const Errors$1 = errors;
 const isWin = typeof process === "object" && "win32" === process.platform;
@@ -947,7 +4180,7 @@ Utils$5.fromDate2DOS = function(val) {
 };
 Utils$5.isWin = isWin;
 Utils$5.crcTable = crcTable;
-const pth$1 = path;
+const pth$1 = path$1;
 var fattr = function(path2, { fs: fs2 }) {
   var _path = path2 || "", _obj = newAttr(), _stat = null;
   function newAttr() {
@@ -2221,7 +5454,7 @@ var zipFile = function(inBuffer, options) {
   };
 };
 const Utils = utilExports;
-const pth = path;
+const pth = path$1;
 const ZipEntry = zipEntry;
 const ZipFile = zipFile;
 const get_Bool = (...val) => Utils.findLast(val, (c) => typeof c === "boolean");
@@ -3027,12 +6260,12 @@ var admZip = function(input, options) {
   };
 };
 const AdmZip = /* @__PURE__ */ getDefaultExportFromCjs(admZip);
-const BACKUP_DIR = path.join(app.getPath("userData"), "backups");
-const AUTO_BACKUP_DIR = path.join(BACKUP_DIR, "auto");
-if (!fs.existsSync(BACKUP_DIR))
-  fs.mkdirSync(BACKUP_DIR, { recursive: true });
-if (!fs.existsSync(AUTO_BACKUP_DIR))
-  fs.mkdirSync(AUTO_BACKUP_DIR, { recursive: true });
+const BACKUP_DIR = path$1.join(app.getPath("userData"), "backups");
+const AUTO_BACKUP_DIR = path$1.join(BACKUP_DIR, "auto");
+if (!fs$1.existsSync(BACKUP_DIR))
+  fs$1.mkdirSync(BACKUP_DIR, { recursive: true });
+if (!fs$1.existsSync(AUTO_BACKUP_DIR))
+  fs$1.mkdirSync(AUTO_BACKUP_DIR, { recursive: true });
 class BackupService {
   // --- Encryption Helpers ---
   deriveKey(password, salt) {
@@ -3172,7 +6405,7 @@ class BackupService {
     try {
       const timestamp = Date.now();
       const filename = `auto_backup_${timestamp}.nebak`;
-      const filePath = path.join(AUTO_BACKUP_DIR, filename);
+      const filePath = path$1.join(AUTO_BACKUP_DIR, filename);
       await this.exportData(filePath);
       console.log("[BackupService] Auto-backup created:", filename);
       await this.rotateAutoBackups();
@@ -3181,20 +6414,20 @@ class BackupService {
     }
   }
   async rotateAutoBackups() {
-    const files = fs.readdirSync(AUTO_BACKUP_DIR).filter((f) => f.endsWith(".nebak")).map((f) => ({
+    const files = fs$1.readdirSync(AUTO_BACKUP_DIR).filter((f) => f.endsWith(".nebak")).map((f) => ({
       name: f,
-      time: fs.statSync(path.join(AUTO_BACKUP_DIR, f)).mtime.getTime()
+      time: fs$1.statSync(path$1.join(AUTO_BACKUP_DIR, f)).mtime.getTime()
     })).sort((a, b) => b.time - a.time);
     const toDelete = files.slice(3);
     for (const file of toDelete) {
-      fs.unlinkSync(path.join(AUTO_BACKUP_DIR, file.name));
+      fs$1.unlinkSync(path$1.join(AUTO_BACKUP_DIR, file.name));
       console.log("[BackupService] Rotated auto-backup:", file.name);
     }
   }
   // 4. List Auto Backups
   async getAutoBackups() {
-    return fs.readdirSync(AUTO_BACKUP_DIR).filter((f) => f.endsWith(".nebak")).map((f) => {
-      const stats = fs.statSync(path.join(AUTO_BACKUP_DIR, f));
+    return fs$1.readdirSync(AUTO_BACKUP_DIR).filter((f) => f.endsWith(".nebak")).map((f) => {
+      const stats = fs$1.statSync(path$1.join(AUTO_BACKUP_DIR, f));
       return {
         filename: f,
         createdAt: stats.mtime.getTime(),
@@ -3204,19 +6437,19 @@ class BackupService {
   }
   // 5. Restore from Auto Backup
   async restoreAutoBackup(filename) {
-    const filePath = path.join(AUTO_BACKUP_DIR, filename);
-    if (!fs.existsSync(filePath))
+    const filePath = path$1.join(AUTO_BACKUP_DIR, filename);
+    if (!fs$1.existsSync(filePath))
       throw new Error("Backup file not found");
     await this.importData(filePath);
   }
 }
 const backupService = new BackupService();
-const __dirname$1 = path$1.dirname(fileURLToPath(import.meta.url));
-process.env.APP_ROOT = path$1.join(__dirname$1, "..");
+const __dirname$1 = path.dirname(fileURLToPath(import.meta.url));
+process.env.APP_ROOT = path.join(__dirname$1, "..");
 const VITE_DEV_SERVER_URL = process.env["VITE_DEV_SERVER_URL"];
-const MAIN_DIST = path$1.join(process.env.APP_ROOT, "dist-electron");
-const RENDERER_DIST = path$1.join(process.env.APP_ROOT, "dist");
-process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL ? path$1.join(process.env.APP_ROOT, "public") : RENDERER_DIST;
+const MAIN_DIST = path.join(process.env.APP_ROOT, "dist-electron");
+const RENDERER_DIST = path.join(process.env.APP_ROOT, "dist");
+process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL ? path.join(process.env.APP_ROOT, "public") : RENDERER_DIST;
 process.on("uncaughtException", (error) => {
   console.error("[Main] Uncaught Exception:", error);
   app.quit();
@@ -3228,13 +6461,152 @@ process.on("unhandledRejection", (reason, promise) => {
   process.exit(1);
 });
 let win;
+function parseAiDiagCommand(argv) {
+  const markerIndex = argv.indexOf("--ai-diag");
+  if (markerIndex < 0)
+    return {};
+  const tokens = argv.slice(markerIndex + 1);
+  if (tokens.length === 0) {
+    return { error: "Missing diagnostic action. Use: --ai-diag smoke <mcp|skill> [--json] [--db <path>] [--user-data <path>] or --ai-diag coverage [--json] [--db <path>] [--user-data <path>]" };
+  }
+  const positionals = [];
+  let json = false;
+  let dbPath;
+  let userDataPath;
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    if (token === "--json") {
+      json = true;
+      continue;
+    }
+    if (token === "--db") {
+      const value = tokens[index + 1];
+      if (!value)
+        return { error: "Missing value for --db" };
+      dbPath = value;
+      index += 1;
+      continue;
+    }
+    if (token === "--user-data") {
+      const value = tokens[index + 1];
+      if (!value)
+        return { error: "Missing value for --user-data" };
+      userDataPath = value;
+      index += 1;
+      continue;
+    }
+    if (token.startsWith("--")) {
+      return { error: `Unknown option: ${token}` };
+    }
+    positionals.push(token);
+  }
+  const [action, kind] = positionals;
+  if (action === "coverage") {
+    return { command: { action: "coverage", json, dbPath, userDataPath } };
+  }
+  if (action === "smoke") {
+    if (kind !== "mcp" && kind !== "skill") {
+      return { error: "Smoke mode requires kind: mcp | skill" };
+    }
+    return { command: { action: "smoke", kind, json, dbPath, userDataPath } };
+  }
+  return { error: `Unknown diagnostic action: ${action}` };
+}
+function formatAiDiagReadable(result, command) {
+  if (command.action === "coverage") {
+    const output2 = result;
+    const lines2 = [
+      `[AI-Diag] Coverage ${output2.overallCoverage}% (${output2.totalSupported}/${output2.totalRequired})`,
+      ...output2.modules.map((module) => {
+        const missing = module.missingActions.length ? ` missing=[${module.missingActions.join(", ")}]` : "";
+        return `- ${module.title}: ${module.coverage}% (${module.supportedActions.length}/${module.requiredActions.length})${missing}`;
+      })
+    ];
+    return lines2.join("\n");
+  }
+  const output = result;
+  const lines = [
+    `[AI-Diag] Smoke ${output.kind.toUpperCase()} ${output.ok ? "PASSED" : "FAILED"}`,
+    `detail: ${output.detail}`,
+    output.missingActions.length ? `missingActions: ${output.missingActions.join(", ")}` : "missingActions: none",
+    ...output.checks.map((check) => {
+      const tag = check.skipped ? "SKIPPED" : check.ok ? "OK" : "FAILED";
+      return `- [${tag}] ${check.actionId}: ${check.detail}`;
+    })
+  ];
+  return lines.join("\n");
+}
+async function runAiDiagCommand(aiService2, command) {
+  const result = command.action === "coverage" ? aiService2.getCapabilityCoverage() : await aiService2.testOpenClawSmoke({ kind: command.kind });
+  if (command.json) {
+    console.log(JSON.stringify(result, null, 2));
+  } else {
+    console.log(formatAiDiagReadable(result, command));
+  }
+  if (command.action === "smoke" && !result.ok) {
+    return 1;
+  }
+  return 0;
+}
+const aiDiagParse = parseAiDiagCommand(process.argv);
+async function applyProxySettings(settings) {
+  const proxy = settings == null ? void 0 : settings.proxy;
+  if (!proxy || !session.defaultSession)
+    return;
+  const clearEnvProxy = () => {
+    delete process.env.HTTP_PROXY;
+    delete process.env.http_proxy;
+    delete process.env.HTTPS_PROXY;
+    delete process.env.https_proxy;
+    delete process.env.ALL_PROXY;
+    delete process.env.all_proxy;
+    delete process.env.NO_PROXY;
+    delete process.env.no_proxy;
+  };
+  const setEnvProxy = () => {
+    if (proxy.httpProxy) {
+      process.env.HTTP_PROXY = proxy.httpProxy;
+      process.env.http_proxy = proxy.httpProxy;
+    }
+    if (proxy.httpsProxy) {
+      process.env.HTTPS_PROXY = proxy.httpsProxy;
+      process.env.https_proxy = proxy.httpsProxy;
+    }
+    if (proxy.allProxy) {
+      process.env.ALL_PROXY = proxy.allProxy;
+      process.env.all_proxy = proxy.allProxy;
+    }
+    if (proxy.noProxy) {
+      process.env.NO_PROXY = proxy.noProxy;
+      process.env.no_proxy = proxy.noProxy;
+    }
+  };
+  if (proxy.mode === "off") {
+    await session.defaultSession.setProxy({ mode: "direct" });
+    clearEnvProxy();
+    return;
+  }
+  if (proxy.mode === "custom") {
+    const rules = [proxy.allProxy, proxy.httpsProxy, proxy.httpProxy].filter((value) => Boolean(value)).join(";");
+    await session.defaultSession.setProxy({
+      mode: rules ? "fixed_servers" : "direct",
+      proxyRules: rules,
+      proxyBypassRules: proxy.noProxy || ""
+    });
+    clearEnvProxy();
+    setEnvProxy();
+    return;
+  }
+  await session.defaultSession.setProxy({ mode: "system" });
+  clearEnvProxy();
+}
 function createWindow() {
   win = new BrowserWindow({
     width: 1200,
     height: 800,
-    icon: path$1.join(process.env.VITE_PUBLIC || "", "electron-vite.svg"),
+    icon: path.join(process.env.VITE_PUBLIC || "", "electron-vite.svg"),
     webPreferences: {
-      preload: path$1.join(__dirname$1, "preload.mjs")
+      preload: path.join(__dirname$1, "preload.mjs")
     },
     // Win11 style & White Screen Fix
     frame: true,
@@ -3269,7 +6641,7 @@ function createWindow() {
   if (VITE_DEV_SERVER_URL) {
     win.loadURL(VITE_DEV_SERVER_URL);
   } else {
-    win.loadFile(path$1.join(RENDERER_DIST, "index.html"));
+    win.loadFile(path.join(RENDERER_DIST, "index.html"));
   }
   win.on("enter-full-screen", () => {
     win == null ? void 0 : win.webContents.send("app:fullscreen-change", true);
@@ -3344,19 +6716,19 @@ ipcMain.handle("db:upload-novel-cover", async (_, novelId) => {
     if (result.canceled || result.filePaths.length === 0)
       return null;
     const srcPath = result.filePaths[0];
-    const ext = path$1.extname(srcPath);
-    const coversDir = path$1.join(app.getPath("userData"), "covers");
-    if (!fs.existsSync(coversDir))
-      fs.mkdirSync(coversDir, { recursive: true });
+    const ext = path.extname(srcPath);
+    const coversDir = path.join(app.getPath("userData"), "covers");
+    if (!fs$1.existsSync(coversDir))
+      fs$1.mkdirSync(coversDir, { recursive: true });
     const novel = await db.novel.findUnique({ where: { id: novelId }, select: { coverUrl: true } });
     if ((_a = novel == null ? void 0 : novel.coverUrl) == null ? void 0 : _a.startsWith("covers/")) {
-      const oldPath = path$1.join(app.getPath("userData"), novel.coverUrl);
-      if (fs.existsSync(oldPath))
-        fs.unlinkSync(oldPath);
+      const oldPath = path.join(app.getPath("userData"), novel.coverUrl);
+      if (fs$1.existsSync(oldPath))
+        fs$1.unlinkSync(oldPath);
     }
     const fileName = `${novelId}${ext}`;
-    const destPath = path$1.join(coversDir, fileName);
-    fs.copyFileSync(srcPath, destPath);
+    const destPath = path.join(coversDir, fileName);
+    fs$1.copyFileSync(srcPath, destPath);
     const relativePath = `covers/${fileName}`;
     await db.novel.update({
       where: { id: novelId },
@@ -3542,6 +6914,7 @@ ipcMain.handle("db:save-chapter", async (_, { chapterId, content }) => {
     if (chapterData) {
       await indexChapter({ ...chapterData, novelId });
     }
+    scheduleChapterSummaryRebuild(chapterId);
     return updatedChapter;
   } catch (e) {
     console.error("[Main] db:save-chapter failed:", e);
@@ -3677,6 +7050,270 @@ ipcMain.handle("db:check-index-status", async (_, novelId) => {
   }
 });
 const syncManager = new SyncManager();
+let aiService;
+ipcMain.handle("ai:get-settings", async () => {
+  try {
+    return aiService.getSettings();
+  } catch (e) {
+    console.error("[Main] ai:get-settings failed:", e);
+    throw e;
+  }
+});
+ipcMain.handle("ai:get-map-image-stats", async () => {
+  try {
+    return aiService.getMapImageStats();
+  } catch (e) {
+    console.error("[Main] ai:get-map-image-stats failed:", e);
+    throw e;
+  }
+});
+ipcMain.handle("ai:list-actions", async () => {
+  try {
+    return aiService.listActions();
+  } catch (e) {
+    console.error("[Main] ai:list-actions failed:", e);
+    throw e;
+  }
+});
+ipcMain.handle("ai:get-capability-coverage", async () => {
+  try {
+    return aiService.getCapabilityCoverage();
+  } catch (e) {
+    console.error("[Main] ai:get-capability-coverage failed:", e);
+    throw e;
+  }
+});
+ipcMain.handle("ai:get-mcp-manifest", async () => {
+  try {
+    return aiService.getMcpToolsManifest();
+  } catch (e) {
+    console.error("[Main] ai:get-mcp-manifest failed:", e);
+    throw e;
+  }
+});
+ipcMain.handle("ai:get-openclaw-manifest", async () => {
+  try {
+    return aiService.getOpenClawManifest();
+  } catch (e) {
+    console.error("[Main] ai:get-openclaw-manifest failed:", e);
+    throw e;
+  }
+});
+ipcMain.handle("ai:get-openclaw-skill-manifest", async () => {
+  try {
+    return aiService.getOpenClawSkillManifest();
+  } catch (e) {
+    console.error("[Main] ai:get-openclaw-skill-manifest failed:", e);
+    throw e;
+  }
+});
+ipcMain.handle("ai:update-settings", async (_, partial) => {
+  try {
+    const updated = aiService.updateSettings(partial || {});
+    await applyProxySettings(updated);
+    return updated;
+  } catch (e) {
+    console.error("[Main] ai:update-settings failed:", e);
+    throw e;
+  }
+});
+ipcMain.handle("ai:test-connection", async () => {
+  try {
+    return await aiService.testConnection();
+  } catch (e) {
+    console.error("[Main] ai:test-connection failed:", e);
+    throw e;
+  }
+});
+ipcMain.handle("ai:test-mcp", async () => {
+  try {
+    return await aiService.testMcp();
+  } catch (e) {
+    console.error("[Main] ai:test-mcp failed:", e);
+    throw e;
+  }
+});
+ipcMain.handle("ai:test-openclaw-mcp", async () => {
+  try {
+    return await aiService.testOpenClawMcp();
+  } catch (e) {
+    console.error("[Main] ai:test-openclaw-mcp failed:", e);
+    throw e;
+  }
+});
+ipcMain.handle("ai:test-openclaw-skill", async () => {
+  try {
+    return await aiService.testOpenClawSkill();
+  } catch (e) {
+    console.error("[Main] ai:test-openclaw-skill failed:", e);
+    throw e;
+  }
+});
+ipcMain.handle("ai:test-openclaw-smoke", async (_, payload) => {
+  try {
+    const kind = (payload == null ? void 0 : payload.kind) === "skill" ? "skill" : "mcp";
+    return await aiService.testOpenClawSmoke({ kind });
+  } catch (e) {
+    console.error("[Main] ai:test-openclaw-smoke failed:", e);
+    throw e;
+  }
+});
+ipcMain.handle("ai:test-proxy", async () => {
+  try {
+    return await aiService.testProxy();
+  } catch (e) {
+    console.error("[Main] ai:test-proxy failed:", e);
+    throw e;
+  }
+});
+ipcMain.handle("ai:test-generate", async (_, payload) => {
+  try {
+    return await aiService.testGenerate(payload == null ? void 0 : payload.prompt);
+  } catch (e) {
+    console.error("[Main] ai:test-generate failed:", e);
+    throw e;
+  }
+});
+ipcMain.handle("ai:generate-title", async (_, payload) => {
+  try {
+    return await aiService.generateTitle(payload);
+  } catch (e) {
+    console.error("[Main] ai:generate-title failed:", e);
+    throw e;
+  }
+});
+ipcMain.handle("ai:continue-writing", async (_, payload) => {
+  try {
+    return await aiService.continueWriting(payload);
+  } catch (e) {
+    console.error("[Main] ai:continue-writing failed:", e);
+    throw e;
+  }
+});
+ipcMain.handle("ai:preview-continue-prompt", async (_, payload) => {
+  try {
+    return await aiService.previewContinuePrompt(payload);
+  } catch (e) {
+    console.error("[Main] ai:preview-continue-prompt failed:", e);
+    throw e;
+  }
+});
+ipcMain.handle("ai:check-consistency", async (_, payload) => {
+  try {
+    return await aiService.checkConsistency(payload);
+  } catch (e) {
+    console.error("[Main] ai:check-consistency failed:", e);
+    throw e;
+  }
+});
+ipcMain.handle("ai:generate-creative-assets", async (_, payload) => {
+  try {
+    return await aiService.generateCreativeAssets(payload);
+  } catch (e) {
+    console.error("[Main] ai:generate-creative-assets failed:", e);
+    throw e;
+  }
+});
+ipcMain.handle("ai:preview-creative-assets-prompt", async (_, payload) => {
+  try {
+    return await aiService.previewCreativeAssetsPrompt(payload);
+  } catch (e) {
+    console.error("[Main] ai:preview-creative-assets-prompt failed:", e);
+    throw e;
+  }
+});
+ipcMain.handle("ai:validate-creative-assets", async (_, payload) => {
+  try {
+    return await aiService.validateCreativeAssetsDraft(payload);
+  } catch (e) {
+    console.error("[Main] ai:validate-creative-assets failed:", e);
+    throw e;
+  }
+});
+ipcMain.handle("ai:confirm-creative-assets", async (_, payload) => {
+  try {
+    return await aiService.confirmCreativeAssets(payload);
+  } catch (e) {
+    console.error("[Main] ai:confirm-creative-assets failed:", e);
+    throw e;
+  }
+});
+ipcMain.handle("ai:generate-map-image", async (_, payload) => {
+  try {
+    return await aiService.generateMapImage(payload);
+  } catch (e) {
+    console.error("[Main] ai:generate-map-image failed:", e);
+    const message = e instanceof Error ? e.message : String(e);
+    return { ok: false, code: "UNKNOWN", detail: message };
+  }
+});
+ipcMain.handle("ai:preview-map-prompt", async (_, payload) => {
+  try {
+    return await aiService.previewMapPrompt(payload);
+  } catch (e) {
+    console.error("[Main] ai:preview-map-prompt failed:", e);
+    throw e;
+  }
+});
+ipcMain.handle("ai:rebuild-chapter-summary", async (_, payload) => {
+  try {
+    if (!(payload == null ? void 0 : payload.chapterId)) {
+      return { ok: false, detail: "chapterId is required" };
+    }
+    scheduleChapterSummaryRebuild(payload.chapterId, "manual");
+    return { ok: true, detail: "summary rebuild scheduled" };
+  } catch (e) {
+    console.error("[Main] ai:rebuild-chapter-summary failed:", e);
+    return { ok: false, detail: e instanceof Error ? e.message : String(e) };
+  }
+});
+ipcMain.handle("ai:execute-action", async (_, payload) => {
+  try {
+    return await aiService.executeAction(payload);
+  } catch (e) {
+    console.error("[Main] ai:execute-action failed:", e);
+    throw e;
+  }
+});
+ipcMain.handle("ai:openclaw-invoke", async (_, payload) => {
+  try {
+    return await aiService.invokeOpenClawTool(payload);
+  } catch (e) {
+    console.error("[Main] ai:openclaw-invoke failed:", e);
+    const normalized = normalizeAiError(e);
+    return {
+      ok: false,
+      code: normalized.code,
+      error: formatAiErrorForDisplay(normalized.code, normalized.message)
+    };
+  }
+});
+ipcMain.handle("ai:openclaw-mcp-invoke", async (_, payload) => {
+  try {
+    return await aiService.invokeOpenClawTool(payload);
+  } catch (e) {
+    console.error("[Main] ai:openclaw-mcp-invoke failed:", e);
+    const normalized = normalizeAiError(e);
+    return {
+      ok: false,
+      code: normalized.code,
+      error: formatAiErrorForDisplay(normalized.code, normalized.message)
+    };
+  }
+});
+ipcMain.handle("ai:openclaw-skill-invoke", async (_, payload) => {
+  try {
+    return await aiService.invokeOpenClawSkill(payload);
+  } catch (e) {
+    console.error("[Main] ai:openclaw-skill-invoke failed:", e);
+    const normalized = normalizeAiError(e);
+    return {
+      ok: false,
+      code: normalized.code,
+      error: formatAiErrorForDisplay(normalized.code, normalized.message)
+    };
+  }
+});
 ipcMain.handle("sync:pull", async () => {
   try {
     return await syncManager.pull();
@@ -3917,21 +7554,21 @@ ipcMain.handle("db:upload-character-image", async (_, { characterId, type }) => 
     if (result.canceled || result.filePaths.length === 0)
       return null;
     const srcPath = result.filePaths[0];
-    const ext = path$1.extname(srcPath);
-    const charDir = path$1.join(app.getPath("userData"), "characters", characterId);
-    if (!fs.existsSync(charDir))
-      fs.mkdirSync(charDir, { recursive: true });
+    const ext = path.extname(srcPath);
+    const charDir = path.join(app.getPath("userData"), "characters", characterId);
+    if (!fs$1.existsSync(charDir))
+      fs$1.mkdirSync(charDir, { recursive: true });
     if (type === "avatar") {
       const fileName = `avatar${ext}`;
-      const destPath = path$1.join(charDir, fileName);
-      const existingFiles = fs.readdirSync(charDir).filter((f) => f.startsWith("avatar."));
+      const destPath = path.join(charDir, fileName);
+      const existingFiles = fs$1.readdirSync(charDir).filter((f) => f.startsWith("avatar."));
       existingFiles.forEach((f) => {
         try {
-          fs.unlinkSync(path$1.join(charDir, f));
+          fs$1.unlinkSync(path.join(charDir, f));
         } catch {
         }
       });
-      fs.copyFileSync(srcPath, destPath);
+      fs$1.copyFileSync(srcPath, destPath);
       const relativePath = `characters/${characterId}/${fileName}`;
       await db.character.update({
         where: { id: characterId },
@@ -3941,8 +7578,8 @@ ipcMain.handle("db:upload-character-image", async (_, { characterId, type }) => 
     } else {
       const timestamp = Date.now();
       const fileName = `fullbody_${timestamp}${ext}`;
-      const destPath = path$1.join(charDir, fileName);
-      fs.copyFileSync(srcPath, destPath);
+      const destPath = path.join(charDir, fileName);
+      fs$1.copyFileSync(srcPath, destPath);
       const relativePath = `characters/${characterId}/${fileName}`;
       const char = await db.character.findUnique({ where: { id: characterId }, select: { fullBodyImages: true } });
       let images = [];
@@ -3964,9 +7601,9 @@ ipcMain.handle("db:upload-character-image", async (_, { characterId, type }) => 
 });
 ipcMain.handle("db:delete-character-image", async (_, { characterId, imagePath, type }) => {
   try {
-    const fullPath = path$1.join(app.getPath("userData"), imagePath);
-    if (fs.existsSync(fullPath))
-      fs.unlinkSync(fullPath);
+    const fullPath = path.join(app.getPath("userData"), imagePath);
+    if (fs$1.existsSync(fullPath))
+      fs$1.unlinkSync(fullPath);
     if (type === "avatar") {
       await db.character.update({
         where: { id: characterId },
@@ -4259,9 +7896,9 @@ ipcMain.handle("db:delete-map", async (_, id) => {
   try {
     const map = await db.mapCanvas.findUnique({ where: { id }, select: { background: true, novelId: true } });
     if (map == null ? void 0 : map.background) {
-      const bgPath = path$1.join(app.getPath("userData"), map.background);
-      if (fs.existsSync(bgPath))
-        fs.unlinkSync(bgPath);
+      const bgPath = path.join(app.getPath("userData"), map.background);
+      if (fs$1.existsSync(bgPath))
+        fs$1.unlinkSync(bgPath);
     }
     return await db.mapCanvas.delete({ where: { id } });
   } catch (e) {
@@ -4282,18 +7919,18 @@ ipcMain.handle("db:upload-map-bg", async (_, mapId) => {
     if (result.canceled || result.filePaths.length === 0)
       return null;
     const srcPath = result.filePaths[0];
-    const ext = path$1.extname(srcPath);
-    const mapsDir = path$1.join(app.getPath("userData"), "maps", map.novelId);
-    if (!fs.existsSync(mapsDir))
-      fs.mkdirSync(mapsDir, { recursive: true });
+    const ext = path.extname(srcPath);
+    const mapsDir = path.join(app.getPath("userData"), "maps", map.novelId);
+    if (!fs$1.existsSync(mapsDir))
+      fs$1.mkdirSync(mapsDir, { recursive: true });
     if (map.background) {
-      const oldPath = path$1.join(app.getPath("userData"), map.background);
-      if (fs.existsSync(oldPath))
-        fs.unlinkSync(oldPath);
+      const oldPath = path.join(app.getPath("userData"), map.background);
+      if (fs$1.existsSync(oldPath))
+        fs$1.unlinkSync(oldPath);
     }
     const fileName = `${mapId}${ext}`;
-    const destPath = path$1.join(mapsDir, fileName);
-    fs.copyFileSync(srcPath, destPath);
+    const destPath = path.join(mapsDir, fileName);
+    fs$1.copyFileSync(srcPath, destPath);
     const relativePath = `maps/${map.novelId}/${fileName}`;
     const img = nativeImage.createFromPath(destPath);
     const imgSize = img.getSize();
@@ -4607,32 +8244,48 @@ app.on("activate", () => {
   }
 });
 app.whenReady().then(async () => {
+  var _a, _b;
   console.log("[Main] App Ready. Starting DB Setup...");
+  if (aiDiagParse.error) {
+    console.error(`[AI-Diag] Invalid arguments: ${aiDiagParse.error}`);
+    app.exit(2);
+    return;
+  }
+  if (aiDiagParse.command && app.isPackaged) {
+    console.error("[AI-Diag] --ai-diag is only available in development mode.");
+    app.exit(1);
+    return;
+  }
+  if ((_a = aiDiagParse.command) == null ? void 0 : _a.userDataPath) {
+    const resolvedUserDataPath = path.resolve(aiDiagParse.command.userDataPath);
+    app.setPath("userData", resolvedUserDataPath);
+    console.log("[AI-Diag] userData override:", resolvedUserDataPath);
+  }
   protocol.handle("local-resource", (request) => {
     const relativePath = decodeURIComponent(request.url.replace("local-resource://", ""));
-    const fullPath = path$1.join(app.getPath("userData"), relativePath);
+    const fullPath = path.join(app.getPath("userData"), relativePath);
     return net.fetch("file:///" + fullPath.replace(/\\/g, "/"));
   });
   let dataPath;
   if (app.isPackaged) {
-    const exePath = path$1.dirname(app.getPath("exe"));
-    dataPath = path$1.join(exePath, "data");
+    const exePath = path.dirname(app.getPath("exe"));
+    dataPath = path.join(exePath, "data");
   } else {
     dataPath = app.getPath("userData");
   }
-  const dbPath = path$1.join(dataPath, "novel_editor.db");
+  const dbPath = ((_b = aiDiagParse.command) == null ? void 0 : _b.dbPath) ? path.resolve(aiDiagParse.command.dbPath) : path.join(dataPath, "novel_editor.db");
   const dbUrl = `file:${dbPath}`;
   console.log("[Main] Database Path:", dbPath);
-  if (!fs.existsSync(dataPath)) {
-    fs.mkdirSync(dataPath, { recursive: true });
+  if (!fs$1.existsSync(path.dirname(dbPath))) {
+    fs$1.mkdirSync(path.dirname(dbPath), { recursive: true });
   }
   if (!app.isPackaged) {
-    const schemaPath = path$1.resolve(__dirname$1, "../../../packages/core/prisma/schema.prisma");
+    const schemaPath = path.resolve(__dirname$1, "../../../packages/core/prisma/schema.prisma");
     console.log("[Main] Development mode detected (unpackaged). Checking schema at:", schemaPath);
-    if (fs.existsSync(schemaPath)) {
-      const dbFolder = path$1.dirname(dbPath);
-      if (!fs.existsSync(dbFolder)) {
-        fs.mkdirSync(dbFolder, { recursive: true });
+    if (fs$1.existsSync(schemaPath)) {
+      const dbFolder = path.dirname(dbPath);
+      if (!fs$1.existsSync(dbFolder)) {
+        fs$1.mkdirSync(dbFolder, { recursive: true });
       }
       console.log("[Main] Schema found.");
       console.log("[Main] Cleaning up FTS tables before migration...");
@@ -4645,9 +8298,9 @@ app.whenReady().then(async () => {
       }
       await db.$disconnect();
       console.log("[Main] Attempting synchronous DB push to:", dbPath);
-      const prismaPath = path$1.resolve(__dirname$1, "../../../packages/core/node_modules/.bin/prisma.cmd");
+      const prismaPath = path.resolve(__dirname$1, "../../../packages/core/node_modules/.bin/prisma.cmd");
       console.log("[Main] Using Prisma binary at:", prismaPath);
-      if (!fs.existsSync(prismaPath)) {
+      if (!fs$1.existsSync(prismaPath)) {
         console.error("[Main] Prisma binary NOT found at:", prismaPath);
       } else {
         try {
@@ -4655,7 +8308,7 @@ app.whenReady().then(async () => {
           console.log("[Main] Executing command:", command);
           const output = execSync(command, {
             env: { ...process.env, DATABASE_URL: dbUrl },
-            cwd: path$1.resolve(__dirname$1, "../../../packages/core"),
+            cwd: path.resolve(__dirname$1, "../../../packages/core"),
             stdio: "pipe",
             // Avoid inherit to prevent encoding issues
             windowsHide: true
@@ -4675,8 +8328,27 @@ app.whenReady().then(async () => {
     }
   }
   initDb(dbUrl);
+  aiService = new AiService(() => app.getPath("userData"));
+  if (aiDiagParse.command) {
+    try {
+      const exitCode = await runAiDiagCommand(aiService, aiDiagParse.command);
+      await db.$disconnect();
+      app.exit(exitCode);
+      return;
+    } catch (error) {
+      console.error("[AI-Diag] Execution failed:", error);
+      await db.$disconnect();
+      app.exit(1);
+      return;
+    }
+  }
   await initSearchIndex();
   console.log("[Main] Search index initialized");
+  try {
+    await applyProxySettings(aiService.getSettings());
+  } catch (e) {
+    console.warn("[Main] Failed to apply AI proxy settings:", e);
+  }
   createWindow();
 });
 export {

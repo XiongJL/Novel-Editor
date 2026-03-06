@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion';
-import { X, Book, type LucideIcon, Settings as SettingsIcon, Keyboard } from 'lucide-react';
+import { X, Book, type LucideIcon, Settings as SettingsIcon, Keyboard, Bot } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { clsx } from 'clsx';
@@ -7,12 +7,14 @@ import { formatShortcut, useShortcuts, KeyBinding, ShortcutAction } from '../hoo
 
 import { useEditorPreferences } from '../hooks/useEditorPreferences';
 import { BackupRestorePanel } from './Settings/BackupRestorePanel';
+import { AISettingsPanel } from './Settings/AISettingsPanel';
 import { Database } from 'lucide-react';
 
 
 interface SettingsModalProps {
     isOpen: boolean;
     onClose: () => void;
+    initialTab?: TabId;
     // Optional context for Novel settings (if opened from Editor)
     novelContext?: {
         initialFormatting: string;
@@ -22,9 +24,9 @@ interface SettingsModalProps {
     // currently we share the modal for both, but some tabs might be hidden
 }
 
-type TabId = 'general' | 'novel' | 'shortcuts' | 'backup';
+type TabId = 'general' | 'novel' | 'shortcuts' | 'backup' | 'ai';
 
-export default function SettingsModal({ isOpen, onClose, novelContext }: SettingsModalProps) {
+export default function SettingsModal({ isOpen, onClose, novelContext, initialTab }: SettingsModalProps) {
     const { t, i18n } = useTranslation();
     const [activeTab, setActiveTab] = useState<TabId>('general');
     const { preferences, updatePreference } = useEditorPreferences();
@@ -49,6 +51,15 @@ export default function SettingsModal({ isOpen, onClose, novelContext }: Setting
             }
         }
     }, [isOpen, novelContext]);
+
+    useEffect(() => {
+        if (!isOpen) return;
+        if (initialTab) {
+            setActiveTab(initialTab);
+            return;
+        }
+        setActiveTab('general');
+    }, [isOpen, initialTab]);
 
     // ESC to close
     useEffect(() => {
@@ -106,6 +117,7 @@ export default function SettingsModal({ isOpen, onClose, novelContext }: Setting
         { id: 'general', label: t('settings.general.title'), icon: SettingsIcon },
         { id: 'shortcuts', label: t('settings.shortcuts.title'), icon: Keyboard },
         { id: 'backup', label: t('backup.title'), icon: Database },
+        { id: 'ai', label: t('settings.ai.title', 'AI'), icon: Bot },
     ];
 
     if (novelContext) {
@@ -295,6 +307,10 @@ export default function SettingsModal({ isOpen, onClose, novelContext }: Setting
 
                         {activeTab === 'backup' && (
                             <BackupRestorePanel />
+                        )}
+
+                        {activeTab === 'ai' && (
+                            <AISettingsPanel isDark={isDark} />
                         )}
 
                         {activeTab === 'novel' && novelContext && (

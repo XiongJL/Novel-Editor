@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+﻿import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowLeft, Save, PanelLeftClose, PanelLeftOpen, Settings, ChevronRight, LayoutGrid, FileText } from 'lucide-react';
+import { ArrowLeft, Save, PanelLeftClose, PanelLeftOpen, Settings, ChevronRight, LayoutGrid, FileText, Sparkles, ScrollText, Loader2 } from 'lucide-react';
 import NarrativeMatrix from '../components/StoryWorkbench/NarrativeMatrix';
 import Sidebar from '../components/Sidebar';
 import ActivityBar, { ActivityTab } from '../components/ActivityBar';
@@ -12,7 +12,7 @@ import { useEditorPreferences } from '../hooks/useEditorPreferences';
 import { useShortcuts } from '../hooks/useShortcuts';
 import { clsx } from 'clsx';
 import LexicalChapterEditor from '../components/LexicalEditor';
-import { LexicalEditor, $getRoot, $getSelection, $isRangeSelection, $getNodeByKey, $isTextNode, $createRangeSelection, $setSelection } from 'lexical';
+import { LexicalEditor, $getRoot, $getSelection, $isRangeSelection, $getNodeByKey, $isTextNode, $createRangeSelection, $setSelection, $createParagraphNode, $createTextNode } from 'lexical';
 import { $isMarkNode, $unwrapMarkNode, $wrapSelectionInMarkNode } from '@lexical/mark';
 import { $isIdeaMarkNode } from '../components/LexicalEditor/nodes/IdeaMarkNode';
 import UnifiedSearchWorkbench from '../components/SearchWorkbench/UnifiedSearchWorkbench';
@@ -21,6 +21,9 @@ import { FlowModeButton } from '../components/FlowModeButton';
 import { GlobalIdeaModal } from '../components/GlobalIdeaModal';
 import { RecentFile } from '../components/RecentFilesDropdown';
 import WorldWorkbench from '../components/WorldWorkbench/WorldWorkbench';
+import AIWorkbenchPanel from '../components/AIWorkbench/AIWorkbenchPanel';
+import AIWorkbenchDraftDock from '../components/AIWorkbench/AIWorkbenchDraftDock';
+import type { CreativeAssetsDraft, DraftSelection } from '../components/AIWorkbench/types';
 import PlotSidebar from '../components/StoryWorkbench/PlotSidebar';
 import PlotContextMenu from '../components/StoryWorkbench/PlotContextMenu';
 import PlotAnchorModal from '../components/StoryWorkbench/PlotAnchorModal';
@@ -30,6 +33,9 @@ import { $isPlotAnchorNode } from '../components/LexicalEditor/nodes/PlotAnchorN
 import { usePlotSystem } from '../hooks/usePlotSystem';
 import { PlotPointModal } from '../components/StoryWorkbench/PlotPointModal';
 import { Idea, Novel, Volume, Chapter } from '../types';
+import { formatAiErrorFromUnknown } from '../utils/aiError';
+import PromptInlinePanel from '../components/AIPromptPreview/PromptInlinePanel';
+import type { PromptPreviewData } from '../components/AIPromptPreview/types';
 
 // Global variable to track active chapter metadata to avoid closure staleness
 let activeChapterMetadata: { id: string; title: string } | null = null;
@@ -38,6 +44,67 @@ interface EditorProps {
     novelId: string;
     onBack: () => void;
 }
+
+type TitleGenerationStage = 'requesting' | 'generating' | 'parsing';
+
+function extractPlainTextFromLexical(content: string): string {
+    if (!content?.trim()) return '';
+    try {
+        const parsed = JSON.parse(content);
+        const texts: string[] = [];
+        const walk = (node: any) => {
+            if (!node || typeof node !== 'object') return;
+            if (typeof node.text === 'string') {
+                texts.push(node.text);
+            }
+            if (Array.isArray(node.children)) {
+                node.children.forEach(walk);
+            }
+        };
+        walk(parsed?.root || parsed);
+        return texts.join(' ').replace(/\s+/g, ' ').trim();
+    } catch {
+        return content.replace(/\s+/g, ' ').trim();
+    }
+}
+
+function stripRepeatedPrefixFromGeneration(existing: string, generated: string): string {
+    const existingRaw = (existing || '').trim();
+    const generatedRaw = (generated || '').trimStart();
+    if (!generatedRaw) return '';
+    if (!existingRaw) return generatedRaw;
+
+    // Safety rule: only trim GENERATED prefix overlap; never mutate existing user text.
+    if (generatedRaw.startsWith(existingRaw)) {
+        return generatedRaw.slice(existingRaw.length).trimStart();
+    }
+
+    const maxOverlap = Math.min(existingRaw.length, generatedRaw.length, 2400);
+    for (let len = maxOverlap; len >= 80; len -= 1) {
+        if (existingRaw.slice(-len) === generatedRaw.slice(0, len)) {
+            return generatedRaw.slice(len).trimStart();
+        }
+    }
+    return generatedRaw;
+}
+
+const EMPTY_CREATIVE_DRAFT: CreativeAssetsDraft = {
+    plotLines: [],
+    plotPoints: [],
+    characters: [],
+    items: [],
+    skills: [],
+    maps: [],
+};
+
+const EMPTY_DRAFT_SELECTION: DraftSelection = {
+    plotLines: [],
+    plotPoints: [],
+    characters: [],
+    items: [],
+    skills: [],
+    maps: [],
+};
 
 export default function Editor({ novelId, onBack }: EditorProps) {
     const { t, i18n } = useTranslation();
@@ -57,6 +124,46 @@ export default function Editor({ novelId, onBack }: EditorProps) {
     const [isLoading, setIsLoading] = useState(false);
     const [recentFiles, setRecentFiles] = useState<RecentFile[]>([]);
     const [ideas, setIdeas] = useState<Idea[]>([]);
+    const [isGeneratingTitle, setIsGeneratingTitle] = useState(false);
+    const [titleGenStage, setTitleGenStage] = useState<TitleGenerationStage | null>(null);
+    const [titleGenStatus, setTitleGenStatus] = useState('');
+    const [titleCandidates, setTitleCandidates] = useState<Array<{ title: string; styleTag: string }>>([]);
+    const [titleGenStyle, setTitleGenStyle] = useState<'stable' | 'literary' | 'viral'>('stable');
+    const [isRebuildingSummary, setIsRebuildingSummary] = useState(false);
+    const [summaryStatus, setSummaryStatus] = useState('');
+    const [isContinueModalOpen, setIsContinueModalOpen] = useState(false);
+    const [isContinuing, setIsContinuing] = useState(false);
+    const [continueStatus, setContinueStatus] = useState('');
+    const [isContinuePreviewOpen, setIsContinuePreviewOpen] = useState(false);
+    const [continuePreviewText, setContinuePreviewText] = useState('');
+    const [continuePreviewBaseTail, setContinuePreviewBaseTail] = useState('');
+    const [continuePromptPreview, setContinuePromptPreview] = useState<PromptPreviewData | null>(null);
+    const [continuePromptLoading, setContinuePromptLoading] = useState(false);
+    const [continuePromptError, setContinuePromptError] = useState('');
+    const [continuePromptOverride, setContinuePromptOverride] = useState('');
+    const [continuePromptDefault, setContinuePromptDefault] = useState('');
+    const [continuePromptDirty, setContinuePromptDirty] = useState(false);
+    const [continueConfig, setContinueConfig] = useState<{
+        ideaIds: string[];
+        targetLength: number;
+        creativityPreset: 'safe' | 'balanced' | 'creative';
+        contextChapterCount: number;
+        style: string;
+        tone: string;
+        pace: string;
+        userIntent: string;
+        currentLocation: string;
+    }>({
+        ideaIds: [],
+        targetLength: 500,
+        creativityPreset: 'balanced',
+        contextChapterCount: 3,
+        style: 'default',
+        tone: 'balanced',
+        pace: 'medium',
+        userIntent: '',
+        currentLocation: '',
+    });
 
     // --- 2. Story / Plot System ---
     const { addAnchor, removeAnchor, createPlotPoint, updatePlotPoint, deletePlotPoint, plotLines, isLoading: isPlotLoading } = usePlotSystem(novelId);
@@ -72,8 +179,25 @@ export default function Editor({ novelId, onBack }: EditorProps) {
     const [activeTab, setActiveTab] = useState<ActivityTab>('explorer');
     const [isSidePanelOpen, setIsSidePanelOpen] = useState(true);
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+    const [settingsInitialTab, setSettingsInitialTab] = useState<'general' | 'novel' | 'shortcuts' | 'backup' | 'ai' | undefined>(undefined);
     const [isGlobalIdeaModalOpen, setIsGlobalIdeaModalOpen] = useState(false);
     const [lastCreatedVolumeId, setLastCreatedVolumeId] = useState<string | null>(null);
+    const [creativeDraft, setCreativeDraft] = useState<CreativeAssetsDraft>({ ...EMPTY_CREATIVE_DRAFT });
+    const [creativeSelection, setCreativeSelection] = useState<DraftSelection>({ ...EMPTY_DRAFT_SELECTION });
+    const [isDraftDockOpen, setIsDraftDockOpen] = useState(false);
+    const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
+
+    useEffect(() => {
+        setCreativeDraft({ ...EMPTY_CREATIVE_DRAFT });
+        setCreativeSelection({ ...EMPTY_DRAFT_SELECTION });
+        setIsDraftDockOpen(false);
+    }, [novelId]);
+
+    useEffect(() => {
+        const onResize = () => setViewportWidth(window.innerWidth);
+        window.addEventListener('resize', onResize);
+        return () => window.removeEventListener('resize', onResize);
+    }, []);
 
     // --- 4. Flow Mode State ---
     const [isFlowMode, setIsFlowMode] = useState(false);
@@ -92,6 +216,10 @@ export default function Editor({ novelId, onBack }: EditorProps) {
     const titleRef = useRef(title);
     const chapterRef = useRef(currentChapter);
     const isSwitchingChapterRef = useRef(false);
+    const titleGenTimersRef = useRef<number[]>([]);
+    const titleGenStatusTimerRef = useRef<number | null>(null);
+    const titleGenActiveRef = useRef(false);
+    const continuePromptTimerRef = useRef<number | null>(null);
 
     useEffect(() => {
         contentRef.current = content;
@@ -103,6 +231,30 @@ export default function Editor({ novelId, onBack }: EditorProps) {
             activeChapterMetadata = { id: currentChapter.id, title: currentChapter.title };
         }
     }, [content, title, currentChapter]);
+
+    const clearTitleGenTimers = useCallback(() => {
+        titleGenTimersRef.current.forEach((id) => window.clearTimeout(id));
+        titleGenTimersRef.current = [];
+    }, []);
+
+    const clearTitleGenStatusTimer = useCallback(() => {
+        if (titleGenStatusTimerRef.current !== null) {
+            window.clearTimeout(titleGenStatusTimerRef.current);
+            titleGenStatusTimerRef.current = null;
+        }
+    }, []);
+
+    useEffect(() => {
+        return () => {
+            clearTitleGenTimers();
+            clearTitleGenStatusTimer();
+            titleGenActiveRef.current = false;
+            if (continuePromptTimerRef.current !== null) {
+                window.clearTimeout(continuePromptTimerRef.current);
+                continuePromptTimerRef.current = null;
+            }
+        };
+    }, [clearTitleGenStatusTimer, clearTitleGenTimers]);
 
     // --- 7. UI Actions ---
     const toggleFlowMode = useCallback(async () => {
@@ -147,8 +299,25 @@ export default function Editor({ novelId, onBack }: EditorProps) {
         }
     };
 
+    const resetContinuePromptPreview = useCallback(() => {
+        setContinuePromptPreview(null);
+        setContinuePromptDefault('');
+        setContinuePromptDirty(false);
+        setContinuePromptOverride('');
+        setContinuePromptError('');
+        setContinuePromptLoading(false);
+    }, []);
+
+    const closeContinueModal = useCallback(() => {
+        setIsContinueModalOpen(false);
+        resetContinuePromptPreview();
+        setContinueConfig((prev) => ({ ...prev, userIntent: '', currentLocation: '' }));
+    }, [resetContinuePromptPreview]);
+
+
     const handleTabChange = (tab: ActivityTab) => {
         if (tab === 'settings') {
+            setSettingsInitialTab('general');
             setIsSettingsOpen(true);
             return;
         }
@@ -160,6 +329,256 @@ export default function Editor({ novelId, onBack }: EditorProps) {
             setIsSidePanelOpen(true);
         }
     };
+
+    const handleGenerateTitle = useCallback(async (styleOverride?: 'stable' | 'literary' | 'viral') => {
+        if (!currentChapter) return;
+        const chapterContent = contentRef.current || '';
+        if (!chapterContent.trim()) return;
+        const selectedStyle = styleOverride || titleGenStyle;
+
+        setIsGeneratingTitle(true);
+        clearTitleGenTimers();
+        clearTitleGenStatusTimer();
+        titleGenActiveRef.current = true;
+        setTitleGenStage('requesting');
+        setTitleGenStatus(t('editor.titleGenRequesting', '正在请求模型...'));
+        titleGenTimersRef.current.push(window.setTimeout(() => {
+            if (!titleGenActiveRef.current) return;
+            setTitleGenStage('generating');
+            setTitleGenStatus(t('editor.titleGenGenerating', '正在生成标题候选...'));
+        }, 500));
+        titleGenTimersRef.current.push(window.setTimeout(() => {
+            if (!titleGenActiveRef.current) return;
+            setTitleGenStage('parsing');
+            setTitleGenStatus(t('editor.titleGenParsing', '正在整理结果...'));
+        }, 1400));
+        try {
+            const result = await window.ai.generateTitle({
+                novelId,
+                chapterId: currentChapter.id,
+                content: chapterContent,
+                style: selectedStyle,
+                count: 6,
+            });
+
+            setTitleGenStage('parsing');
+            setTitleGenStatus(t('editor.titleGenParsing', '正在整理结果...'));
+            const candidates = (result.candidates || [])
+                .map((item) => ({
+                    title: String(item?.title || '').trim(),
+                    styleTag: String(item?.styleTag || '').trim() || t('editor.aiTitleStyle.stable', '稳健推进'),
+                }))
+                .filter((item) => Boolean(item.title))
+                .slice(0, 10);
+
+            setTitleCandidates(candidates);
+
+            // Auto-fill first candidate as a quick win, user can still pick others in dropdown.
+            if (candidates[0]) setTitle(candidates[0].title);
+            setTitleGenStatus(t('editor.titleGenDone', '标题候选已更新'));
+            clearTitleGenStatusTimer();
+            titleGenStatusTimerRef.current = window.setTimeout(() => setTitleGenStatus(''), 2600);
+        } catch (error) {
+            console.error('[Editor] AI title generation failed:', error);
+            setTitleGenStatus(formatAiErrorFromUnknown(error, t('editor.titleGenFailed', '标题生成失败，请稍后重试')));
+            clearTitleGenStatusTimer();
+            titleGenStatusTimerRef.current = window.setTimeout(() => setTitleGenStatus(''), 4200);
+        } finally {
+            titleGenActiveRef.current = false;
+            clearTitleGenTimers();
+            setTitleGenStage(null);
+            setIsGeneratingTitle(false);
+        }
+    }, [clearTitleGenStatusTimer, clearTitleGenTimers, currentChapter, novelId, titleGenStyle, t]);
+
+    const handleRebuildChapterSummary = useCallback(async () => {
+        if (!currentChapter) return;
+        setIsRebuildingSummary(true);
+        try {
+            const result = await window.ai.rebuildChapterSummary(currentChapter.id);
+            if (result.ok) {
+                setSummaryStatus(t('editor.summaryRebuildQueued', '已触发摘要生成任务'));
+            } else {
+                setSummaryStatus(`${t('editor.summaryRebuildFailed', '摘要触发失败')}: ${result.detail || ''}`);
+            }
+        } catch (error) {
+            console.error('[Editor] chapter summary rebuild failed:', error);
+            setSummaryStatus(formatAiErrorFromUnknown(error, t('editor.summaryRebuildFailed', '摘要触发失败')));
+        } finally {
+            setIsRebuildingSummary(false);
+            window.setTimeout(() => setSummaryStatus(''), 4000);
+        }
+    }, [currentChapter, t]);
+
+    const appendGeneratedTextToEditor = useCallback((generated: string, existingPlainText?: string) => {
+        if (!generated.trim()) return;
+        const deduped = stripRepeatedPrefixFromGeneration(existingPlainText || '', generated);
+        if (!deduped.trim()) return;
+        const editor = editorRef.current;
+        if (!editor) return;
+        editor.update(() => {
+            const root = $getRoot();
+            const normalized = deduped.replace(/\r\n/g, '\n').trim();
+            const blocks = normalized.split(/\n{2,}/).map((block) => block.trim()).filter(Boolean);
+            if (blocks.length === 0) return;
+            blocks.forEach((block) => {
+                const paragraph = $createParagraphNode();
+                paragraph.append($createTextNode(block));
+                root.append(paragraph);
+            });
+        });
+    }, []);
+
+    const handleConfirmContinueInsert = useCallback(() => {
+        if (!continuePreviewText.trim()) {
+            setIsContinuePreviewOpen(false);
+            return;
+        }
+        appendGeneratedTextToEditor(continuePreviewText);
+        setIsContinuePreviewOpen(false);
+        setContinuePreviewText('');
+        setContinuePreviewBaseTail('');
+        setContinueStatus(t('editor.continueDone', '续写已完成并插入到正文末尾'));
+        window.setTimeout(() => setContinueStatus(''), 5000);
+    }, [appendGeneratedTextToEditor, continuePreviewText, t]);
+
+    const refreshContinuePromptPreview = useCallback(async () => {
+        if (!currentChapter || !isContinueModalOpen) return;
+        const currentText = extractPlainTextFromLexical(contentRef.current || '');
+        const mode: 'new_chapter' | 'continue_chapter' = currentText.trim().length === 0 ? 'new_chapter' : 'continue_chapter';
+        const temperature = continueConfig.creativityPreset === 'safe'
+            ? 0.4
+            : continueConfig.creativityPreset === 'creative'
+                ? 0.95
+                : 0.7;
+        setContinuePromptLoading(true);
+        setContinuePromptError('');
+        try {
+            const preview = await window.ai.previewContinuePrompt({
+                locale: i18n.language,
+                mode,
+                novelId,
+                chapterId: currentChapter.id,
+                currentContent: contentRef.current || '',
+                ideaIds: continueConfig.ideaIds,
+                contextChapterCount: continueConfig.contextChapterCount,
+                targetLength: continueConfig.targetLength,
+                style: continueConfig.style,
+                tone: continueConfig.tone,
+                pace: continueConfig.pace,
+                temperature,
+                userIntent: continueConfig.userIntent,
+                currentLocation: continueConfig.currentLocation,
+            });
+            setContinuePromptPreview(preview as unknown as PromptPreviewData);
+            const nextDefault = preview.editableUserPrompt || '';
+            setContinuePromptDefault(nextDefault);
+            if (!continuePromptDirty) {
+                setContinuePromptOverride(nextDefault);
+            }
+        } catch (error) {
+            setContinuePromptError(formatAiErrorFromUnknown(error, t('editor.promptPreviewFailed')));
+        } finally {
+            setContinuePromptLoading(false);
+        }
+    }, [continueConfig, continuePromptDirty, currentChapter, isContinueModalOpen, novelId, t]);
+
+    useEffect(() => {
+        if (!isContinueModalOpen || !currentChapter) return;
+        if (continuePromptTimerRef.current !== null) {
+            window.clearTimeout(continuePromptTimerRef.current);
+        }
+        continuePromptTimerRef.current = window.setTimeout(() => {
+            void refreshContinuePromptPreview();
+        }, 800);
+        return () => {
+            if (continuePromptTimerRef.current !== null) {
+                window.clearTimeout(continuePromptTimerRef.current);
+                continuePromptTimerRef.current = null;
+            }
+        };
+    }, [
+        continueConfig.ideaIds,
+        continueConfig.targetLength,
+        continueConfig.creativityPreset,
+        continueConfig.contextChapterCount,
+        continueConfig.style,
+        continueConfig.tone,
+        continueConfig.pace,
+        currentChapter,
+        isContinueModalOpen,
+        refreshContinuePromptPreview,
+    ]);
+
+    const handleStartContinueWriting = useCallback(async () => {
+        if (!currentChapter || isContinuing) return;
+
+        const currentText = extractPlainTextFromLexical(contentRef.current || '');
+        const hasOutline = plotLines.some((line) => (line.points?.length || 0) > 0) || plotLines.length > 0;
+        const isFirstChapter = currentChapter.order === 1;
+        const isBlocked = isFirstChapter && !hasOutline && currentText.length < 120;
+        if (isBlocked) {
+            setContinueStatus(t('editor.continueBlocked', '第一章缺少大纲且正文不足，无法直接续写。请先补大纲或先手写开头。'));
+            return;
+        }
+
+        const targetLength = Math.max(100, Math.min(5000, Number(continueConfig.targetLength) || 500));
+        const temperature = continueConfig.creativityPreset === 'safe'
+            ? 0.4
+            : continueConfig.creativityPreset === 'creative'
+                ? 0.95
+                : 0.7;
+
+        closeContinueModal();
+        setIsContinuing(true);
+        setContinueStatus(t('editor.continueGenerating', 'AI 正在续写...'));
+        try {
+            const mode: 'new_chapter' | 'continue_chapter' = currentText.trim().length === 0 ? 'new_chapter' : 'continue_chapter';
+            const result = await window.ai.executeAction('chapter.generate', {
+                locale: i18n.language,
+                mode,
+                novelId,
+                chapterId: currentChapter.id,
+                currentContent: contentRef.current || '',
+                ideaIds: continueConfig.ideaIds,
+                contextChapterCount: continueConfig.contextChapterCount,
+                targetLength,
+                style: continueConfig.style,
+                tone: continueConfig.tone,
+                pace: continueConfig.pace,
+                temperature,
+                userIntent: continueConfig.userIntent,
+                currentLocation: continueConfig.currentLocation,
+                overrideUserPrompt: continuePromptOverride.trim() || undefined,
+            }) as {
+                text: string;
+                warnings?: string[];
+                consistency: {
+                    ok: boolean;
+                    issues: string[];
+                };
+            };
+            const dedupedText = stripRepeatedPrefixFromGeneration(currentText, result.text || '');
+            if (!dedupedText.trim()) {
+                setContinueStatus(t('editor.continueNoNewText', '未检测到可新增内容，请调整参数后重试'));
+                return;
+            }
+            setContinuePreviewText(dedupedText);
+            setContinuePreviewBaseTail(currentText.slice(-600));
+            setIsContinuePreviewOpen(true);
+            if (result.consistency?.ok === false && result.consistency.issues?.length) {
+                setContinueStatus(`${t('editor.continueDoneWithIssues', '续写已完成，但有一致性提醒')}: ${result.consistency.issues[0]}`);
+            } else {
+                setContinueStatus(t('editor.continueNeedConfirm', '续写已生成，请先确认再插入'));
+            }
+        } catch (error) {
+            console.error('[Editor] continue writing failed:', error);
+            setContinueStatus(formatAiErrorFromUnknown(error, t('editor.continueFailed', '续写失败，请检查模型配置或稍后重试')));
+        } finally {
+            setIsContinuing(false);
+            window.setTimeout(() => setContinueStatus(''), 6000);
+        }
+    }, [closeContinueModal, continueConfig, continuePromptOverride, currentChapter, isContinuing, novelId, plotLines, t]);
 
     // Load Novel Details
     useEffect(() => {
@@ -424,14 +843,15 @@ export default function Editor({ novelId, onBack }: EditorProps) {
                 return;
             }
 
-            if (chapter) {
-                // Update Cache & State
-                chapterCache.current.set(chapterId, chapter);
+                if (chapter) {
+                    // Update Cache & State
+                    chapterCache.current.set(chapterId, chapter);
 
-                activeChapterMetadata = { id: chapter.id, title: chapter.title };
-                setTitle(chapter.title);
-                setContent(chapter.content);
-                setCurrentChapter(chapter);
+                    activeChapterMetadata = { id: chapter.id, title: chapter.title };
+                    setTitle(chapter.title);
+                    setContent(chapter.content);
+                    setCurrentChapter(chapter);
+                    setTitleCandidates([]);
 
                 localStorage.setItem(`last_chapter_${novelId}`, chapterId);
                 addToRecentFiles(chapter);
@@ -781,8 +1201,6 @@ export default function Editor({ novelId, onBack }: EditorProps) {
         window.addEventListener('keydown', handleGlobalKeyDown);
         return () => window.removeEventListener('keydown', handleGlobalKeyDown);
     }, [isMatch, handleCreateGlobalIdea]);
-
-
 
     const handleDeleteIdea = async (id: string) => {
         setIdeas(prev => prev.filter(i => i.id !== id));
@@ -1195,6 +1613,17 @@ export default function Editor({ novelId, onBack }: EditorProps) {
         }
     };
 
+    const draftCount = useMemo(() => (
+        (creativeDraft.plotLines?.length ?? 0)
+        + (creativeDraft.plotPoints?.length ?? 0)
+        + (creativeDraft.characters?.length ?? 0)
+        + (creativeDraft.items?.length ?? 0)
+        + (creativeDraft.skills?.length ?? 0)
+        + (creativeDraft.maps?.length ?? 0)
+    ), [creativeDraft]);
+    const hasDraft = draftCount > 0;
+    const isCompactDraftDock = viewportWidth < 1700;
+
     return (
         <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
@@ -1324,6 +1753,22 @@ export default function Editor({ novelId, onBack }: EditorProps) {
                             />
                         </div>
 
+                        {/* AI Workbench */}
+                        <div className={clsx("flex-1 h-full flex flex-col min-h-0", activeTab !== 'ai_workbench' && "hidden")}>
+                            <AIWorkbenchPanel
+                                novelId={novelId}
+                                theme={preferences.theme}
+                                draft={creativeDraft}
+                                selection={creativeSelection}
+                                onDraftChange={setCreativeDraft}
+                                onSelectionChange={setCreativeSelection}
+                                onDraftGenerated={() => {
+                                    setIsDraftDockOpen(true);
+                                    setViewMode('editor');
+                                }}
+                            />
+                        </div>
+
                         {activeTab === 'map' && (
                             <div className="flex-1 flex flex-col min-h-0">
                                 <MapSidebar
@@ -1399,6 +1844,29 @@ export default function Editor({ novelId, onBack }: EditorProps) {
                             >
                                 <LayoutGrid className="w-4 h-4" />
                             </button>
+                            {hasDraft && (
+                                <button
+                                    onClick={() => {
+                                        setViewMode('editor');
+                                        setIsDraftDockOpen((prev) => !prev);
+                                    }}
+                                    className={clsx(
+                                        "relative p-2 rounded-full transition-all flex items-center gap-2",
+                                        isDraftDockOpen && viewMode === 'editor'
+                                            ? (preferences.theme === 'dark' ? "bg-white/20 text-white" : "bg-gray-200 text-black")
+                                            : "opacity-60 hover:opacity-100",
+                                    )}
+                                    title={isDraftDockOpen ? t('aiWorkbench.closeDraftDock') : t('aiWorkbench.openDraftDock')}
+                                >
+                                    <Sparkles className="w-4 h-4" />
+                                    <span className={clsx(
+                                        "absolute -right-1 -top-1 min-w-4 h-4 px-1 rounded-full text-[10px] leading-4 text-center",
+                                        preferences.theme === 'dark' ? "bg-indigo-500 text-white" : "bg-indigo-600 text-white",
+                                    )}>
+                                        {draftCount}
+                                    </span>
+                                </button>
+                            )}
                         </div>
                     </div>
 
@@ -1410,7 +1878,10 @@ export default function Editor({ novelId, onBack }: EditorProps) {
                             className="mr-1"
                         />
                         <button
-                            onClick={() => setIsSettingsOpen(true)}
+                            onClick={() => {
+                                setSettingsInitialTab('general');
+                                setIsSettingsOpen(true);
+                            }}
                             className={`p-2 rounded-full transition-colors ${preferences.theme === 'dark' ? 'hover:bg-white/10 hover:text-white' : 'hover:bg-black/5 hover:text-black'}`}
                             title={t('editor.settings')}
                         >
@@ -1461,66 +1932,270 @@ export default function Editor({ novelId, onBack }: EditorProps) {
                         </div>
                     ) : currentChapter ? (
                         <div className={clsx(
-                            "flex-1 min-h-0 editor-shell layout-transition",
+                            "flex-1 min-h-0 editor-shell layout-transition relative flex",
                             preferences.theme === 'dark' ? 'bg-[#0a0a0f]' : 'bg-white'
                         )}>
-                            <LexicalChapterEditor
-                                key={currentChapter.id}
-                                namespace={currentChapter.id}
-                                initialContent={currentChapter.content}
-                                onChange={(editorState) => {
-                                    if (isSwitchingChapterRef.current) return;
-                                    editorState.read(() => {
-                                        const jsonString = JSON.stringify(editorState.toJSON());
-                                        setContent(jsonString);
-                                    });
-                                }}
-                                className={getEditorContentClass()}
-                                editorRef={editorRef}
-                                preferences={preferences}
-                                onUpdatePreference={updatePreference}
-                                shortcuts={shortcuts}
-                                onSave={saveChanges}
-                                onCreateIdea={handleCreateGlobalIdea}
-                                language={i18n.language}
-                                headerContent={
-                                    <input
-                                        type="text"
-                                        value={title}
-                                        onChange={(e) => setTitle(e.target.value)}
-                                        placeholder={t('editor.chapterTitle')}
-                                        className={`w-full bg-transparent text-3xl font-bold outline-none text-center font-serif mb-4 ${preferences.theme === 'dark' ? 'text-neutral-100 placeholder-neutral-600' : 'text-neutral-900 placeholder-neutral-300'}`}
-                                    />
+                            <div className="flex-1 min-w-0 relative">
+                                <LexicalChapterEditor
+                                    key={currentChapter.id}
+                                    namespace={currentChapter.id}
+                                    initialContent={currentChapter.content}
+                                    onChange={(editorState) => {
+                                        if (isSwitchingChapterRef.current) return;
+                                        editorState.read(() => {
+                                            const jsonString = JSON.stringify(editorState.toJSON());
+                                            setContent(jsonString);
+                                        });
+                                    }}
+                                    className={getEditorContentClass()}
+                                    editorRef={editorRef}
+                                    preferences={preferences}
+                                    onUpdatePreference={updatePreference}
+                                    shortcuts={shortcuts}
+                                    onSave={saveChanges}
+                                    onCreateIdea={handleCreateGlobalIdea}
+                                    language={i18n.language}
+                                    toolbarActions={
+                                        <>
+                                            <button
+                                                onClick={() => setIsContinueModalOpen(true)}
+                                                disabled={!currentChapter || isContinuing}
+                                                title={t('editor.continueWriting', 'AI 续写')}
+                                                className={clsx(
+                                                    "shrink-0 px-2.5 py-2 rounded-lg border transition-colors inline-flex items-center gap-1.5 text-xs",
+                                                    preferences.theme === 'dark'
+                                                        ? "border-white/10 text-neutral-300 hover:bg-white/5 disabled:opacity-40 disabled:cursor-not-allowed"
+                                                        : "border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+                                                )}
+                                            >
+                                                {isContinuing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                                                <span>{t('editor.continueWriting', 'AI 续写')}</span>
+                                            </button>
+                                            <button
+                                                onClick={() => void handleRebuildChapterSummary()}
+                                                disabled={isRebuildingSummary || !currentChapter}
+                                                title={t('editor.rebuildSummary', '手动生成摘要')}
+                                                className={clsx(
+                                                    "shrink-0 p-2 rounded-lg border transition-colors",
+                                                    preferences.theme === 'dark'
+                                                        ? "border-white/10 text-neutral-300 hover:bg-white/5 disabled:opacity-40 disabled:cursor-not-allowed"
+                                                        : "border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+                                                )}
+                                            >
+                                                <ScrollText className={clsx("w-4 h-4", isRebuildingSummary && "animate-pulse")} />
+                                            </button>
+                                        </>
+                                    }
+                                    headerContent={
+                                        <div className="w-full mb-4 relative">
+                                        <div className="flex items-center gap-2 flex-wrap">
+                                            <input
+                                                type="text"
+                                                value={title}
+                                                onChange={(e) => setTitle(e.target.value)}
+                                                placeholder={t('editor.chapterTitle')}
+                                                className={`flex-1 min-w-[260px] bg-transparent text-2xl md:text-3xl font-bold outline-none text-left md:text-center font-serif ${preferences.theme === 'dark' ? 'text-neutral-100 placeholder-neutral-600' : 'text-neutral-900 placeholder-neutral-300'}`}
+                                            />
+                                            <select
+                                                value={titleGenStyle}
+                                                onChange={(e) => setTitleGenStyle(e.target.value as 'stable' | 'literary' | 'viral')}
+                                                className={clsx(
+                                                    "shrink-0 text-xs rounded-lg border px-2 py-1.5",
+                                                    preferences.theme === 'dark'
+                                                        ? "bg-transparent border-white/10 text-neutral-300"
+                                                        : "bg-white border-gray-200 text-gray-600"
+                                                )}
+                                                title={t('editor.aiTitleStyleLabel', '标题风格')}
+                                            >
+                                                <option value="stable">{t('editor.aiTitleStyle.stable', '稳健')}</option>
+                                                <option value="literary">{t('editor.aiTitleStyle.literary', '文艺')}</option>
+                                                <option value="viral">{t('editor.aiTitleStyle.viral', '张力')}</option>
+                                            </select>
+                                            <button
+                                                onClick={() => void handleGenerateTitle()}
+                                                disabled={isGeneratingTitle || !currentChapter || !content.trim()}
+                                                title={t('editor.aiTitle', 'AI 生成标题')}
+                                                className={clsx(
+                                                    "shrink-0 p-2 rounded-lg border transition-colors",
+                                                    preferences.theme === 'dark'
+                                                        ? "border-white/10 text-neutral-300 hover:bg-white/5 disabled:opacity-40 disabled:cursor-not-allowed"
+                                                        : "border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+                                                )}
+                                            >
+                                                <Sparkles className={clsx("w-4 h-4", isGeneratingTitle && "animate-pulse")} />
+                                            </button>
+                                        </div>
+                                        {summaryStatus && (
+                                            <p className={clsx(
+                                                "mt-2 text-xs text-right",
+                                                preferences.theme === 'dark' ? 'text-neutral-400' : 'text-gray-500'
+                                            )}>
+                                                {summaryStatus}
+                                            </p>
+                                        )}
+                                        {continueStatus && (
+                                            <p className={clsx(
+                                                "mt-1 text-xs text-right",
+                                                preferences.theme === 'dark' ? 'text-neutral-400' : 'text-gray-500'
+                                            )}>
+                                                {continueStatus}
+                                            </p>
+                                        )}
+                                        {titleGenStatus && (
+                                            <div className="mt-1">
+                                                <p className={clsx(
+                                                    "text-xs text-right",
+                                                    preferences.theme === 'dark' ? 'text-neutral-400' : 'text-gray-500'
+                                                )}>
+                                                    {titleGenStatus}
+                                                </p>
+                                                {titleGenStage && (
+                                                    <div className={clsx(
+                                                        "mt-1 h-1.5 w-full rounded-full overflow-hidden",
+                                                        preferences.theme === 'dark' ? 'bg-white/10' : 'bg-gray-100'
+                                                    )}>
+                                                        <div
+                                                            className={clsx(
+                                                                "h-full rounded-full transition-all duration-300",
+                                                                preferences.theme === 'dark' ? 'bg-neutral-300/80' : 'bg-gray-500'
+                                                            )}
+                                                            style={{
+                                                                width: titleGenStage === 'requesting'
+                                                                    ? '33%'
+                                                                    : titleGenStage === 'generating'
+                                                                        ? '66%'
+                                                                        : '100%',
+                                                            }}
+                                                        />
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )}
+
+                                        {titleCandidates.length > 0 && (
+                                            <div
+                                                className={clsx(
+                                                    "absolute right-0 top-full mt-2 z-20 w-[360px] max-h-56 overflow-y-auto rounded-xl border shadow-xl",
+                                                    preferences.theme === 'dark'
+                                                        ? "bg-[#121218] border-white/10"
+                                                        : "bg-white border-gray-200"
+                                                )}
+                                            >
+                                                <div className={clsx(
+                                                    "flex items-center justify-between px-3 py-2 border-b text-xs",
+                                                    preferences.theme === 'dark' ? "border-white/10 text-neutral-400" : "border-gray-100 text-gray-500"
+                                                )}>
+                                                    <span>{t('editor.aiTitleCandidates', '标题候选')}</span>
+                                                    <button
+                                                        onClick={() => void handleGenerateTitle()}
+                                                        disabled={isGeneratingTitle}
+                                                        className={clsx(
+                                                            "px-2 py-1 rounded-md border transition-colors",
+                                                            preferences.theme === 'dark'
+                                                                ? "border-white/10 hover:bg-white/5 disabled:opacity-40"
+                                                                : "border-gray-200 hover:bg-gray-50 disabled:opacity-40"
+                                                        )}
+                                                    >
+                                                        {t('editor.regenerate', '再生成')}
+                                                    </button>
+                                                </div>
+                                                {titleCandidates.map((candidate, index) => (
+                                                    <button
+                                                        key={`${candidate.title}-${index}`}
+                                                        onClick={() => {
+                                                            setTitle(candidate.title);
+                                                            setTitleCandidates([]);
+                                                        }}
+                                                        className={clsx(
+                                                            "w-full text-left px-3 py-2 transition-colors border-b last:border-b-0",
+                                                            preferences.theme === 'dark'
+                                                                ? "border-white/5 text-neutral-200 hover:bg-white/5"
+                                                                : "border-gray-100 text-gray-700 hover:bg-gray-50"
+                                                        )}
+                                                    >
+                                                        <div className="text-sm">{candidate.title}</div>
+                                                        <div className={clsx(
+                                                            "mt-1 inline-block text-[11px] px-1.5 py-0.5 rounded-full",
+                                                            preferences.theme === 'dark'
+                                                                ? "bg-white/5 text-neutral-400"
+                                                                : "bg-gray-100 text-gray-500"
+                                                        )}>
+                                                            {candidate.styleTag}
+                                                        </div>
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
                                 }
-                                onAddIdea={handleAddIdea}
-                                onIdeaClick={handleIdeaClick}
-                                recentFiles={recentFiles}
-                                onDeleteRecent={handleDeleteRecent}
-                                onRecentFileSelect={handleSelectChapter}
-                                onPlotContextMenu={handlePlotContextMenu}
-                                onPlotAnchorClick={handlePlotAnchorClick}
-                                novelId={novelId}
-                            />
-                            {/* Floating Elements */}
-                            {plotContextMenuData && (
-                                <PlotContextMenu
-                                    data={plotContextMenuData}
-                                    onClose={() => setPlotContextMenuData(null)}
-                                    onAddAnchor={handleAddAnchorClick}
-                                    onRemoveAnchor={handleRemoveAnchor}
-                                    onViewDetails={handleViewDetails}
-                                    onCreatePoint={handleCreatePointFromSelection}
+                                    onAddIdea={handleAddIdea}
+                                    onIdeaClick={handleIdeaClick}
+                                    recentFiles={recentFiles}
+                                    onDeleteRecent={handleDeleteRecent}
+                                    onRecentFileSelect={handleSelectChapter}
+                                    onPlotContextMenu={handlePlotContextMenu}
+                                    onPlotAnchorClick={handlePlotAnchorClick}
+                                    novelId={novelId}
+                                />
+                                {/* Floating Elements */}
+                                {plotContextMenuData && (
+                                    <PlotContextMenu
+                                        data={plotContextMenuData}
+                                        onClose={() => setPlotContextMenuData(null)}
+                                        onAddAnchor={handleAddAnchorClick}
+                                        onRemoveAnchor={handleRemoveAnchor}
+                                        onViewDetails={handleViewDetails}
+                                        onCreatePoint={handleCreatePointFromSelection}
+                                        theme={preferences.theme}
+                                    />
+                                )}
+
+                                <PlotAnchorModal
+                                    novelId={novelId}
+                                    isOpen={isPlotAnchorModalOpen}
+                                    onClose={() => setIsPlotAnchorModalOpen(false)}
+                                    onSubmit={handleSubmitAnchor}
                                     theme={preferences.theme}
                                 />
+                            </div>
+                            {hasDraft && isDraftDockOpen && !isCompactDraftDock && (
+                                <div className={clsx(
+                                    "w-[420px] min-w-[360px] max-w-[520px] shrink-0 border-l",
+                                    preferences.theme === 'dark' ? 'border-white/10 bg-[#0F0F13]' : 'border-gray-200 bg-gray-50',
+                                )}>
+                                    <AIWorkbenchDraftDock
+                                        theme={preferences.theme}
+                                        draft={creativeDraft}
+                                        selection={creativeSelection}
+                                        onDraftChange={setCreativeDraft}
+                                        onSelectionChange={setCreativeSelection}
+                                    />
+                                </div>
                             )}
-
-                            <PlotAnchorModal
-                                novelId={novelId}
-                                isOpen={isPlotAnchorModalOpen}
-                                onClose={() => setIsPlotAnchorModalOpen(false)}
-                                onSubmit={handleSubmitAnchor}
-                                theme={preferences.theme}
-                            />
+                            {hasDraft && isDraftDockOpen && isCompactDraftDock && (
+                                <>
+                                    <button
+                                        type="button"
+                                        className="absolute inset-0 z-20 bg-black/20"
+                                        onClick={() => setIsDraftDockOpen(false)}
+                                        aria-label="Close draft dock overlay"
+                                    />
+                                    <div
+                                        className={clsx(
+                                            "absolute right-0 top-0 bottom-0 z-30 w-[min(92vw,420px)] border-l shadow-2xl",
+                                            preferences.theme === 'dark' ? 'border-white/10 bg-[#0F0F13]' : 'border-gray-200 bg-gray-50',
+                                        )}
+                                    >
+                                        <AIWorkbenchDraftDock
+                                            theme={preferences.theme}
+                                            draft={creativeDraft}
+                                            selection={creativeSelection}
+                                            onDraftChange={setCreativeDraft}
+                                            onSelectionChange={setCreativeSelection}
+                                        />
+                                    </div>
+                                </>
+                            )}
                         </div>
                     ) : (
                         <div className="flex-1 flex items-center justify-center text-neutral-600 flex-col gap-4">
@@ -1537,7 +2212,11 @@ export default function Editor({ novelId, onBack }: EditorProps) {
                 novel && (
                     <SettingsModal
                         isOpen={isSettingsOpen}
-                        onClose={() => setIsSettingsOpen(false)}
+                        onClose={() => {
+                            setIsSettingsOpen(false);
+                            setSettingsInitialTab(undefined);
+                        }}
+                        initialTab={settingsInitialTab}
                         novelContext={{
                             initialFormatting: novel.formatting || '{}',
                             onSaveFormatting: async (newFormatting) => {
@@ -1578,6 +2257,352 @@ export default function Editor({ novelId, onBack }: EditorProps) {
                 }}
                 theme={preferences.theme}
             />
+
+            {isContinueModalOpen && currentChapter && (
+                <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/45 px-4">
+                    <div className={clsx(
+                        "w-full max-w-2xl rounded-2xl border shadow-2xl",
+                        preferences.theme === 'dark' ? 'bg-[#11131a] border-white/10' : 'bg-white border-gray-200'
+                    )}>
+                        <div className={clsx(
+                            "px-5 py-4 border-b flex items-center justify-between",
+                            preferences.theme === 'dark' ? 'border-white/10' : 'border-gray-100'
+                        )}>
+                            <div>
+                                <h3 className={clsx("text-sm font-semibold", preferences.theme === 'dark' ? 'text-neutral-100' : 'text-gray-900')}>
+                                    {t('editor.continueModalTitle')}
+                                </h3>
+                                <p className={clsx("text-xs mt-1", preferences.theme === 'dark' ? 'text-neutral-400' : 'text-gray-500')}>
+                                    {t('editor.continueModalDesc')}
+                                </p>
+                            </div>
+                            <button
+                                onClick={closeContinueModal}
+                                className={clsx("text-xs px-2 py-1 rounded border", preferences.theme === 'dark' ? 'border-white/10 text-neutral-300' : 'border-gray-200 text-gray-600')}
+                            >
+                                {t('common.cancel')}
+                            </button>
+                        </div>
+
+                        <div className="px-5 py-4 space-y-4 max-h-[70vh] overflow-y-auto">
+                            {(() => {
+                                const plain = extractPlainTextFromLexical(contentRef.current || '');
+                                const hasOutline = plotLines.some((line) => (line.points?.length || 0) > 0) || plotLines.length > 0;
+                                const blocked = currentChapter.order === 1 && !hasOutline && plain.length < 120;
+                                if (!blocked) return null;
+                                return (
+                                    <div className={clsx(
+                                        "rounded-xl border px-3 py-3",
+                                        preferences.theme === 'dark' ? 'border-amber-500/30 bg-amber-500/10 text-amber-200' : 'border-amber-200 bg-amber-50 text-amber-800'
+                                    )}>
+                                        <div className="text-sm font-medium">
+                                            {t('editor.continueBlocked')}
+                                        </div>
+                                        <div className="text-xs mt-1 opacity-90">
+                                            {t('editor.continueBlockedHint')}
+                                        </div>
+                                        <div className="mt-2 flex items-center gap-2">
+                                            <button
+                                                onClick={() => {
+                                                    setActiveTab('outline');
+                                                    setIsSidePanelOpen(true);
+                                                    closeContinueModal();
+                                                }}
+                                                className={clsx("text-xs px-2 py-1 rounded border", preferences.theme === 'dark' ? 'border-amber-300/40' : 'border-amber-300')}
+                                            >
+                                                {t('editor.gotoOutline')}
+                                            </button>
+                                            <button
+                                                onClick={closeContinueModal}
+                                                className={clsx("text-xs px-2 py-1 rounded border", preferences.theme === 'dark' ? 'border-amber-300/40' : 'border-amber-300')}
+                                            >
+                                                {t('editor.writeManually')}
+                                            </button>
+                                            <button
+                                                onClick={() => {
+                                                    setActiveTab('ai_workbench');
+                                                    setIsSidePanelOpen(true);
+                                                    closeContinueModal();
+                                                }}
+                                                className={clsx("text-xs px-2 py-1 rounded border", preferences.theme === 'dark' ? 'border-amber-300/40' : 'border-amber-300')}
+                                            >
+                                                {t('editor.gotoAiOutlineGenerator')}
+                                            </button>
+                                        </div>
+                                    </div>
+                                );
+                            })()}
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                <label className="text-xs">
+                                    <div className={clsx("mb-1", preferences.theme === 'dark' ? 'text-neutral-400' : 'text-gray-500')}>
+                                        {t('editor.continueLength')}
+                                    </div>
+                                    <input
+                                        type="number"
+                                        min={100}
+                                        max={5000}
+                                        value={continueConfig.targetLength}
+                                        onChange={(e) => setContinueConfig((prev) => ({ ...prev, targetLength: Math.max(100, Math.min(5000, Number(e.target.value) || 500)) }))}
+                                        placeholder="500"
+                                        className={clsx("w-full rounded-lg border px-2 py-2", preferences.theme === 'dark' ? 'bg-transparent border-white/10 text-neutral-200' : 'border-gray-200')}
+                                    />
+                                </label>
+                                <label className="text-xs">
+                                    <div className={clsx("mb-1", preferences.theme === 'dark' ? 'text-neutral-400' : 'text-gray-500')}>
+                                        {t('editor.continueCreativity')}
+                                    </div>
+                                    <select
+                                        value={continueConfig.creativityPreset}
+                                        onChange={(e) => setContinueConfig((prev) => ({ ...prev, creativityPreset: e.target.value as 'safe' | 'balanced' | 'creative' }))}
+                                        className={clsx("w-full rounded-lg border px-2 py-2", preferences.theme === 'dark' ? 'bg-transparent border-white/10 text-neutral-200' : 'border-gray-200')}
+                                    >
+                                        <option value="safe">{t('editor.creativeSafe')}</option>
+                                        <option value="balanced">{t('editor.creativeBalanced')}</option>
+                                        <option value="creative">{t('editor.creativeCreative')}</option>
+                                    </select>
+                                </label>
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                <label className="text-xs">
+                                    <div className={clsx("mb-1", preferences.theme === 'dark' ? 'text-neutral-400' : 'text-gray-500')}>
+                                        {t('editor.continueStyle')}
+                                    </div>
+                                    <select
+                                        value={continueConfig.style}
+                                        onChange={(e) => setContinueConfig((prev) => ({ ...prev, style: e.target.value }))}
+                                        className={clsx("w-full rounded-lg border px-2 py-2", preferences.theme === 'dark' ? 'bg-transparent border-white/10 text-neutral-200' : 'border-gray-200')}
+                                    >
+                                        <option value="default">{t('editor.styleDefault')}</option>
+                                        <option value="tight">{t('editor.styleTight')}</option>
+                                        <option value="lyrical">{t('editor.styleLyrical')}</option>
+                                        <option value="cinematic">{t('editor.styleCinematic')}</option>
+                                    </select>
+                                </label>
+                                <label className="text-xs">
+                                    <div className={clsx("mb-1", preferences.theme === 'dark' ? 'text-neutral-400' : 'text-gray-500')}>
+                                        {t('editor.continueTone')}
+                                    </div>
+                                    <select
+                                        value={continueConfig.tone}
+                                        onChange={(e) => setContinueConfig((prev) => ({ ...prev, tone: e.target.value }))}
+                                        className={clsx("w-full rounded-lg border px-2 py-2", preferences.theme === 'dark' ? 'bg-transparent border-white/10 text-neutral-200' : 'border-gray-200')}
+                                    >
+                                        <option value="balanced">{t('editor.toneBalanced')}</option>
+                                        <option value="calm">{t('editor.toneCalm')}</option>
+                                        <option value="tense">{t('editor.toneTense')}</option>
+                                        <option value="warm">{t('editor.toneWarm')}</option>
+                                    </select>
+                                </label>
+                            </div>
+
+                            <label className="text-xs block">
+                                <div className={clsx("mb-1", preferences.theme === 'dark' ? 'text-neutral-400' : 'text-gray-500')}>
+                                    {t('editor.contextChapterCount')}
+                                </div>
+                                <input
+                                    type="number"
+                                    min={1}
+                                    max={8}
+                                    value={continueConfig.contextChapterCount}
+                                    onChange={(e) => setContinueConfig((prev) => ({ ...prev, contextChapterCount: Math.max(1, Math.min(8, Number(e.target.value) || 3)) }))}
+                                    className={clsx("w-full rounded-lg border px-2 py-2", preferences.theme === 'dark' ? 'bg-transparent border-white/10 text-neutral-200' : 'border-gray-200')}
+                                />
+                            </label>
+
+                            <div>
+                                <div className={clsx("text-xs mb-2", preferences.theme === 'dark' ? 'text-neutral-400' : 'text-gray-500')}>
+                                    {t('editor.selectIdeas')}
+                                </div>
+                                <div className={clsx(
+                                    "max-h-44 overflow-y-auto rounded-lg border p-2 space-y-1",
+                                    preferences.theme === 'dark' ? 'border-white/10' : 'border-gray-200'
+                                )}>
+                                    {ideas.length === 0 && (
+                                        <div className={clsx("text-xs", preferences.theme === 'dark' ? 'text-neutral-500' : 'text-gray-400')}>
+                                            {t('editor.noIdeas')}
+                                        </div>
+                                    )}
+                                    {ideas.map((idea) => (
+                                        <label key={idea.id} className={clsx(
+                                            "flex items-start gap-2 rounded px-2 py-1 text-xs",
+                                            preferences.theme === 'dark' ? 'hover:bg-white/5' : 'hover:bg-gray-50'
+                                        )}>
+                                            <input
+                                                type="checkbox"
+                                                checked={continueConfig.ideaIds.includes(idea.id)}
+                                                onChange={(e) => {
+                                                    setContinueConfig((prev) => ({
+                                                        ...prev,
+                                                        ideaIds: e.target.checked
+                                                            ? [...prev.ideaIds, idea.id]
+                                                            : prev.ideaIds.filter((id) => id !== idea.id),
+                                                    }));
+                                                }}
+                                            />
+                                            <span className={clsx("line-clamp-2", preferences.theme === 'dark' ? 'text-neutral-300' : 'text-gray-700')}>
+                                                {idea.content}
+                                            </span>
+                                        </label>
+                                    ))}
+                                </div>
+                            </div>
+                            <label className="text-xs block">
+                                <div className={clsx("mb-1", preferences.theme === 'dark' ? 'text-neutral-400' : 'text-gray-500')}>
+                                    {t('editor.continueUserIntentLabel')}
+                                </div>
+                                <textarea
+                                    value={continueConfig.userIntent}
+                                    onChange={(e) => setContinueConfig((prev) => ({ ...prev, userIntent: e.target.value }))}
+                                    onBlur={() => void refreshContinuePromptPreview()}
+                                    rows={3}
+                                    placeholder={t('editor.continueUserIntentPlaceholder')}
+                                    className={clsx(
+                                        "w-full rounded-lg border px-2 py-2 text-xs resize-y",
+                                        preferences.theme === 'dark' ? 'bg-transparent border-white/10 text-neutral-200 placeholder:text-neutral-500' : 'border-gray-200 text-gray-700 placeholder:text-gray-400'
+                                    )}
+                                />
+                                <div className={clsx("mt-1", preferences.theme === 'dark' ? 'text-neutral-500' : 'text-gray-400')}>
+                                    {t('editor.continueUserIntentHint')}
+                                </div>
+                            </label>
+                            <label className="text-xs block">
+                                <div className={clsx("mb-1", preferences.theme === 'dark' ? 'text-neutral-400' : 'text-gray-500')}>
+                                    {t('editor.continueCurrentLocationLabel')}
+                                </div>
+                                <input
+                                    value={continueConfig.currentLocation}
+                                    onChange={(e) => setContinueConfig((prev) => ({ ...prev, currentLocation: e.target.value }))}
+                                    placeholder={t('editor.continueCurrentLocationPlaceholder')}
+                                    className={clsx(
+                                        "w-full rounded-lg border px-2 py-2 text-xs",
+                                        preferences.theme === 'dark' ? 'bg-transparent border-white/10 text-neutral-200 placeholder:text-neutral-500' : 'border-gray-200 text-gray-700 placeholder:text-gray-400'
+                                    )}
+                                />
+                                <div className={clsx("mt-1", preferences.theme === 'dark' ? 'text-neutral-500' : 'text-gray-400')}>
+                                    {t('editor.continueCurrentLocationHint')}
+                                </div>
+                            </label>
+                            <PromptInlinePanel
+                                theme={preferences.theme}
+                                title={t('editor.promptPreview')}
+                                loading={continuePromptLoading}
+                                error={continuePromptError}
+                                data={continuePromptPreview}
+                                editablePrompt={continuePromptOverride}
+                                baselinePrompt={continuePromptDefault}
+                                onEditablePromptChange={(value) => {
+                                    setContinuePromptOverride(value);
+                                    setContinuePromptDirty(value.trim() !== continuePromptDefault.trim());
+                                }}
+                                onRefresh={() => void refreshContinuePromptPreview()}
+                            />
+                        </div>
+
+                        <div className={clsx(
+                            "px-5 py-3 border-t flex items-center justify-end gap-2",
+                            preferences.theme === 'dark' ? 'border-white/10' : 'border-gray-100'
+                        )}>
+                            <button
+                                onClick={closeContinueModal}
+                                className={clsx("text-xs px-3 py-1.5 rounded border", preferences.theme === 'dark' ? 'border-white/10 text-neutral-300' : 'border-gray-200 text-gray-600')}
+                            >
+                                {t('common.cancel')}
+                            </button>
+                            <button
+                                onClick={() => void handleStartContinueWriting()}
+                                disabled={isContinuing}
+                                className={clsx(
+                                    "text-xs px-3 py-1.5 rounded border inline-flex items-center gap-1.5",
+                                    preferences.theme === 'dark' ? 'border-white/20 text-neutral-100 hover:bg-white/10 disabled:opacity-40' : 'border-gray-300 text-gray-800 hover:bg-gray-50 disabled:opacity-40'
+                                )}
+                            >
+                                {isContinuing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+                                {t('editor.startContinue')}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {isContinuePreviewOpen && (
+                <div className="fixed inset-0 z-[121] flex items-center justify-center bg-black/55 px-4">
+                    <div className={clsx(
+                        "w-full max-w-4xl rounded-2xl border shadow-2xl",
+                        preferences.theme === 'dark' ? 'bg-[#11131a] border-white/10' : 'bg-white border-gray-200'
+                    )}>
+                        <div className={clsx(
+                            "px-5 py-4 border-b flex items-center justify-between",
+                            preferences.theme === 'dark' ? 'border-white/10' : 'border-gray-100'
+                        )}>
+                            <h3 className={clsx("text-sm font-semibold", preferences.theme === 'dark' ? 'text-neutral-100' : 'text-gray-900')}>
+                                {t('editor.continuePreviewTitle', '续写预览（确认后写入）')}
+                            </h3>
+                            <button
+                                onClick={() => {
+                                    setIsContinuePreviewOpen(false);
+                                    setContinuePreviewText('');
+                                    setContinuePreviewBaseTail('');
+                                }}
+                                className={clsx("text-xs px-2 py-1 rounded border", preferences.theme === 'dark' ? 'border-white/10 text-neutral-300' : 'border-gray-200 text-gray-600')}
+                            >
+                                {t('common.cancel', '取消')}
+                            </button>
+                        </div>
+
+                        <div className="px-5 py-4 grid grid-cols-1 md:grid-cols-2 gap-4 max-h-[70vh] overflow-y-auto">
+                            <div>
+                                <div className={clsx("text-xs mb-2", preferences.theme === 'dark' ? 'text-neutral-400' : 'text-gray-500')}>
+                                    {t('editor.continuePreviewContext', '当前正文末尾（参考）')}
+                                </div>
+                                <pre className={clsx(
+                                    "whitespace-pre-wrap rounded-lg border p-3 text-xs leading-relaxed",
+                                    preferences.theme === 'dark' ? 'border-white/10 bg-black/20 text-neutral-300' : 'border-gray-200 bg-gray-50 text-gray-700'
+                                )}>
+                                    {continuePreviewBaseTail || '...'}
+                                </pre>
+                            </div>
+                            <div>
+                                <div className={clsx("text-xs mb-2", preferences.theme === 'dark' ? 'text-neutral-400' : 'text-gray-500')}>
+                                    {t('editor.continuePreviewInsert', '拟新增内容（将追加）')}
+                                </div>
+                                <pre className={clsx(
+                                    "whitespace-pre-wrap rounded-lg border p-3 text-xs leading-relaxed",
+                                    preferences.theme === 'dark' ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-100' : 'border-emerald-200 bg-emerald-50 text-emerald-800'
+                                )}>
+                                    {continuePreviewText}
+                                </pre>
+                            </div>
+                        </div>
+
+                        <div className={clsx(
+                            "px-5 py-3 border-t flex items-center justify-end gap-2",
+                            preferences.theme === 'dark' ? 'border-white/10' : 'border-gray-100'
+                        )}>
+                            <button
+                                onClick={() => {
+                                    setIsContinuePreviewOpen(false);
+                                    setContinuePreviewText('');
+                                    setContinuePreviewBaseTail('');
+                                }}
+                                className={clsx("text-xs px-3 py-1.5 rounded border", preferences.theme === 'dark' ? 'border-white/10 text-neutral-300' : 'border-gray-200 text-gray-600')}
+                            >
+                                {t('editor.discardGenerated', '放弃本次生成')}
+                            </button>
+                            <button
+                                onClick={handleConfirmContinueInsert}
+                                className={clsx(
+                                    "text-xs px-3 py-1.5 rounded border",
+                                    preferences.theme === 'dark' ? 'border-white/20 text-neutral-100 hover:bg-white/10' : 'border-gray-300 text-gray-800 hover:bg-gray-50'
+                                )}
+                            >
+                                {t('editor.confirmInsert', '确认插入')}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* --- Flow Mode Specific Overlays --- */}
             <div className={clsx("flow-curtain", isFlowSwitching && "active")} />
@@ -1626,3 +2651,6 @@ export default function Editor({ novelId, onBack }: EditorProps) {
         </motion.div>
     );
 }
+
+
+

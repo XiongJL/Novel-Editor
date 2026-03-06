@@ -129,6 +129,7 @@ interface LexicalChapterEditorProps {
     onSave: () => void;
     onCreateIdea?: () => void; // Callback for Ctrl+I global idea creation
     headerContent?: React.ReactNode;
+    toolbarActions?: React.ReactNode;
     language?: string; // 'zh' | 'en'
     onAddIdea: (id: string, quote: string, cursor: string, note: string) => void;
     onIdeaClick?: (ideaId: string) => void;
@@ -154,6 +155,7 @@ export default function LexicalChapterEditor({
     onSave,
     onCreateIdea,
     headerContent,
+    toolbarActions,
     language = 'zh',
     onAddIdea,
     onIdeaClick,
@@ -214,6 +216,7 @@ export default function LexicalChapterEditor({
                     recentFiles={recentFiles}
                     onDeleteRecent={onDeleteRecent}
                     onRecentFileSelect={onRecentFileSelect}
+                    rightActions={toolbarActions}
                 />
 
                 {/* Scrollable Content Area */}

@@ -1,90 +1,160 @@
-# Tasks
+﻿# Active Tasks
 
-- [ ] 灵感搜索与过滤功能 (Idea Search & Filtering)
-    - [x] **Phase 1: 统一搜索工作台基础框架**
-        - [x] 创建侧边栏/弹窗容器组件 (`UnifiedSearchWorkbench`)
-        - [x] 实现一级过滤器 (搜索范围: 全部/灵感/章节/小说)
-        - [x] 实现内容类型过滤器 (已整合进搜索范围)
-        - [x] 实现防抖关键词搜索框
-        - [x] 确保核心数据结构支持字段检索
-    - [x] **Phase 2: 灵感工作台深度功能**
-        - [x] 实现二级过滤器 (小说/卷/章节联动) - *已精简为灵感专用过滤器*
-        - [x] 标签筛选与管理 - *已实现带搜索功能的自定义下拉菜单*
-        - [x] 时间范围与收藏筛选 - *已实现*
-        - [x] 灵感结果卡片 UI (带原文引用)
-        - [x] **Phase 2.5: 功能整合 (IdeaList -> UnifiedSearchWorkbench)**
-            - [x] 增强 `SearchResultsList`: 添加星标(Star)与删除(Delete)按钮
-            - [x] 增强 `UnifiedSearchWorkbench`: 添加新建灵感(+)入口
-            - [x] 重构 `Editor.tsx`: 替换灵感Tab为增强版搜索工作台
-            - [x] **侧边栏分离 (Separation)**
-                - [x] 创建 `SearchSidebar`: 独立的搜索侧边栏组件
-                - [x] 简化 `UnifiedSearchWorkbench`: 仅保留灵感搜索，移除Scope切换
-                - [x] 简化 `IdeaAdvancedFilter`: 移除小说/章节下拉过滤
-            - [x] 废弃并移除 `IdeaList.tsx`
-            - [x] **反向导航反馈 (Reverse Feedback)**
-                - [x] 在 `Editor.tsx` 增加高亮状态逻辑
-                - [x] 在 `SearchResultsList` 实现自动滚动与闪烁动画
-            - [x] **灵感卡片收藏 UI 增强 (Starred UI Refinement)**
-                - [x] 迭代收藏样式：移除边框变色，采用更优雅的角标 Banner 设计
-            - [x] **编辑器暗色模式适配 (Dark Mode Fix)**
-                - [x] 修复编辑器高亮文字在暗色模式下显示为黑色的问题
-            - [x] **设置区域国际化 (Settings i18n)**
-                - [x] 为设置面板的“通用”和“快捷键”区域添加完整的多语言支持
-                - [x] 修复漏掉的快捷键翻译 ("Enter Focus", "Create Idea")
-            - [x] **设置区域主题适配 (Settings Theme Fix)**
-                - [x] 修复设置面板在浅色模式下样式不生效的问题，实现完整的视觉适配
-            - [x] **主页列表主题适配 (Home Theme Fix)**
-                - [x] 适配 `Home.tsx` 及其子组件 `ProjectCard` 在浅色模式下的样式
-    - [x] **Git 初始化与备份 (Git Init)**
-        - [x] 初始化 Git 仓库并推送到远程 GitHub
-        - [x] 配置完善的 `.gitignore` 规则（排除日志、构建产物、依赖等）
-    - [x] **Phase 3: 全局搜索集成**
-        - [x] 接入小说与章节内容索引 (FTS5 全文索引)
-        - [x] 搜索结果分组展示 (章节/灵感)
-        - [x] 实现点击跳转 + 关键词高亮
-- [x] **数据备份与恢复 (Backup & Restore System)**
-    - [x] 数据导出 (Export): 格式为 `.nebak` (ZIP + JSON + Manifest)
-    - [x] 数据加密 (Encryption): AES-256-GCM + PBKDF2
-    - [x] 自动备份 (Auto Backup): 恢复前自动快照，自动轮替保留最新3份
-    - [x] 数据恢复 (Restore): 事务性恢复 (Atomicity)，清空旧数据后写入新数据
-    - [x] 备份设置面板 (Settings UI): 集成于设置模态框，支持密码保护
-- [x] **架构重构与稳定性修复 (Architecture Refactoring & Stability)**
-    - [x] **Editor.tsx 重构**: 修复重复组件定义，合并状态管理，恢复丢失的 UI 逻辑
-    - [x] **Story Structure Backend**: 修复 `PlotLine` Prisma Client 同步问题，增强 IPC 错误处理
-- [x] **剧情大纲交互增强 (Story Structure Enhancements)**
-    - [x] **Phase 4: 基础交互与排序 (Interactions & Sorting)**
-        - [x] 安装 `@dnd-kit`
-        - [x] 后端实现 `reorderPlotLines/Points`
-        - [x] 前端实现拖拽排序 UI
-        - [x] 优化“要点创建”为快速输入模式
-    - [x] **Phase 5: 深度编辑与矩阵视图 (Matrix & Details)**
-        - [x] 实现 `PlotPointModal` (编辑标题、描述、类型、状态)
-        - [x] 实现 `NarrativeMatrix` (表格视图、筛选器)
-    - [x] **Phase 6: 锚点与编辑器集成 (Anchors & Editor)**
-        - [x] 实现 `AnchorPlugin` (Lexical 高亮)
-        - [x] 实现右键菜单 "Add to Plot"
-        - [x] 实现锚点跳转与数据联动
-            - [x] **Phase 6.5: 锚点跳转优化 (Anchor Jump Improvement)**
-                - [x] 实现 `handleJumpToPlotPoint` (bi-directional sync)
-                - [x] 更新 `PlotSidebar` / `PlotPointItem` 添加跳转按钮
-                - [x] 实现无锚点时的抖动反馈 (Shake Animation)
+## 当前目标
+- [ ] 聚焦主线：完成 Phase E 入库闭环收尾 + 标题生成进度条（Phase C）
 
-    - [x] **Phase 8: 角色系统增强 (Character System)**
-        - [x] **@Mentions**: 在剧情要点与矩阵视图中实现快捷选取与高亮
-        - [x] **角色卡片**: 实现点击 Mention 弹出详情档案卡
-        - [x] **交互优化**: 采用全透明 Textarea 方案解决文本重叠，实现 Click-outside 自动关闭
-    - [x] **Phase 9: UI 样式大统一与交互安全 (UI Unification)**
-        - [x] **按钮迁移**: 统一将删除按钮移至模态框页脚左侧
-        - [x] **确认拦截**: 全系统集成 `ConfirmModal` 二次确认机制
-        - [x] **视觉对齐**: 统一页脚按钮比例与 `text-xs` 字号
-        - [x] 完善角色、物品功能
-    - [x] **Phase 10: @ Mention 扩展与全局搜索增强**
-        - [x] **@ Mention 世界观/地图支持**: 扩展 `MentionsPlugin.tsx` 和 `PlotPointModal.tsx` 支持 world/map 类型
-        - [x] **类别筛选标签**: 在 @ mention 下拉中添加全部/角色/物品/世界观/地图标签
-        - [x] **后端数据源**: 修改 `main.ts` 的 `db:get-mentionables` 返回世界观和地图数据
-        - [x] **全局搜索地图集成**: `SearchSidebar.tsx` 新增地图搜索分类和结果展示
-        - [x] **搜索导航增强**: 点击搜索结果跳转到对应实体并高亮（角色/物品/世界观/地图）
-        - [x] **EntityInfoCard 优化**: 移除底部 ID/验证链接，实现动态定位防溢出
-- [ ] 云同步功能开发
-    - [ ] `SyncService.java` 代码审查
-    - [ ] 增量同步逻辑完善
+## 执行清单（按顺序）
+
+### Phase A: 配置与基础设施
+- [x] 新增 `ai:*` IPC 命名空间（main/preload/types）
+- [x] 新增 `AiProvider` 抽象与 Provider 工厂
+- [x] 实现 HTTP Provider（支持 OpenAI/Anthropic 兼容接口）
+- [x] 实现 MCP CLI Provider（stdio 通信）
+
+### Phase B: AI 设置界面
+- [x] 在 `SettingsModal` 新增 `AI` 分页
+- [x] API 配置表单：`baseUrl` `apiKey` `model` `timeoutMs`
+- [x] 多模型可选：支持 OpenAI/Gemini/豆包预设，文本模型与生图模型分离配置
+- [x] MCP 配置表单：`cliPath` `argsTemplate` `workingDir` `envJson` `startupTimeoutMs`
+- [x] 代理配置表单：`mode` `httpProxy` `httpsProxy` `allProxy` `noProxy`
+- [x] “测试连接”按钮：HTTP 连通测试
+- [x] “测试 MCP”按钮：CLI 可执行与握手测试
+- [x] “测试代理”按钮：代理路径连通测试
+- [ ] 直连模式验收：不依赖 OpenClaw，仅通过软件 UI + 豆包模型完成“生成->确认->入库”
+
+### Phase C: 标题 AI 生成
+- [x] 在章节标题输入区域新增“AI 生成标题”入口
+- [x] 输入上下文：当前章节正文 + 最近章节摘要 + 小说基础信息
+- [x] 输出 5-10 个候选标题 + 风格标签
+- [x] 支持一键替换/再生成
+- [x] 标题生成过程可视化进度（与续写一致）：按钮 loading + 阶段提示/进度条（请求中/生成中/解析中）
+- [x] 标题生成状态提示文案与失败提示统一（i18n）
+
+### Phase D: 自动续写（强约束）
+- [x] 新建 `ContextBuilder`：统一组装续写上下文
+- [x] 续写前强制读取并注入：
+    - [x] 全量世界观（`WorldSetting`）
+    - [x] 全量大纲（`PlotLine + PlotPoint + Anchor`）
+    - [x] 关键实体（角色/物品/地图）
+- [x] 注入最近 N 章正文与当前章节光标前文本
+- [x] 支持参数：目标字数、上下文章数、风格、温度
+- [x] 生成后执行一致性检查并返回冲突提示
+
+### Phase D.1: 续写触发与交互分流（新增）
+- [x] 统一触发入口：UI “续写”按钮 + `chapter.generate` action
+- [ ] 新建章节（空章）续写资格校验：
+    - [x] 判断是否第一章
+    - [x] 判断是否存在大纲（PlotLine/PlotPoint）
+    - [x] 第一章且无大纲时阻断并提供三路径引导（去大纲/先手写/去 AI 大纲生成）
+- [ ] 现有章节续写配置弹窗：
+    - [x] 灵感选择（支持多选已有灵感）
+    - [x] 长度（短/中/长）映射 `targetLength`
+    - [x] 创意程度（稳妥/平衡/创意）映射 `temperature`
+    - [x] 上下文章数映射 `contextChapterCount`
+    - [x] 风格语气（`style/tone`）
+    - [x] 首章无大纲阻断弹窗增加“去 AI 大纲生成器”入口（跳转设置-AI页）
+- [x] 续写结果采用追加预览（diff）+ 用户确认后写入 `chapter.save`
+- [x] 续写配置模态框内新增“提示词预览”（结构化/原文）+ 本次临时提示词覆盖（仅本次生效）
+- [x] OpenClaw/智能体支持 `chapter.generate` 两种模式：`new_chapter` / `continue_chapter`
+- [x] `chapter.generate` / `continueWriting` 已接入 `ideaIds`，并注入 `ContextBuilder` 动态上下文（缺失灵感返回 warnings）
+- [x] OpenClaw 写入审计：`chapter.save` 保留来源 `ai_agent` 与 rollback point
+
+### Phase E: AI 快速创建创作资产（新增）
+- [x] 新增“AI 创作工坊”入口（ActivityBar: `ai_workbench`）
+- [x] AI 输出结构化草稿（JSON schema 约束）
+- [x] 预览区支持编辑、删除、勾选
+- [x] 入库前校验：`validateCreativeAssetsDraft`（必填/类型/重名/地图资产关系/标准化）
+- [ ] 地图生成支持：
+    - [x] 文本描述生成地图图片
+    - [x] 图片下载与本地保存（`userData/maps/<novelId>/`）
+    - [x] 图片路径关联到 `MapCanvas.background`
+    - [x] 地图 AI 生成参数支持：尺寸（如 1024x1024 / 1536x1024）与风格模板（写实/奇幻/古风/科技）
+    - [x] 地图 AI 生成失败原因在 UI 明确展示（网络错误/鉴权失败/模型不可用/超时/内容过滤）
+    - [x] 地图 AI 生成过程可视化进度：进度条或阶段提示（请求中/生成中/下载中/入库中），并显示预计耗时或已耗时
+    - [x] 生成按钮交互优化：禁用期间显示明确状态与原因，避免“无反馈等待”
+    - [x] 配额保护（Doubao-Seedream-5.0-lite）：默认低成本参数 + 429 明确提示 + 调用统计
+- [ ] 用户确认后执行入库：
+    - [x] 大纲 -> `PlotLine/PlotPoint`
+    - [x] 角色 -> `Character`
+    - [x] 物品/技能 -> `Item`（type 区分）
+    - [x] 世界地图 -> `MapCanvas` + 背景图片资产
+- [x] 批量入库使用事务（原子回滚）+ 失败明细返回
+- [x] 重名与关联冲突校验（入库前）
+- [x] `confirmCreativeAssets` 返回增强：`success/created/warnings/errors?/transactionMode:'atomic'`
+- [x] 工坊状态机与反馈收尾：生成/校验/入库阶段化 + 用户化错误摘要 + 详细错误折叠 + 原子回滚提示 + i18n
+- [x] AI 工坊内新增“提示词预览”（结构化/原文）+ 本次临时提示词覆盖（仅本次生效）
+- [x] 地图 AI 生成模态框新增“引用世界观 + 提示词预览”（结构化/原文）+ 本次临时提示词覆盖（仅本次生效）
+
+### Phase F: 记忆压缩与 RAG
+- [x] 新增章节摘要表与更新流程
+    - [x] Prisma schema 已新增 `ChapterSummary`（含内容指纹、事实JSON、模型元数据、状态与错误信息、索引）
+    - [x] 章节保存后异步更新 `ChapterSummary`（`db:save-chapter` 与 `chapter.save` action 双路径）
+    - [x] 摘要更新节流策略：保存后防抖 + 最小间隔 + 最小字数变化阈值
+    - [x] 摘要模式可配置：本地启发式 / AI 摘要（AI 失败自动回退本地）
+    - [x] 摘要触发策略可配置：自动 / 仅手动 / 章节完稿后触发（AI 默认仅手动）
+    - [x] 编辑器章节页已提供“手动生成摘要”按钮（调用 `ai:rebuild-chapter-summary`）
+- [ ] 新增卷摘要/全书摘要聚合
+    - [x] Prisma schema 已新增 `NarrativeSummary`（volume/novel 聚合层，含覆盖范围、约束与元数据）
+    - [x] `chapterSummary` 完成后异步触发聚合更新（volume + novel）
+    - [x] ContextBuilder 已接入最新 `NarrativeSummary`（续写上下文注入）
+- [x] 续写时检索“关键事实 + 摘要片段”注入 Prompt
+    - [x] ContextBuilder 优先读取最新 `ChapterSummary`，缺失时回退章节正文片段
+    - [x] 续写时最近几章优先正文片段（用于贴近文风），其余章节走摘要优先策略
+
+### Phase G: 验收
+- [ ] 手工测试：无代理/系统代理/v2ray 自定义代理
+- [ ] 手工测试：HTTP Provider 与 MCP CLI Provider
+- [ ] 手工测试：标题生成过程显示进度（loading/阶段提示），成功与失败状态可正确收敛
+- [ ] 手工测试：标题生成进度条在“请求中/生成中/解析中”阶段正确推进，失败后状态清理
+- [ ] 手工测试：续写是否遵循世界观与大纲
+- [ ] 手工测试：AI 资产生成确认后是否正确入库
+- [ ] 手工测试：AI 工坊入库前校验可阻断非法草稿并返回可读错误
+- [ ] 手工测试：AI 工坊原子事务生效（任一失败时整批回滚）
+- [ ] 手工测试：AI 地图图片是否成功落盘并可在地图工作台打开
+- [ ] 终端验收：`ai:diag smoke mcp|skill|coverage` 与 `--json` 输出符合预期
+- [ ] 补充用户文档（AI 设置与故障排查）
+- [x] 文档同步：`.agent/*`、`DEVELOPMENT.md`、`README.md`、`USER_GUIDE*.md`、`apps/backend/README.md`
+
+### Phase H: AI 全域操作平台（新增）
+- [x] 设计 Capability Registry：`feature -> actions -> input schema -> output schema -> permissions`
+- [x] 新增统一入口 `ai:execute-action`（按 actionId 调度到既有业务能力）
+- [x] OpenClaw 工具通道（MCP）适配：`ai:get-openclaw-manifest` + `ai:openclaw-mcp-invoke`
+- [x] OpenClaw Skill 通道适配：`ai:get-openclaw-skill-manifest` + `ai:openclaw-skill-invoke`
+- [x] OpenClaw 双通道健康检查：`ai:test-openclaw-mcp` + `ai:test-openclaw-skill`
+- [ ] 建立现有功能 AI 覆盖矩阵并补齐缺口：
+    - [x] 新增能力覆盖矩阵查询：`ai:get-capability-coverage`（主进程 + 终端 `ai:diag coverage`）
+    - [ ] 小说/卷章管理
+    - [ ] 编辑器操作（标题/续写/改写/总结）
+    - [ ] 全局搜索与跳转
+    - [ ] 大纲/故事线/锚点
+    - [ ] 角色/物品/世界观/地图
+    - [ ] 备份恢复
+- [x] MCP Tool Manifest 自动导出（供 Claude Code 等 CLI 直接发现能力）- 已提供 `ai:get-mcp-manifest`
+- [ ] 新功能接入门禁：PR 必须包含对应 AI action 定义与最小测试
+
+### Phase H.1: OpenClaw 对话式章节生成闭环（新增）
+- [x] 新增章节定位动作：`volume.list` `chapter.list`
+- [x] 新增章节写入动作：`chapter.create` `chapter.save`
+- [x] 新增生成动作：`chapter.generate`（内部调用 doubao，支持方向/长度/语气参数）
+- [x] `chapter.generate` 强制上下文注入：世界观 + 大纲 + 关键实体 + 最近 N 章
+- [ ] 边界校正：对话确认由 OpenClaw 编排；软件侧仅做参数校验与写入护栏
+- [x] 统一错误码（基础层）：`INVALID_INPUT/NOT_FOUND/PROVIDER_*/NETWORK_ERROR/PERSISTENCE_ERROR`
+- [x] 统一错误码（展示层）：UI 与聊天侧映射为可读失败原因
+    - [x] UI 侧已接入可读错误映射（Editor 续写/摘要触发、AI 设置页测试入口）
+    - [x] 聊天/OpenClaw 返回层已接入可读错误映射（`ai:openclaw-*` 返回中文错误 + code）
+    - [x] 修复主进程 AI 错误文案乱码（`electron/ai/errors.ts`）
+    - [x] 补齐续写/标题生成相关 i18n 键（`zh.json`/`en.json`），避免回退文案导致乱码与不一致
+- [x] OpenClaw Skill Manifest 覆盖上述 action 并通过 smoke test
+- [x] OpenClaw MCP Manifest 覆盖上述 action 并通过 smoke test
+    - [x] 新增 `ai:test-openclaw-smoke`：校验 manifest 关键 action 覆盖 + 读链路冒烟（`novel.list -> volume.list -> chapter.list`）
+    - [x] 开发诊断收口：设置页移除 smoke/coverage 可视化，仅保留终端 `ai:diag` 输出
+
+### Phase I: AI 启用式输入入口（未来计划）
+- [x] 当前版本策略：`Space` 启用 Chat 模式暂不开放，已屏蔽入口与触发；统一延后至 2.0
+- [ ] 空白态/章节顶部提示文案：`按 Space（空格）以启用 AI，或按 / 启用命令`
+- [ ] `Space` 快捷触发：在编辑器可输入区域激活 AI 输入条（不打断现有内容）
+- [ ] `/` 快捷触发：打开 AI 命令面板（续写/改写/总结/生成标题等）
+- [ ] AI 输入条交互：发送按钮 + Enter 发送 + Shift+Enter 换行 + ESC 关闭
+- [ ] 输入条视觉样式按参考图实现（暗色玻璃面板、圆角边框、左侧图标、右侧发送）
+- [ ] 状态反馈：请求中/执行中/完成/失败 的轻量进度提示
+- [ ] 完整 i18n（zh/en）与主题适配（light/dark）
