@@ -48,6 +48,12 @@ Note: validation runs before persistence. If one item fails, the batch is rolled
 - AI summary: higher quality, consumes model tokens.
 - Recommended: use AI summary in manual mode or when a chapter is finished.
 
+### 3.5 AI Key Storage
+- `API Key` / `API Token` values are stored only on the current device.
+- They are saved in `ai-settings.json` under the app user data directory.
+- The app does not write these keys into the novel database.
+- Backup/restore does not include these keys. After restoring a backup, you must enter the key again if AI features are needed.
+
 ## 4. Common Shortcuts
 | Action | Windows/Linux | macOS |
 | --- | --- | --- |
@@ -62,3 +68,5 @@ Note: validation runs before persistence. If one item fails, the batch is rolled
 - Continuation quality is off: tune context range and style/tone, then regenerate.
 - Search misses content: save chapter first and retry.
 - Map generation fails: verify model settings and network, then retry.
+- AI settings are missing after moving devices or restoring a backup: this is expected because API keys stay local and are not migrated with backups.
+

@@ -8,7 +8,9 @@ const __dirname = path.dirname(__filename);
 const require = createRequire(import.meta.url);
 
 // Source: packages/core/node_modules/.prisma
-// Destination: apps/desktop/node_modules/.prisma
+// Destination:
+//   1. apps/desktop/node_modules/.prisma
+//   2. apps/desktop/node_modules/@prisma/client/.prisma
 
 // In a pnpm monorepo, the location might vary, but since we run db:generate in packages/core,
 // it should be resolvable from there or we need to find where Require resolves it.
@@ -92,10 +94,19 @@ if (!fs.existsSync(prismaSrc)) {
 }
 
 const prismaDest = path.join(desktopNodeModules, '.prisma');
+const prismaClientNestedDest = path.join(desktopNodeModules, '@prisma', 'client', '.prisma');
+const corePrismaClientNestedDest = path.join(desktopNodeModules, '@novel-editor', 'core', 'node_modules', '@prisma', 'client', '.prisma');
+const coreNodeModulesPrismaDest = path.join(desktopNodeModules, '@novel-editor', 'core', 'node_modules', '.prisma');
 
 if (fs.existsSync(prismaSrc)) {
     console.log(`[Build] Copying .prisma from ${prismaSrc} to ${prismaDest}`);
     copyDir(prismaSrc, prismaDest);
+    console.log(`[Build] Copying .prisma from ${prismaSrc} to ${prismaClientNestedDest}`);
+    copyDir(prismaSrc, prismaClientNestedDest);
+    console.log(`[Build] Copying .prisma from ${prismaSrc} to ${corePrismaClientNestedDest}`);
+    copyDir(prismaSrc, corePrismaClientNestedDest);
+    console.log(`[Build] Copying .prisma from ${prismaSrc} to ${coreNodeModulesPrismaDest}`);
+    copyDir(prismaSrc, coreNodeModulesPrismaDest);
     console.log('[Build] Copy complete.');
 } else {
     console.error('[Build] Error: Could not find .prisma directory. Make sure to run "pnpm db:generate" in packages/core first.');

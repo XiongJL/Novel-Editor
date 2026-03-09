@@ -44,3 +44,12 @@
 - [x] 用户文档中英一致：`README.md`、`USER_GUIDE.md`、`USER_GUIDE_EN.md`
 - [x] 用户文档不包含开发诊断细节（smoke/coverage/list actions 等）
 - [x] 文档中的 `ai:diag` 命令与参数、退出码说明一致
+- [x] 开发文档补充 debug 日志方案（`debug-dev.log`）
+- [x] 开发文档补充 Prisma 打包初始化方案（生成 client + schema-init.sql + 首启建表）
+
+## 打包与数据库后续
+- [x] `packages/core` 构建期生成 Prisma Client 到 `generated/client`
+- [x] 同步生成 `schema-init.sql`
+- [x] 打包版首启自动建表逻辑接入
+- [ ] 验证打包版“创建小说”链路无报错
+- [ ] 设计并实现版本化 migration runner（替代用户机运行时 `db push`）

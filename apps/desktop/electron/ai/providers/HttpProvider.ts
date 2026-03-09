@@ -1,4 +1,5 @@
 ﻿import { AiGenerateRequest, AiGenerateResponse, AiHealthCheckResult, AiImageRequest, AiImageResponse, AiProvider, AiSettings } from '../types';
+import { devLog, devLogError, redactForLog } from '../../debug/devLogger';
 
 function joinUrl(baseUrl: string, path: string): string {
     return `${baseUrl.replace(/\/+$/, '')}/${path.replace(/^\/+/, '')}`;
@@ -35,13 +36,21 @@ export class HttpProvider implements AiProvider {
 
         const controller = new AbortController();
         let didTimeout = false;
+        const effectiveTimeout = Math.max(1000, timeoutMs);
         const timer = setTimeout(() => {
             didTimeout = true;
             controller.abort();
-        }, Math.max(1000, timeoutMs));
+        }, effectiveTimeout);
+        const url = joinUrl(baseUrl, 'models');
+        const startedAt = Date.now();
 
         try {
-            const res = await fetch(joinUrl(baseUrl, 'models'), {
+            devLog('INFO', 'HttpProvider.healthCheck.request', 'HTTP health check request', {
+                url,
+                timeoutMs: effectiveTimeout,
+                headers: { Authorization: `Bearer ${apiKey}` },
+            });
+            const res = await fetch(url, {
                 method: 'GET',
                 headers: {
                     Authorization: `Bearer ${apiKey}`,
@@ -50,12 +59,27 @@ export class HttpProvider implements AiProvider {
             });
 
             if (!res.ok) {
+                devLog('WARN', 'HttpProvider.healthCheck.response', 'HTTP health check rejected', {
+                    url,
+                    status: res.status,
+                    elapsedMs: Date.now() - startedAt,
+                });
                 return { ok: false, detail: `HTTP provider rejected: ${res.status}` };
             }
+            devLog('INFO', 'HttpProvider.healthCheck.response', 'HTTP health check ok', {
+                url,
+                status: res.status,
+                elapsedMs: Date.now() - startedAt,
+            });
             return { ok: true, detail: 'HTTP provider is reachable' };
         } catch (error: any) {
+            devLogError('HttpProvider.healthCheck.error', error, {
+                url,
+                elapsedMs: Date.now() - startedAt,
+                didTimeout,
+            });
             if (didTimeout) {
-                return { ok: false, detail: `HTTP health check timed out after ${Math.max(1000, timeoutMs)}ms` };
+                return { ok: false, detail: `HTTP health check timed out after ${effectiveTimeout}ms` };
             }
             return { ok: false, detail: `HTTP health check failed: ${error?.message || 'unknown error'}` };
         } finally {
@@ -86,9 +110,16 @@ export class HttpProvider implements AiProvider {
             max_tokens: req.maxTokens ?? this.settings.http.maxTokens,
             temperature: req.temperature ?? this.settings.http.temperature,
         };
+        const url = joinUrl(this.settings.http.baseUrl, 'chat/completions');
+        const startedAt = Date.now();
 
         try {
-            const res = await fetch(joinUrl(this.settings.http.baseUrl, 'chat/completions'), {
+            devLog('INFO', 'HttpProvider.generate.request', 'AI text generation request', {
+                url,
+                timeoutMs: timeout,
+                body: redactForLog(body),
+            });
+            const res = await fetch(url, {
                 method: 'POST',
                 headers: {
                     Authorization: `Bearer ${this.settings.http.apiKey}`,
@@ -100,6 +131,12 @@ export class HttpProvider implements AiProvider {
 
             const text = await res.text();
             const json = parseJsonSafe(text);
+            devLog('INFO', 'HttpProvider.generate.response', 'AI text generation response', {
+                url,
+                status: res.status,
+                elapsedMs: Date.now() - startedAt,
+                text,
+            });
 
             if (!res.ok) {
                 throw new Error(json?.error?.message || `HTTP ${res.status}: ${text.slice(0, 300)}`);
@@ -116,6 +153,12 @@ export class HttpProvider implements AiProvider {
                 model: json?.model || this.settings.http.model,
             };
         } catch (error: any) {
+            devLogError('HttpProvider.generate.error', error, {
+                url,
+                elapsedMs: Date.now() - startedAt,
+                didTimeout,
+                requestBody: redactForLog(body),
+            });
             if (didTimeout || error?.name === 'AbortError') {
                 throw new Error(`HTTP request timeout after ${timeout}ms`);
             }
@@ -138,26 +181,40 @@ export class HttpProvider implements AiProvider {
             didTimeout = true;
             controller.abort();
         }, timeout);
+        const body = {
+            model: req.model || this.settings.http.model,
+            prompt,
+            size: req.size || '1024x1024',
+            output_format: req.outputFormat || 'png',
+            watermark: req.watermark ?? true,
+        };
+        const url = joinUrl(this.settings.http.baseUrl, 'images/generations');
+        const startedAt = Date.now();
 
         try {
-            const res = await fetch(joinUrl(this.settings.http.baseUrl, 'images/generations'), {
+            devLog('INFO', 'HttpProvider.generateImage.request', 'AI image generation request', {
+                url,
+                timeoutMs: timeout,
+                body: redactForLog(body),
+            });
+            const res = await fetch(url, {
                 method: 'POST',
                 headers: {
                     Authorization: `Bearer ${this.settings.http.apiKey}`,
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify({
-                    model: req.model || this.settings.http.model,
-                    prompt,
-                    size: req.size || '1024x1024',
-                    output_format: req.outputFormat || 'png',
-                    watermark: req.watermark ?? true,
-                }),
+                body: JSON.stringify(body),
                 signal: controller.signal,
             });
 
             const text = await res.text();
             const json = parseJsonSafe(text);
+            devLog('INFO', 'HttpProvider.generateImage.response', 'AI image generation response', {
+                url,
+                status: res.status,
+                elapsedMs: Date.now() - startedAt,
+                text,
+            });
 
             if (!res.ok) {
                 throw new Error(json?.error?.message || `HTTP ${res.status}: ${text.slice(0, 300)}`);
@@ -170,6 +227,12 @@ export class HttpProvider implements AiProvider {
                 mimeType: 'image/png',
             };
         } catch (error: any) {
+            devLogError('HttpProvider.generateImage.error', error, {
+                url,
+                elapsedMs: Date.now() - startedAt,
+                didTimeout,
+                requestBody: redactForLog(body),
+            });
             if (didTimeout || error?.name === 'AbortError') {
                 throw new Error(`HTTP request timeout after ${timeout}ms`);
             }

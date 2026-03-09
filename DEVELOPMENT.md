@@ -8,14 +8,21 @@
 - 分层：`packages/core` 保持纯逻辑/数据层，不引入 UI 依赖。
 
 ## 2. 数据库与模型变更流程
-修改 `packages/core/prisma/schema.prisma` 后按顺序执行：
+开发阶段修改 `packages/core/prisma/schema.prisma` 后，不再手工依赖运行时 `@prisma/client` 目录结构。当前流程是：
 
 ```bash
-pnpm db:push
-pnpm db:generate
+pnpm --filter @novel-editor/core run build
 ```
 
-如被 Electron 进程占用导致失败，先结束相关进程再重试。
+该命令会同时完成：
+- Prisma Client 生成到 `packages/core/generated/client`
+- 生成首启建库 SQL：`packages/core/generated/client/schema-init.sql`
+- TypeScript 编译到 `packages/core/dist`
+
+说明：
+- Desktop 的 `predev` / `prebuild` 已自动执行 `prepare:core`，正常情况下无需额外手工运行。
+- 开发环境需要同步本地数据库结构时，仍可使用 `pnpm db:push`，但打包版不依赖运行时 `prisma db push`。
+- 打包版首次启动发现数据库缺表时，会执行内置的 `schema-init.sql` 自动建表。
 
 ## 3. Electron IPC 约定
 - Main：`ipcMain.handle('namespace:action')`
@@ -26,6 +33,22 @@ pnpm db:generate
 - 前端问题：Electron DevTools Console。
 - 主进程问题：`pnpm dev` 终端输出。
 - 类型问题：`pnpm --filter @novel-editor/desktop exec tsc --noEmit --pretty false`。
+
+### 开发模式 Debug 日志
+开发模式会额外写本地调试日志：
+
+- 文件位置：Electron `userData/debug-dev.log`
+- 生效范围：仅开发模式（不在打包用户环境启用）
+- 文件策略：单文件上限 `15MB`，超出后直接覆盖重写
+
+记录内容：
+- 主进程错误：`console.error` / `console.warn` / `uncaughtException` / `unhandledRejection`
+- AI 请求链路：HTTP Provider / MCP CLI Provider 的请求体、响应体、状态码、耗时、异常
+- AI 业务入口摘要：标题生成、续写、AI 工坊、地图生成、提示词预览、确认入库
+
+脱敏规则：
+- 自动脱敏 `Authorization` / `apiKey` / `token` / `access_token` / `refresh_token`
+- Prompt 和模型返回正文在开发模式下允许记录
 
 ### Desktop Dev Server 可选启动配置
 默认开发命令不变：
@@ -76,14 +99,29 @@ pnpm --filter @novel-editor/desktop run ai:diag -- coverage
 - 诊断脚本放在 `apps/desktop/scripts`，不作为用户可见功能入口。
 - 打包前确认 `packages/core` 已可用，避免 Prisma Client 缺失。
 - 开发诊断参数（如 `--ai-diag`）仅开发环境可用，打包环境应拒绝。
+- Prisma 打包策略已切换为：
+  - 构建期生成 `packages/core/generated/client`
+  - 打包时直接携带生成产物
+  - 打包版首次启动通过 `ensureDbSchema()` 执行 `schema-init.sql`
+- 当前不再把“运行时调用 Prisma CLI 做 `db push`”作为打包版初始化依赖。
+- 后续版本升级建议走“版本化 migration runner”，而不是在用户机器上执行 `prisma db push`。
 
 ## 7. 文档更新原则
 - 用户文档（`README.md` / `USER_GUIDE*.md`）仅描述用户可见能力。
 - 开发诊断、覆盖矩阵、smoke 细节仅保留在开发文档。
 - 每次阶段更新需同步 `.agent/*` 与用户文档，避免状态不一致。
 
-## 8. 参考路径
+## 8. AI 设置存储说明
+- AI 设置持久化文件位于 Electron `userData` 目录下的 `ai-settings.json`。
+- `http.apiKey` / `apiToken` 类敏感字段仅本地保存，不写入 `novel_editor.db`。
+- 备份恢复流程不应导出或恢复 `ai-settings.json`；恢复后需要用户重新填写密钥。
+
+## 9. 参考路径
 - 桌面端：`apps/desktop`
 - AI 主进程：`apps/desktop/electron/ai`
+- 开发日志：`apps/desktop/electron/debug/devLogger.ts`
 - AI 工坊 UI：`apps/desktop/src/components/AIWorkbench`
 - 诊断脚本：`apps/desktop/scripts/ai-dev-diagnostics.mjs`
+- Core Prisma 生成脚本：`packages/core/scripts/generate-prisma-client.mjs`
+- 生成产物：`packages/core/generated/client`
+

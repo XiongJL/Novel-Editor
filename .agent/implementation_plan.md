@@ -7,6 +7,9 @@
 - 诊断主进程入口 `--ai-diag` 仅开发环境可用，打包环境拒绝。
 - Phase E 按“生成 -> 预览编辑 -> 入库前校验 -> 原子事务入库”闭环推进。
 - 入库事务默认 `atomic`（任一失败整批回滚）。
+- AI `apiKey/apiToken` 仅保存在本地 `userData/ai-settings.json`，不写入小说数据库，也不参与备份恢复。
+- 开发模式启用本地 debug 日志：`debug-dev.log`，记录 AI 请求/响应与主进程错误，单文件 15MB 覆盖。
+- Prisma 打包策略切换为“构建期生成 client + 首次启动内置 SQL 初始化”，不依赖打包版运行时 `prisma db push`。
 
 ## 2. 当前实现状态（按阶段）
 
@@ -126,7 +129,38 @@ pnpm --filter @novel-editor/desktop run ai:diag -- coverage
 - `testOpenClawSmoke`
 - `getCapabilityCoverage`
 
-## 7. 验收标准
+## 7. 开发日志与打包基线（新增）
+
+### 7.1 Dev Debug Log
+- 文件：Electron `userData/debug-dev.log`
+- 范围：仅开发模式
+- 策略：单文件 `15MB`，超出后清空重写
+- 内容：
+  - 主进程错误与 warning
+  - AI HTTP / MCP CLI 请求与响应
+  - AI 业务入口摘要日志
+- 脱敏：
+  - `Authorization`
+  - `apiKey`
+  - `token`
+  - `access_token`
+  - `refresh_token`
+
+### 7.2 Prisma Packaging
+- `packages/core` 改为构建期生成 Prisma Client：
+  - 输出目录：`packages/core/generated/client`
+  - 生成脚本：`packages/core/scripts/generate-prisma-client.mjs`
+- 同步生成首启初始化 SQL：
+  - `packages/core/generated/client/schema-init.sql`
+- 打包版启动时：
+  1. `initDb(dbUrl)`
+  2. `ensureDbSchema()`
+  3. 若缺少核心表（如 `Novel`），执行 `schema-init.sql`
+- 结论：
+  - 打包版不再依赖运行时 Prisma CLI
+  - 后续升级应走版本化 migration runner，而不是用户机上 `db push`
+
+## 8. 验收标准
 
 ### A. 诊断收口
 - 设置页不再展示 smoke/coverage 相关入口。
@@ -148,7 +182,12 @@ pnpm --filter @novel-editor/desktop run ai:diag -- coverage
 - 用户文档中英结构一致。
 - 用户文档不暴露开发诊断细节。
 
-## 8. Future UX（已登记）
+### E. 打包与首启
+- `packages/core/generated/client` 与 `schema-init.sql` 构建成功。
+- `win-unpacked` 首次启动后可自动创建 SQLite 核心表。
+- 打包版创建小说成功，不再出现 `main.Novel does not exist`。
+
+## 9. Future UX（已登记）
 - 新增“AI 启用式输入”交互方案（参考图）：
   - 当前版本不启用 `Space -> Chat` 入口，统一放入 2.0 版本规划。
   - 空白态提示：`按 Space（空格）以启用 AI，或按 / 启用命令`。

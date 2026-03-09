@@ -290,7 +290,7 @@ export class ContextBuilder {
                 style: payload.style || 'default',
                 tone: payload.tone || 'balanced',
                 pace: payload.pace || 'medium',
-                targetLength: payload.targetLength ?? 500,
+                targetLength: Math.max(100, Math.min(4000, payload.targetLength ?? 500)),
             },
             usedContext: [
                 'world_settings_full',

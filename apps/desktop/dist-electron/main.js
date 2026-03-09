@@ -1,28 +1,24 @@
-var __defProp = Object.defineProperty;
-var __defNormalProp = (obj, key, value) => key in obj ? __defProp(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
-var __publicField = (obj, key, value) => {
-  __defNormalProp(obj, typeof key !== "symbol" ? key + "" : key, value);
-  return value;
-};
-import { app, dialog, ipcMain, nativeImage, BrowserWindow, protocol, net, session } from "electron";
-import { db, initDb } from "@novel-editor/core";
-import { fileURLToPath } from "node:url";
-import path from "node:path";
-import { execSync } from "child_process";
-import fs$1 from "fs";
-import fs from "node:fs";
-import { createHash, randomUUID } from "node:crypto";
-import { spawn } from "node:child_process";
-import path$1 from "path";
-import require$$0 from "zlib";
-import crypto from "crypto";
-async function initSearchIndex() {
+var $t = Object.defineProperty;
+var Rt = (r, t, e) => t in r ? $t(r, t, { enumerable: !0, configurable: !0, writable: !0, value: e }) : r[t] = e;
+var ee = (r, t, e) => (Rt(r, typeof t != "symbol" ? t + "" : t, e), e);
+import { app as b, dialog as Ce, ipcMain as S, nativeImage as Ft, BrowserWindow as wt, protocol as Ut, net as Bt, session as _e } from "electron";
+import { db as h, initDb as Ze, ensureDbSchema as zt } from "@novel-editor/core";
+import { fileURLToPath as jt } from "node:url";
+import L from "node:path";
+import { execSync as Ht } from "child_process";
+import x from "fs";
+import z from "node:fs";
+import { createHash as vt, randomUUID as qt } from "node:crypto";
+import { spawn as Vt } from "node:child_process";
+import ne from "path";
+import It from "zlib";
+import fe from "crypto";
+async function Wt() {
   try {
-    const tableExists = await db.$queryRaw`
+    if ((await h.$queryRaw`
             SELECT name FROM sqlite_master WHERE type='table' AND name='search_index';
-        `;
-    if (tableExists.length === 0) {
-      await db.$executeRaw`
+        `).length === 0)
+      await h.$executeRaw`
                 CREATE VIRTUAL TABLE search_index USING fts5(
                     content,
                     entity_type,
@@ -36,334 +32,236 @@ async function initSearchIndex() {
                     volume_id UNINDEXED,
                     tokenize='unicode61'
                 );
-            `;
-      console.log("[SearchIndex] FTS5 table created successfully");
-    } else {
-      const columnsToAdd = ["volume_title", "chapter_order", "volume_order", "volume_id"];
-      for (const col of columnsToAdd) {
+            `, console.log("[SearchIndex] FTS5 table created successfully");
+    else {
+      const t = ["volume_title", "chapter_order", "volume_order", "volume_id"];
+      for (const e of t)
         try {
-          await db.$executeRawUnsafe(`SELECT ${col} FROM search_index LIMIT 1;`);
-        } catch (e) {
-          console.warn(`[SearchIndex] Schema mismatch (missing ${col}). Attempting to add column...`);
+          await h.$executeRawUnsafe(`SELECT ${e} FROM search_index LIMIT 1;`);
+        } catch {
+          console.warn(`[SearchIndex] Schema mismatch (missing ${e}). Attempting to add column...`);
           try {
-            await db.$executeRawUnsafe(`ALTER TABLE search_index ADD COLUMN ${col};`);
-            console.log(`[SearchIndex] Added ${col} column successfully`);
-          } catch (alterError) {
-            console.error(`[SearchIndex] Failed to add column ${col}:`, alterError);
+            await h.$executeRawUnsafe(`ALTER TABLE search_index ADD COLUMN ${e};`), console.log(`[SearchIndex] Added ${e} column successfully`);
+          } catch (a) {
+            console.error(`[SearchIndex] Failed to add column ${e}:`, a);
           }
         }
-      }
     }
-  } catch (error) {
-    console.error("[SearchIndex] Failed to initialize FTS5 table:", error);
+  } catch (r) {
+    console.error("[SearchIndex] Failed to initialize FTS5 table:", r);
   }
 }
-function extractPlainText(lexicalJson) {
-  if (!lexicalJson)
+function Gt(r) {
+  if (!r)
     return "";
   try {
-    const state = JSON.parse(lexicalJson);
-    const textParts = [];
-    const traverse = (node) => {
-      if (node.type === "text" && node.text) {
-        textParts.push(node.text);
-      }
-      if (node.children && Array.isArray(node.children)) {
-        node.children.forEach(traverse);
-        if (node.type !== "root" && node.type !== "list" && node.type !== "listitem") {
-          textParts.push(" ");
-        }
-      }
+    const t = JSON.parse(r), e = [], n = (a) => {
+      a.type === "text" && a.text && e.push(a.text), a.children && Array.isArray(a.children) && (a.children.forEach(n), a.type !== "root" && a.type !== "list" && a.type !== "listitem" && e.push(" "));
     };
-    if (state.root) {
-      traverse(state.root);
-    }
-    return textParts.join("").trim();
+    return t.root && n(t.root), e.join("").trim();
   } catch {
-    return lexicalJson;
+    return r;
   }
 }
-async function indexChapter(chapter) {
-  const plainText = extractPlainText(chapter.content);
-  let novelId = chapter.novelId;
-  let volumeTitle = chapter.volumeTitle;
-  let order = chapter.order;
-  let volumeOrder = chapter.volumeOrder;
-  if (!novelId || !volumeTitle || order === void 0 || volumeOrder === void 0) {
-    const chapterWithVol = await db.chapter.findUnique({
-      where: { id: chapter.id },
+async function Ee(r) {
+  const t = Gt(r.content);
+  let e = r.novelId, n = r.volumeTitle, a = r.order, o = r.volumeOrder;
+  if (!e || !n || a === void 0 || o === void 0) {
+    const c = await h.chapter.findUnique({
+      where: { id: r.id },
       select: {
-        order: true,
-        volume: { select: { id: true, novelId: true, title: true, order: true } }
+        order: !0,
+        volume: { select: { id: !0, novelId: !0, title: !0, order: !0 } }
       }
     });
-    if (chapterWithVol) {
-      if (order === void 0)
-        order = chapterWithVol.order;
-      if (chapterWithVol.volume) {
-        if (!novelId)
-          novelId = chapterWithVol.volume.novelId;
-        if (!volumeTitle)
-          volumeTitle = chapterWithVol.volume.title;
-        if (volumeOrder === void 0)
-          volumeOrder = chapterWithVol.volume.order;
-      }
+    c && (a === void 0 && (a = c.order), c.volume && (e || (e = c.volume.novelId), n || (n = c.volume.title), o === void 0 && (o = c.volume.order)));
+  }
+  if (e)
+    try {
+      await h.$executeRaw`
+            DELETE FROM search_index WHERE entity_type = 'chapter' AND entity_id = ${r.id};
+        `, await h.$executeRaw`
+            INSERT INTO search_index (content, entity_type, entity_id, novel_id, chapter_id, title, volume_title, chapter_order, volume_order, volume_id)
+            VALUES (${t}, 'chapter', ${r.id}, ${e}, ${r.id}, ${r.title}, ${n || ""}, ${a || 0}, ${o || 0}, ${r.volumeId});
+        `;
+    } catch (c) {
+      console.error("[SearchIndex] Failed to index chapter:", c);
     }
-  }
-  if (!novelId)
-    return;
+}
+async function Ve(r) {
+  const t = [r.content, r.quote].filter(Boolean).join(" ");
   try {
-    await db.$executeRaw`
-            DELETE FROM search_index WHERE entity_type = 'chapter' AND entity_id = ${chapter.id};
-        `;
-    await db.$executeRaw`
+    await h.$executeRaw`
+            DELETE FROM search_index WHERE entity_type = 'idea' AND entity_id = ${r.id};
+        `, await h.$executeRaw`
             INSERT INTO search_index (content, entity_type, entity_id, novel_id, chapter_id, title, volume_title, chapter_order, volume_order, volume_id)
-            VALUES (${plainText}, 'chapter', ${chapter.id}, ${novelId}, ${chapter.id}, ${chapter.title}, ${volumeTitle || ""}, ${order || 0}, ${volumeOrder || 0}, ${chapter.volumeId});
+            VALUES (${t}, 'idea', ${r.id}, ${r.novelId}, ${r.chapterId || ""}, ${r.content.substring(0, 50)}, '', 0, 0, '');
         `;
-  } catch (error) {
-    console.error("[SearchIndex] Failed to index chapter:", error);
+  } catch (e) {
+    console.error("[SearchIndex] Failed to index idea:", e);
   }
 }
-async function indexIdea(idea) {
-  const searchContent = [idea.content, idea.quote].filter(Boolean).join(" ");
+async function Zt(r, t) {
   try {
-    await db.$executeRaw`
-            DELETE FROM search_index WHERE entity_type = 'idea' AND entity_id = ${idea.id};
+    await h.$executeRaw`
+            DELETE FROM search_index WHERE entity_type = ${r} AND entity_id = ${t};
         `;
-    await db.$executeRaw`
-            INSERT INTO search_index (content, entity_type, entity_id, novel_id, chapter_id, title, volume_title, chapter_order, volume_order, volume_id)
-            VALUES (${searchContent}, 'idea', ${idea.id}, ${idea.novelId}, ${idea.chapterId || ""}, ${idea.content.substring(0, 50)}, '', 0, 0, '');
-        `;
-  } catch (error) {
-    console.error("[SearchIndex] Failed to index idea:", error);
+  } catch (e) {
+    console.error("[SearchIndex] Failed to remove from index:", e);
   }
 }
-async function removeFromIndex(entityType, entityId) {
-  try {
-    await db.$executeRaw`
-            DELETE FROM search_index WHERE entity_type = ${entityType} AND entity_id = ${entityId};
-        `;
-  } catch (error) {
-    console.error("[SearchIndex] Failed to remove from index:", error);
-  }
-}
-async function search(novelId, keyword, limit = 20, offset = 0) {
-  if (!keyword.trim())
+async function Ct(r, t, e = 20, n = 0) {
+  if (!t.trim())
     return [];
   try {
-    const escapedKeyword = keyword.replace(/[%_]/g, "\\$&");
-    const likePattern = `%${escapedKeyword}%`;
-    const results = await db.$queryRaw`
+    const o = `%${t.replace(/[%_]/g, "\\$&")}%`, c = await h.$queryRaw`
             SELECT entity_type, entity_id, chapter_id, novel_id, title, volume_title, content, chapter_order, volume_order, volume_id
             FROM search_index
-            WHERE novel_id = ${novelId} 
-            AND (content LIKE ${likePattern} OR title LIKE ${likePattern} OR volume_title LIKE ${likePattern})
+            WHERE novel_id = ${r} 
+            AND (content LIKE ${o} OR title LIKE ${o} OR volume_title LIKE ${o})
             ORDER BY volume_order ASC, chapter_order ASC
-            LIMIT ${limit} OFFSET ${offset};
-        `;
-    const allResults = [];
-    const lowerKeyword = keyword.toLowerCase();
-    const matchedVolumes = /* @__PURE__ */ new Set();
-    for (const r of results) {
-      const docContent = r.content || "";
-      const title = r.title || "";
-      const volumeTitle = r.volume_title || "";
-      const chapterOrder = Number(r.chapter_order || 0);
-      const volumeOrder = Number(r.volume_order || 0);
-      if (r.entity_type === "chapter" && volumeTitle && volumeTitle.toLowerCase().includes(lowerKeyword)) {
-        if (!matchedVolumes.has(volumeTitle)) {
-          allResults.push({
-            entityType: "chapter",
-            entityId: r.entity_id,
-            chapterId: r.chapter_id,
-            novelId: r.novel_id,
-            title: r.title,
-            snippet: `Volume match: <mark>${volumeTitle}</mark>`,
-            preview: `Found in Volume: ${volumeTitle}`,
-            keyword,
-            matchType: "volume",
-            chapterOrder,
-            volumeTitle,
-            volumeOrder,
-            volumeId: r.volume_id
-          });
-          matchedVolumes.add(volumeTitle);
-        }
-      }
-      if (r.entity_type === "chapter" && title.toLowerCase().includes(lowerKeyword)) {
-        allResults.push({
-          entityType: "chapter",
-          entityId: r.entity_id,
-          chapterId: r.chapter_id,
-          novelId: r.novel_id,
-          title: r.title,
-          snippet: `Title match: <mark>${title}</mark>`,
-          preview: `Found in Title: ${title}`,
-          keyword,
-          matchType: "title",
-          chapterOrder,
-          volumeTitle,
-          volumeOrder,
-          volumeId: r.volume_id
-        });
-      }
-      const lowerContent = docContent.toLowerCase();
-      const indices = [];
-      let pos = 0;
-      while (pos < lowerContent.length && indices.length < 200) {
-        const idx = lowerContent.indexOf(lowerKeyword, pos);
-        if (idx === -1)
-          break;
-        indices.push(idx);
-        pos = idx + lowerKeyword.length;
-      }
-      const SNIPPET_WINDOW = 60;
-      const mergedIndices = [];
-      for (const index of indices) {
-        if (mergedIndices.length === 0 || index - mergedIndices[mergedIndices.length - 1] > SNIPPET_WINDOW) {
-          mergedIndices.push(index);
-        }
-      }
-      for (const index of mergedIndices) {
-        allResults.push({
-          entityType: r.entity_type,
-          entityId: r.entity_id,
-          chapterId: r.chapter_id,
-          novelId: r.novel_id,
-          title: r.title,
-          snippet: generateSnippetAtIndex(docContent, keyword, index, 10, true),
-          preview: generateSnippetAtIndex(docContent, keyword, index, 25, false),
-          keyword,
-          matchType: "content",
-          chapterOrder,
-          volumeTitle,
-          volumeOrder,
-          volumeId: r.volume_id
-        });
-      }
-    }
-    return allResults;
-  } catch (error) {
-    console.error("[SearchIndex] Search failed:", error);
-    return [];
-  }
-}
-function generateSnippetAtIndex(content, keyword, index, contextLength = 30, useMark = true) {
-  if (!content)
-    return "";
-  const start = Math.max(0, index - contextLength);
-  const end = Math.min(content.length, index + keyword.length + contextLength * 2);
-  let snippet = "";
-  if (start > 0)
-    snippet += "...";
-  const before = content.substring(start, index);
-  const match = content.substring(index, index + keyword.length);
-  const after = content.substring(index + keyword.length, end);
-  if (useMark) {
-    snippet += before + "<mark>" + match + "</mark>" + after;
-  } else {
-    snippet += before + match + after;
-  }
-  if (end < content.length)
-    snippet += "...";
-  return snippet;
-}
-async function rebuildIndex(novelId) {
-  var _a, _b;
-  let chaptersIndexed = 0;
-  let ideasIndexed = 0;
-  try {
-    await db.$executeRaw`DELETE FROM search_index WHERE novel_id = ${novelId};`;
-    const chapters = await db.chapter.findMany({
-      where: { volume: { novelId } },
-      select: {
-        id: true,
-        title: true,
-        content: true,
-        volumeId: true,
-        order: true,
-        volume: { select: { title: true, order: true } }
-      }
-    });
-    for (const chapter of chapters) {
-      await indexChapter({
-        ...chapter,
-        novelId,
-        volumeTitle: (_a = chapter.volume) == null ? void 0 : _a.title,
-        volumeOrder: (_b = chapter.volume) == null ? void 0 : _b.order
+            LIMIT ${e} OFFSET ${n};
+        `, i = [], l = t.toLowerCase(), I = /* @__PURE__ */ new Set();
+    for (const w of c) {
+      const E = w.content || "", C = w.title || "", p = w.volume_title || "", g = Number(w.chapter_order || 0), f = Number(w.volume_order || 0);
+      w.entity_type === "chapter" && p && p.toLowerCase().includes(l) && (I.has(p) || (i.push({
+        entityType: "chapter",
+        entityId: w.entity_id,
+        chapterId: w.chapter_id,
+        novelId: w.novel_id,
+        title: w.title,
+        snippet: `Volume match: <mark>${p}</mark>`,
+        preview: `Found in Volume: ${p}`,
+        keyword: t,
+        matchType: "volume",
+        chapterOrder: g,
+        volumeTitle: p,
+        volumeOrder: f,
+        volumeId: w.volume_id
+      }), I.add(p))), w.entity_type === "chapter" && C.toLowerCase().includes(l) && i.push({
+        entityType: "chapter",
+        entityId: w.entity_id,
+        chapterId: w.chapter_id,
+        novelId: w.novel_id,
+        title: w.title,
+        snippet: `Title match: <mark>${C}</mark>`,
+        preview: `Found in Title: ${C}`,
+        keyword: t,
+        matchType: "title",
+        chapterOrder: g,
+        volumeTitle: p,
+        volumeOrder: f,
+        volumeId: w.volume_id
       });
-      chaptersIndexed++;
+      const m = E.toLowerCase(), u = [];
+      let s = 0;
+      for (; s < m.length && u.length < 200; ) {
+        const v = m.indexOf(l, s);
+        if (v === -1)
+          break;
+        u.push(v), s = v + l.length;
+      }
+      const d = 60, y = [];
+      for (const v of u)
+        (y.length === 0 || v - y[y.length - 1] > d) && y.push(v);
+      for (const v of y)
+        i.push({
+          entityType: w.entity_type,
+          entityId: w.entity_id,
+          chapterId: w.chapter_id,
+          novelId: w.novel_id,
+          title: w.title,
+          snippet: Je(E, t, v, 10, !0),
+          preview: Je(E, t, v, 25, !1),
+          keyword: t,
+          matchType: "content",
+          chapterOrder: g,
+          volumeTitle: p,
+          volumeOrder: f,
+          volumeId: w.volume_id
+        });
     }
-    const ideas = await db.idea.findMany({
-      where: { novelId },
-      select: { id: true, content: true, quote: true, novelId: true, chapterId: true }
-    });
-    for (const idea of ideas) {
-      await indexIdea(idea);
-      ideasIndexed++;
-    }
-  } catch (error) {
-    console.error("[SearchIndex] Rebuild failed:", error);
+    return i;
+  } catch (a) {
+    return console.error("[SearchIndex] Search failed:", a), [];
   }
-  return { chapters: chaptersIndexed, ideas: ideasIndexed };
 }
-async function getIndexStats(novelId) {
+function Je(r, t, e, n = 30, a = !0) {
+  if (!r)
+    return "";
+  const o = Math.max(0, e - n), c = Math.min(r.length, e + t.length + n * 2);
+  let i = "";
+  o > 0 && (i += "...");
+  const l = r.substring(o, e), I = r.substring(e, e + t.length), w = r.substring(e + t.length, c);
+  return a ? i += l + "<mark>" + I + "</mark>" + w : i += l + I + w, c < r.length && (i += "..."), i;
+}
+async function Jt(r) {
+  var n, a;
+  let t = 0, e = 0;
   try {
-    const result = await db.$queryRaw`
-            SELECT entity_type, COUNT(*) as count FROM search_index WHERE novel_id = ${novelId} GROUP BY entity_type;
-        `;
-    let chapters = 0;
-    let ideas = 0;
-    result.forEach((r) => {
-      if (r.entity_type === "chapter")
-        chapters = Number(r.count);
-      if (r.entity_type === "idea")
-        ideas = Number(r.count);
+    await h.$executeRaw`DELETE FROM search_index WHERE novel_id = ${r};`;
+    const o = await h.chapter.findMany({
+      where: { volume: { novelId: r } },
+      select: {
+        id: !0,
+        title: !0,
+        content: !0,
+        volumeId: !0,
+        order: !0,
+        volume: { select: { title: !0, order: !0 } }
+      }
     });
-    return { chapters, ideas };
-  } catch (error) {
-    console.error("[SearchIndex] Failed to get stats:", error);
-    return { chapters: 0, ideas: 0 };
+    for (const i of o)
+      await Ee({
+        ...i,
+        novelId: r,
+        volumeTitle: (n = i.volume) == null ? void 0 : n.title,
+        volumeOrder: (a = i.volume) == null ? void 0 : a.order
+      }), t++;
+    const c = await h.idea.findMany({
+      where: { novelId: r },
+      select: { id: !0, content: !0, quote: !0, novelId: !0, chapterId: !0 }
+    });
+    for (const i of c)
+      await Ve(i), e++;
+  } catch (o) {
+    console.error("[SearchIndex] Rebuild failed:", o);
+  }
+  return { chapters: t, ideas: e };
+}
+async function Kt(r) {
+  try {
+    const t = await h.$queryRaw`
+            SELECT entity_type, COUNT(*) as count FROM search_index WHERE novel_id = ${r} GROUP BY entity_type;
+        `;
+    let e = 0, n = 0;
+    return t.forEach((a) => {
+      a.entity_type === "chapter" && (e = Number(a.count)), a.entity_type === "idea" && (n = Number(a.count));
+    }), { chapters: e, ideas: n };
+  } catch (t) {
+    return console.error("[SearchIndex] Failed to get stats:", t), { chapters: 0, ideas: 0 };
   }
 }
-class AiActionError extends Error {
-  constructor(code, message, detail) {
-    super(message);
-    __publicField(this, "code");
-    __publicField(this, "detail");
-    this.code = code;
-    this.detail = detail;
-    this.name = "AiActionError";
+class j extends Error {
+  constructor(e, n, a) {
+    super(n);
+    ee(this, "code");
+    ee(this, "detail");
+    this.code = e, this.detail = a, this.name = "AiActionError";
   }
 }
-function fromMessage(message) {
-  const text = message.toLowerCase();
-  if (text.includes("timed out") || text.includes("timeout") || text.includes("aborterror") || text.includes("aborted")) {
-    return new AiActionError("PROVIDER_TIMEOUT", message);
-  }
-  if (text.includes("401") || text.includes("403") || text.includes("unauthorized") || text.includes("forbidden") || text.includes("api key")) {
-    return new AiActionError("PROVIDER_AUTH", message);
-  }
-  if (text.includes("content_filter") || text.includes("safety") || text.includes("filtered")) {
-    return new AiActionError("PROVIDER_FILTERED", message);
-  }
-  if (text.includes("429") || text.includes("503") || text.includes("model") || text.includes("unavailable")) {
-    return new AiActionError("PROVIDER_UNAVAILABLE", message);
-  }
-  if (text.includes("fetch") || text.includes("network") || text.includes("econn")) {
-    return new AiActionError("NETWORK_ERROR", message);
-  }
-  return new AiActionError("UNKNOWN", message);
+function Xt(r) {
+  const t = r.toLowerCase();
+  return t.includes("timed out") || t.includes("timeout") || t.includes("aborterror") || t.includes("aborted") ? new j("PROVIDER_TIMEOUT", r) : t.includes("401") || t.includes("403") || t.includes("unauthorized") || t.includes("forbidden") || t.includes("api key") ? new j("PROVIDER_AUTH", r) : t.includes("content_filter") || t.includes("safety") || t.includes("filtered") ? new j("PROVIDER_FILTERED", r) : t.includes("429") || t.includes("503") || t.includes("model") || t.includes("unavailable") ? new j("PROVIDER_UNAVAILABLE", r) : t.includes("fetch") || t.includes("network") || t.includes("econn") ? new j("NETWORK_ERROR", r) : new j("UNKNOWN", r);
 }
-function normalizeAiError(error) {
-  if (error instanceof AiActionError) {
-    return error;
-  }
-  const msg = error instanceof Error ? error.message : String(error ?? "unknown error");
-  return fromMessage(msg);
+function te(r) {
+  if (r instanceof j)
+    return r;
+  const t = r instanceof Error ? r.message : String(r ?? "unknown error");
+  return Xt(t);
 }
-function formatAiErrorForDisplay(code, fallback) {
-  switch (code) {
+function ge(r, t) {
+  switch (r) {
     case "INVALID_INPUT":
       return "参数不完整或格式错误，请检查输入。";
     case "NOT_FOUND":
@@ -384,167 +282,280 @@ function formatAiErrorForDisplay(code, fallback) {
       return "写入失败，数据未成功保存。";
     case "UNKNOWN":
     default:
-      return fallback || "未知错误，请稍后重试。";
+      return t || "未知错误，请稍后重试。";
   }
 }
-function joinUrl(baseUrl, path2) {
-  return `${baseUrl.replace(/\/+$/, "")}/${path2.replace(/^\/+/, "")}`;
+const Yt = "debug-dev.log", Qt = 15 * 1024 * 1024, er = "***REDACTED***", tr = /* @__PURE__ */ new Set([
+  "authorization",
+  "apikey",
+  "api_key",
+  "api key",
+  "token",
+  "access_token",
+  "refresh_token"
+]);
+let ae = null;
+function We() {
+  return process.env.NODE_ENV !== "production";
 }
-function parseJsonSafe(text) {
+function Ke(r) {
+  We() && (ae = L.join(r, Yt), Et());
+}
+function oe(r) {
+  return je(r, /* @__PURE__ */ new WeakSet());
+}
+function M(r, t, e, n) {
+  if (!We())
+    return;
+  const a = [
+    `[${(/* @__PURE__ */ new Date()).toISOString()}] [${r}] [${t}]`,
+    `message=${e}`,
+    n === void 0 ? "" : `extra=${nr(oe(n))}`,
+    ""
+  ].filter(Boolean);
+  rr(a.join(`
+`));
+}
+function ie(r, t, e) {
+  const n = St(t);
+  M("ERROR", r, n.message, {
+    error: n,
+    ...e === void 0 ? {} : { extra: e }
+  });
+}
+function Et() {
+  if (!ae)
+    return;
+  const r = L.dirname(ae);
+  z.existsSync(r) || z.mkdirSync(r, { recursive: !0 }), z.existsSync(ae) || z.writeFileSync(ae, "", "utf8");
+}
+function rr(r) {
+  if (ae)
+    try {
+      Et(), (z.existsSync(ae) ? z.statSync(ae).size : 0) >= Qt && z.writeFileSync(ae, "", "utf8"), z.appendFileSync(ae, `${r}
+`, "utf8");
+    } catch {
+    }
+}
+function nr(r) {
   try {
-    return JSON.parse(text);
+    return JSON.stringify(r, null, 2);
+  } catch {
+    return String(r);
+  }
+}
+function St(r) {
+  return r instanceof Error ? {
+    name: r.name,
+    message: r.message,
+    stack: r.stack
+  } : {
+    name: typeof r,
+    message: String(r)
+  };
+}
+function je(r, t) {
+  if (r == null || typeof r == "string" || typeof r == "number" || typeof r == "boolean")
+    return r;
+  if (typeof r == "bigint")
+    return r.toString();
+  if (r instanceof Error)
+    return St(r);
+  if (Array.isArray(r))
+    return r.map((e) => je(e, t));
+  if (typeof r == "object") {
+    const e = r;
+    if (t.has(e))
+      return "[Circular]";
+    t.add(e);
+    const n = {};
+    for (const [a, o] of Object.entries(e)) {
+      if (tr.has(a.toLowerCase())) {
+        n[a] = er;
+        continue;
+      }
+      n[a] = je(o, t);
+    }
+    return t.delete(e), n;
+  }
+  return String(r);
+}
+function be(r, t) {
+  return `${r.replace(/\/+$/, "")}/${t.replace(/^\/+/, "")}`;
+}
+function Xe(r) {
+  try {
+    return JSON.parse(r);
   } catch {
     return null;
   }
 }
-class HttpProvider {
-  constructor(settings) {
-    __publicField(this, "name", "http");
-    this.settings = settings;
+class _t {
+  constructor(t) {
+    ee(this, "name", "http");
+    this.settings = t;
   }
   async healthCheck() {
-    const { baseUrl, apiKey, timeoutMs } = this.settings.http;
-    if (!baseUrl.trim()) {
-      return { ok: false, detail: "HTTP baseUrl is empty" };
-    }
+    const { baseUrl: t, apiKey: e, timeoutMs: n } = this.settings.http;
+    if (!t.trim())
+      return { ok: !1, detail: "HTTP baseUrl is empty" };
     try {
-      new URL(baseUrl);
+      new URL(t);
     } catch {
-      return { ok: false, detail: "HTTP baseUrl is invalid" };
+      return { ok: !1, detail: "HTTP baseUrl is invalid" };
     }
-    if (!apiKey.trim()) {
-      return { ok: false, detail: "API key is empty" };
-    }
-    const controller = new AbortController();
-    let didTimeout = false;
-    const timer = setTimeout(() => {
-      didTimeout = true;
-      controller.abort();
-    }, Math.max(1e3, timeoutMs));
+    if (!e.trim())
+      return { ok: !1, detail: "API key is empty" };
+    const a = new AbortController();
+    let o = !1;
+    const c = Math.max(1e3, n), i = setTimeout(() => {
+      o = !0, a.abort();
+    }, c), l = be(t, "models"), I = Date.now();
     try {
-      const res = await fetch(joinUrl(baseUrl, "models"), {
+      M("INFO", "HttpProvider.healthCheck.request", "HTTP health check request", {
+        url: l,
+        timeoutMs: c,
+        headers: { Authorization: `Bearer ${e}` }
+      });
+      const w = await fetch(l, {
         method: "GET",
         headers: {
-          Authorization: `Bearer ${apiKey}`
+          Authorization: `Bearer ${e}`
         },
-        signal: controller.signal
+        signal: a.signal
       });
-      if (!res.ok) {
-        return { ok: false, detail: `HTTP provider rejected: ${res.status}` };
-      }
-      return { ok: true, detail: "HTTP provider is reachable" };
-    } catch (error) {
-      if (didTimeout) {
-        return { ok: false, detail: `HTTP health check timed out after ${Math.max(1e3, timeoutMs)}ms` };
-      }
-      return { ok: false, detail: `HTTP health check failed: ${(error == null ? void 0 : error.message) || "unknown error"}` };
+      return w.ok ? (M("INFO", "HttpProvider.healthCheck.response", "HTTP health check ok", {
+        url: l,
+        status: w.status,
+        elapsedMs: Date.now() - I
+      }), { ok: !0, detail: "HTTP provider is reachable" }) : (M("WARN", "HttpProvider.healthCheck.response", "HTTP health check rejected", {
+        url: l,
+        status: w.status,
+        elapsedMs: Date.now() - I
+      }), { ok: !1, detail: `HTTP provider rejected: ${w.status}` });
+    } catch (w) {
+      return ie("HttpProvider.healthCheck.error", w, {
+        url: l,
+        elapsedMs: Date.now() - I,
+        didTimeout: o
+      }), o ? { ok: !1, detail: `HTTP health check timed out after ${c}ms` } : { ok: !1, detail: `HTTP health check failed: ${(w == null ? void 0 : w.message) || "unknown error"}` };
     } finally {
-      clearTimeout(timer);
+      clearTimeout(i);
     }
   }
-  async generate(req) {
-    var _a, _b, _c, _d, _e, _f;
-    const prompt = req.prompt.trim();
-    if (!prompt) {
+  async generate(t) {
+    var w, E, C, p, g, f;
+    const e = t.prompt.trim();
+    if (!e)
       return { text: "", model: this.settings.http.model };
-    }
-    const controller = new AbortController();
-    let didTimeout = false;
-    const timeout = Math.max(1e3, this.settings.http.timeoutMs);
-    const timer = setTimeout(() => {
-      didTimeout = true;
-      controller.abort();
-    }, timeout);
-    const body = {
+    const n = new AbortController();
+    let a = !1;
+    const o = Math.max(1e3, this.settings.http.timeoutMs), c = setTimeout(() => {
+      a = !0, n.abort();
+    }, o), i = {
       model: this.settings.http.model,
       messages: [
-        ...req.systemPrompt ? [{ role: "system", content: req.systemPrompt }] : [],
-        { role: "user", content: prompt }
+        ...t.systemPrompt ? [{ role: "system", content: t.systemPrompt }] : [],
+        { role: "user", content: e }
       ],
-      max_tokens: req.maxTokens ?? this.settings.http.maxTokens,
-      temperature: req.temperature ?? this.settings.http.temperature
-    };
+      max_tokens: t.maxTokens ?? this.settings.http.maxTokens,
+      temperature: t.temperature ?? this.settings.http.temperature
+    }, l = be(this.settings.http.baseUrl, "chat/completions"), I = Date.now();
     try {
-      const res = await fetch(joinUrl(this.settings.http.baseUrl, "chat/completions"), {
+      M("INFO", "HttpProvider.generate.request", "AI text generation request", {
+        url: l,
+        timeoutMs: o,
+        body: oe(i)
+      });
+      const m = await fetch(l, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${this.settings.http.apiKey}`,
           "Content-Type": "application/json"
         },
-        body: JSON.stringify(body),
-        signal: controller.signal
-      });
-      const text = await res.text();
-      const json = parseJsonSafe(text);
-      if (!res.ok) {
-        throw new Error(((_a = json == null ? void 0 : json.error) == null ? void 0 : _a.message) || `HTTP ${res.status}: ${text.slice(0, 300)}`);
-      }
-      const output = ((_d = (_c = (_b = json == null ? void 0 : json.choices) == null ? void 0 : _b[0]) == null ? void 0 : _c.message) == null ? void 0 : _d.content) || (json == null ? void 0 : json.output_text) || ((_f = (_e = json == null ? void 0 : json.content) == null ? void 0 : _e[0]) == null ? void 0 : _f.text) || "";
+        body: JSON.stringify(i),
+        signal: n.signal
+      }), u = await m.text(), s = Xe(u);
+      if (M("INFO", "HttpProvider.generate.response", "AI text generation response", {
+        url: l,
+        status: m.status,
+        elapsedMs: Date.now() - I,
+        text: u
+      }), !m.ok)
+        throw new Error(((w = s == null ? void 0 : s.error) == null ? void 0 : w.message) || `HTTP ${m.status}: ${u.slice(0, 300)}`);
+      const d = ((p = (C = (E = s == null ? void 0 : s.choices) == null ? void 0 : E[0]) == null ? void 0 : C.message) == null ? void 0 : p.content) || (s == null ? void 0 : s.output_text) || ((f = (g = s == null ? void 0 : s.content) == null ? void 0 : g[0]) == null ? void 0 : f.text) || "";
       return {
-        text: typeof output === "string" ? output : JSON.stringify(output),
-        model: (json == null ? void 0 : json.model) || this.settings.http.model
+        text: typeof d == "string" ? d : JSON.stringify(d),
+        model: (s == null ? void 0 : s.model) || this.settings.http.model
       };
-    } catch (error) {
-      if (didTimeout || (error == null ? void 0 : error.name) === "AbortError") {
-        throw new Error(`HTTP request timeout after ${timeout}ms`);
-      }
-      throw error;
+    } catch (m) {
+      throw ie("HttpProvider.generate.error", m, {
+        url: l,
+        elapsedMs: Date.now() - I,
+        didTimeout: a,
+        requestBody: oe(i)
+      }), a || (m == null ? void 0 : m.name) === "AbortError" ? new Error(`HTTP request timeout after ${o}ms`) : m;
     } finally {
-      clearTimeout(timer);
+      clearTimeout(c);
     }
   }
-  async generateImage(req) {
-    var _a, _b;
-    const prompt = req.prompt.trim();
-    if (!prompt) {
+  async generateImage(t) {
+    var w, E;
+    const e = t.prompt.trim();
+    if (!e)
       return {};
-    }
-    const controller = new AbortController();
-    let didTimeout = false;
-    const timeout = Math.max(1e3, this.settings.http.timeoutMs);
-    const timer = setTimeout(() => {
-      didTimeout = true;
-      controller.abort();
-    }, timeout);
+    const n = new AbortController();
+    let a = !1;
+    const o = Math.max(1e3, this.settings.http.timeoutMs), c = setTimeout(() => {
+      a = !0, n.abort();
+    }, o), i = {
+      model: t.model || this.settings.http.model,
+      prompt: e,
+      size: t.size || "1024x1024",
+      output_format: t.outputFormat || "png",
+      watermark: t.watermark ?? !0
+    }, l = be(this.settings.http.baseUrl, "images/generations"), I = Date.now();
     try {
-      const res = await fetch(joinUrl(this.settings.http.baseUrl, "images/generations"), {
+      M("INFO", "HttpProvider.generateImage.request", "AI image generation request", {
+        url: l,
+        timeoutMs: o,
+        body: oe(i)
+      });
+      const C = await fetch(l, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${this.settings.http.apiKey}`,
           "Content-Type": "application/json"
         },
-        body: JSON.stringify({
-          model: req.model || this.settings.http.model,
-          prompt,
-          size: req.size || "1024x1024",
-          output_format: req.outputFormat || "png",
-          watermark: req.watermark ?? true
-        }),
-        signal: controller.signal
-      });
-      const text = await res.text();
-      const json = parseJsonSafe(text);
-      if (!res.ok) {
-        throw new Error(((_a = json == null ? void 0 : json.error) == null ? void 0 : _a.message) || `HTTP ${res.status}: ${text.slice(0, 300)}`);
-      }
-      const first = ((_b = json == null ? void 0 : json.data) == null ? void 0 : _b[0]) || {};
+        body: JSON.stringify(i),
+        signal: n.signal
+      }), p = await C.text(), g = Xe(p);
+      if (M("INFO", "HttpProvider.generateImage.response", "AI image generation response", {
+        url: l,
+        status: C.status,
+        elapsedMs: Date.now() - I,
+        text: p
+      }), !C.ok)
+        throw new Error(((w = g == null ? void 0 : g.error) == null ? void 0 : w.message) || `HTTP ${C.status}: ${p.slice(0, 300)}`);
+      const f = ((E = g == null ? void 0 : g.data) == null ? void 0 : E[0]) || {};
       return {
-        imageUrl: first.url,
-        imageBase64: first.b64_json,
+        imageUrl: f.url,
+        imageBase64: f.b64_json,
         mimeType: "image/png"
       };
-    } catch (error) {
-      if (didTimeout || (error == null ? void 0 : error.name) === "AbortError") {
-        throw new Error(`HTTP request timeout after ${timeout}ms`);
-      }
-      throw error;
+    } catch (C) {
+      throw ie("HttpProvider.generateImage.error", C, {
+        url: l,
+        elapsedMs: Date.now() - I,
+        didTimeout: a,
+        requestBody: oe(i)
+      }), a || (C == null ? void 0 : C.name) === "AbortError" ? new Error(`HTTP request timeout after ${o}ms`) : C;
     } finally {
-      clearTimeout(timer);
+      clearTimeout(c);
     }
   }
 }
-const LOG_PREFIX = "[Summary]";
-const DEFAULT_SUMMARY_SETTINGS = {
+const B = "[Summary]", At = {
   summaryMode: "local",
   summaryTriggerPolicy: "manual",
   summaryDebounceMs: 3e4,
@@ -553,8 +564,7 @@ const DEFAULT_SUMMARY_SETTINGS = {
   summaryFinalizeStableMs: 6e5,
   summaryFinalizeMinWords: 1200,
   recentChapterRawCount: 2
-};
-const DEFAULT_AI_SETTINGS$1 = {
+}, pe = {
   providerType: "http",
   http: {
     baseUrl: "",
@@ -563,7 +573,7 @@ const DEFAULT_AI_SETTINGS$1 = {
     imageModel: "doubao-seedream-5-0-260128",
     imageSize: "2K",
     imageOutputFormat: "png",
-    imageWatermark: false,
+    imageWatermark: !1,
     timeoutMs: 6e4,
     maxTokens: 2048,
     temperature: 0.7
@@ -582,103 +592,78 @@ const DEFAULT_AI_SETTINGS$1 = {
     allProxy: "",
     noProxy: ""
   },
-  summary: DEFAULT_SUMMARY_SETTINGS
-};
-const pendingTimers = /* @__PURE__ */ new Map();
-const aiPendingCounters = /* @__PURE__ */ new Map();
-const finalizeTimers = /* @__PURE__ */ new Map();
-const narrativeTimers = /* @__PURE__ */ new Map();
-let dbPathLogged = false;
-function extractPlainTextFromLexical$2(content) {
-  if (!(content == null ? void 0 : content.trim()))
+  summary: At
+}, xe = /* @__PURE__ */ new Map(), we = /* @__PURE__ */ new Map(), ke = /* @__PURE__ */ new Map(), Oe = /* @__PURE__ */ new Map();
+let Ye = !1;
+function ar(r) {
+  if (!(r != null && r.trim()))
     return "";
   try {
-    const parsed = JSON.parse(content);
-    const texts = [];
-    const walk = (node) => {
-      if (!node || typeof node !== "object")
-        return;
-      if (typeof node.text === "string") {
-        texts.push(node.text);
-      }
-      if (Array.isArray(node.children)) {
-        node.children.forEach(walk);
-      }
+    const t = JSON.parse(r), e = [], n = (a) => {
+      !a || typeof a != "object" || (typeof a.text == "string" && e.push(a.text), Array.isArray(a.children) && a.children.forEach(n));
     };
-    walk((parsed == null ? void 0 : parsed.root) || parsed);
-    return texts.join(" ").replace(/\s+/g, " ").trim();
+    return n((t == null ? void 0 : t.root) || t), e.join(" ").replace(/\s+/g, " ").trim();
   } catch {
-    return content.replace(/\s+/g, " ").trim();
+    return r.replace(/\s+/g, " ").trim();
   }
 }
-function buildKeyFacts(plainText) {
-  if (!plainText)
-    return [];
-  const sentences = plainText.split(/[。！？!?]/).map((item) => item.trim()).filter(Boolean);
-  return sentences.slice(0, 5).map((item, index) => `fact_${index + 1}: ${item.slice(0, 80)}`);
+function or(r) {
+  return r ? r.split(/[。！？!?]/).map((e) => e.trim()).filter(Boolean).slice(0, 5).map((e, n) => `fact_${n + 1}: ${e.slice(0, 80)}`) : [];
 }
-function buildOpenQuestions(plainText) {
-  if (!plainText)
-    return [];
-  return plainText.split(/[。！？!?]/).map((item) => item.trim()).filter((item) => item.includes("？") || item.includes("?")).slice(0, 5);
+function ir(r) {
+  return r ? r.split(/[。！？!?]/).map((t) => t.trim()).filter((t) => t.includes("？") || t.includes("?")).slice(0, 5) : [];
 }
-function buildCompressedMemory(title, chapterOrder, summaryText, keyFacts) {
-  const orderPart = Number.isFinite(chapterOrder) ? `第${chapterOrder}章` : "章节";
-  const factPart = keyFacts.length > 0 ? keyFacts.join(" | ") : "无明显关键事实";
-  return `${orderPart}《${title || "未命名章节"}》摘要：${summaryText}
-关键事实：${factPart}`;
+function sr(r, t, e, n) {
+  const a = Number.isFinite(t) ? `第${t}章` : "章节", o = n.length > 0 ? n.join(" | ") : "无明显关键事实";
+  return `${a}《${r || "未命名章节"}》摘要：${e}
+关键事实：${o}`;
 }
-function safeParseJsonArray(value) {
-  if (typeof value !== "string" || !value.trim())
+function Qe(r) {
+  if (typeof r != "string" || !r.trim())
     return [];
   try {
-    const parsed = JSON.parse(value);
-    if (!Array.isArray(parsed))
-      return [];
-    return parsed.map((item) => String(item || "").trim()).filter(Boolean);
+    const t = JSON.parse(r);
+    return Array.isArray(t) ? t.map((e) => String(e || "").trim()).filter(Boolean) : [];
   } catch {
     return [];
   }
 }
-function computeNarrativeFingerprint(parts) {
-  return createHash("sha256").update(parts.join("|")).digest("hex");
+function cr(r) {
+  return vt("sha256").update(r.join("|")).digest("hex");
 }
-function buildNarrativeSummaryText(scope, itemCount, summarySnippets) {
-  const header = scope === "volume" ? `卷级摘要（覆盖${itemCount}章）` : `全书摘要（覆盖${itemCount}章）`;
-  const merged = summarySnippets.map((item, index) => `${index + 1}. ${item}`).join("\n");
-  return `${header}
-${merged}`.slice(0, 2400);
+function lr(r, t, e) {
+  const n = r === "volume" ? `卷级摘要（覆盖${t}章）` : `全书摘要（覆盖${t}章）`, a = e.map((o, c) => `${c + 1}. ${o}`).join(`
+`);
+  return `${n}
+${a}`.slice(0, 2400);
 }
-function getAiSettingsFilePath() {
-  return path.join(app.getPath("userData"), "ai-settings.json");
+function dr() {
+  return L.join(b.getPath("userData"), "ai-settings.json");
 }
-function loadAiSettings() {
+function Dt() {
   try {
-    const filePath = getAiSettingsFilePath();
-    if (!fs.existsSync(filePath))
-      return DEFAULT_AI_SETTINGS$1;
-    const raw = fs.readFileSync(filePath, "utf8");
-    const parsed = JSON.parse(raw);
+    const r = dr();
+    if (!z.existsSync(r))
+      return pe;
+    const t = z.readFileSync(r, "utf8"), e = JSON.parse(t);
     return {
-      ...DEFAULT_AI_SETTINGS$1,
-      ...parsed,
-      http: { ...DEFAULT_AI_SETTINGS$1.http, ...parsed.http ?? {} },
-      mcpCli: { ...DEFAULT_AI_SETTINGS$1.mcpCli, ...parsed.mcpCli ?? {} },
-      proxy: { ...DEFAULT_AI_SETTINGS$1.proxy, ...parsed.proxy ?? {} },
-      summary: { ...DEFAULT_SUMMARY_SETTINGS, ...parsed.summary ?? {} }
+      ...pe,
+      ...e,
+      http: { ...pe.http, ...e.http ?? {} },
+      mcpCli: { ...pe.mcpCli, ...e.mcpCli ?? {} },
+      proxy: { ...pe.proxy, ...e.proxy ?? {} },
+      summary: { ...At, ...e.summary ?? {} }
     };
-  } catch (error) {
-    console.warn(`${LOG_PREFIX} failed to load ai-settings.json, fallback to defaults:`, error);
-    return DEFAULT_AI_SETTINGS$1;
+  } catch (r) {
+    return console.warn(`${B} failed to load ai-settings.json, fallback to defaults:`, r), pe;
   }
 }
-async function buildLocalSummary(plainText, chapterOrder) {
-  const summaryText = plainText.slice(0, 220) || "章节内容为空，暂无可提炼摘要。";
+async function et(r, t) {
   return {
-    summaryText,
-    keyFacts: buildKeyFacts(plainText),
-    openQuestions: buildOpenQuestions(plainText),
-    timelineHints: [`chapter_order:${chapterOrder ?? "unknown"}`],
+    summaryText: r.slice(0, 220) || "章节内容为空，暂无可提炼摘要。",
+    keyFacts: or(r),
+    openQuestions: ir(r),
+    timelineHints: [`chapter_order:${t ?? "unknown"}`],
     provider: "local",
     model: "heuristic-v1",
     promptVersion: "chapter-summary-v1",
@@ -689,16 +674,12 @@ async function buildLocalSummary(plainText, chapterOrder) {
     latencyMs: 0
   };
 }
-async function buildAiSummary(chapterId, plainText, settings, chapterOrder) {
-  var _a, _b;
-  const canUseHttp = settings.providerType === "http" && Boolean((_a = settings.http.baseUrl) == null ? void 0 : _a.trim()) && Boolean((_b = settings.http.apiKey) == null ? void 0 : _b.trim());
-  if (!canUseHttp) {
+async function ur(r, t, e, n) {
+  var E, C;
+  if (!(e.providerType === "http" && !!((E = e.http.baseUrl) != null && E.trim()) && !!((C = e.http.apiKey) != null && C.trim())))
     throw new Error("AI summary mode requires HTTP provider with baseUrl and apiKey");
-  }
-  console.log(`${LOG_PREFIX} [${chapterId}] AI summary start (model=${settings.http.model})`);
-  const provider = new HttpProvider(settings);
-  const startedAt = Date.now();
-  const response = await provider.generate({
+  console.log(`${B} [${r}] AI summary start (model=${e.http.model})`);
+  const o = new _t(e), c = Date.now(), i = await o.generate({
     systemPrompt: [
       "You summarize novel chapters for continuity memory.",
       "Return strict JSON only.",
@@ -706,140 +687,124 @@ async function buildAiSummary(chapterId, plainText, settings, chapterOrder) {
     ].join(" "),
     prompt: JSON.stringify({
       task: "chapter_memory_summary",
-      chapterOrder,
-      content: plainText.slice(0, 8e3),
+      chapterOrder: n,
+      content: t.slice(0, 8e3),
       constraints: [
         "summaryText should be concise and neutral",
         "keyFacts at most 6 items",
         "openQuestions at most 4 items"
       ]
     }),
-    maxTokens: Math.min(1024, settings.http.maxTokens),
-    temperature: Math.min(0.3, settings.http.temperature)
-  });
-  const parsed = JSON.parse(response.text || "{}");
-  const summaryText = String(parsed.summaryText || "").trim();
-  if (!summaryText) {
+    maxTokens: Math.min(1024, e.http.maxTokens),
+    temperature: Math.min(0.3, e.http.temperature)
+  }), l = JSON.parse(i.text || "{}"), I = String(l.summaryText || "").trim();
+  if (!I)
     throw new Error("AI summary returned empty summaryText");
-  }
-  const latencyMs = Date.now() - startedAt;
-  console.log(`${LOG_PREFIX} [${chapterId}] AI summary success (${latencyMs}ms)`);
-  return {
-    summaryText: summaryText.slice(0, 400),
-    keyFacts: Array.isArray(parsed.keyFacts) ? parsed.keyFacts.map((item) => String(item).trim()).filter(Boolean).slice(0, 6) : [],
-    openQuestions: Array.isArray(parsed.openQuestions) ? parsed.openQuestions.map((item) => String(item).trim()).filter(Boolean).slice(0, 4) : [],
-    timelineHints: Array.isArray(parsed.timelineHints) ? parsed.timelineHints.map((item) => String(item).trim()).filter(Boolean).slice(0, 6) : [`chapter_order:${chapterOrder ?? "unknown"}`],
+  const w = Date.now() - c;
+  return console.log(`${B} [${r}] AI summary success (${w}ms)`), {
+    summaryText: I.slice(0, 400),
+    keyFacts: Array.isArray(l.keyFacts) ? l.keyFacts.map((p) => String(p).trim()).filter(Boolean).slice(0, 6) : [],
+    openQuestions: Array.isArray(l.openQuestions) ? l.openQuestions.map((p) => String(p).trim()).filter(Boolean).slice(0, 4) : [],
+    timelineHints: Array.isArray(l.timelineHints) ? l.timelineHints.map((p) => String(p).trim()).filter(Boolean).slice(0, 6) : [`chapter_order:${n ?? "unknown"}`],
     provider: "http",
-    model: settings.http.model,
+    model: e.http.model,
     promptVersion: "chapter-summary-ai-v1",
-    temperature: Math.min(0.3, settings.http.temperature),
-    maxTokens: Math.min(1024, settings.http.maxTokens),
+    temperature: Math.min(0.3, e.http.temperature),
+    maxTokens: Math.min(1024, e.http.maxTokens),
     inputTokens: 0,
     outputTokens: 0,
-    latencyMs
+    latencyMs: w
   };
 }
-async function collectNarrativePayload(scope, novelId, volumeId) {
-  const where = scope === "volume" ? { novelId, volumeId: volumeId || "", isLatest: true, status: "active" } : { novelId, isLatest: true, status: "active" };
-  const chapterSummaries = await db.chapterSummary.findMany({
-    where,
+async function tt(r, t, e) {
+  const n = r === "volume" ? { novelId: t, volumeId: e || "", isLatest: !0, status: "active" } : { novelId: t, isLatest: !0, status: "active" }, a = await h.chapterSummary.findMany({
+    where: n,
     select: {
-      id: true,
-      chapterId: true,
-      chapterOrder: true,
-      updatedAt: true,
-      summaryText: true,
-      keyFacts: true,
-      openQuestions: true
+      id: !0,
+      chapterId: !0,
+      chapterOrder: !0,
+      updatedAt: !0,
+      summaryText: !0,
+      keyFacts: !0,
+      openQuestions: !0
     },
     orderBy: [
       { chapterOrder: "asc" },
       { updatedAt: "asc" }
     ],
-    take: scope === "volume" ? 120 : 300
+    take: r === "volume" ? 120 : 300
   });
-  if (chapterSummaries.length === 0) {
+  if (a.length === 0)
     return null;
-  }
-  const coverageChapterIds = chapterSummaries.map((item) => item.chapterId);
-  const chapterOrders = chapterSummaries.map((item) => Number(item.chapterOrder)).filter((item) => Number.isFinite(item));
-  const chapterRangeStart = chapterOrders.length > 0 ? Math.min(...chapterOrders) : null;
-  const chapterRangeEnd = chapterOrders.length > 0 ? Math.max(...chapterOrders) : null;
-  const summarySnippets = chapterSummaries.map((item) => String(item.summaryText || "").trim()).filter(Boolean).slice(-10);
-  const keyFacts = [...new Set(
-    chapterSummaries.flatMap((item) => safeParseJsonArray(item.keyFacts))
-  )].map((item) => String(item || "").slice(0, 120)).filter(Boolean).slice(0, 24);
-  const unresolvedThreads = [...new Set(
-    chapterSummaries.flatMap((item) => safeParseJsonArray(item.openQuestions))
-  )].map((item) => String(item || "").slice(0, 120)).filter(Boolean).slice(0, 20);
-  const styleGuide = [
-    scope === "volume" ? "保持本卷叙事风格一致" : "保持全书叙事风格一致",
+  const o = a.map((m) => m.chapterId), c = a.map((m) => Number(m.chapterOrder)).filter((m) => Number.isFinite(m)), i = c.length > 0 ? Math.min(...c) : null, l = c.length > 0 ? Math.max(...c) : null, I = a.map((m) => String(m.summaryText || "").trim()).filter(Boolean).slice(-10), w = [...new Set(
+    a.flatMap((m) => Qe(m.keyFacts))
+  )].map((m) => String(m || "").slice(0, 120)).filter(Boolean).slice(0, 24), E = [...new Set(
+    a.flatMap((m) => Qe(m.openQuestions))
+  )].map((m) => String(m || "").slice(0, 120)).filter(Boolean).slice(0, 20), C = [
+    r === "volume" ? "保持本卷叙事风格一致" : "保持全书叙事风格一致",
     "优先遵循现有大纲与关键事实"
-  ];
-  const hardConstraints = [
+  ], p = [
     "不得与已确认关键事实冲突",
     "保持角色动机与关系连续"
-  ];
-  const sourceFingerprint = computeNarrativeFingerprint(
-    chapterSummaries.map((item) => `${item.id}:${new Date(item.updatedAt).toISOString()}`)
+  ], g = cr(
+    a.map((m) => `${m.id}:${new Date(m.updatedAt).toISOString()}`)
   );
-  let title = null;
-  if (scope === "volume" && volumeId) {
-    const volume = await db.volume.findUnique({
-      where: { id: volumeId },
-      select: { title: true }
+  let f = null;
+  if (r === "volume" && e) {
+    const m = await h.volume.findUnique({
+      where: { id: e },
+      select: { title: !0 }
     });
-    title = (volume == null ? void 0 : volume.title) || null;
+    f = (m == null ? void 0 : m.title) || null;
   }
   return {
-    title,
-    summaryText: buildNarrativeSummaryText(scope, coverageChapterIds.length, summarySnippets),
-    keyFacts,
-    unresolvedThreads,
-    styleGuide,
-    hardConstraints,
-    coverageChapterIds,
-    chapterRangeStart,
-    chapterRangeEnd,
-    sourceFingerprint
+    title: f,
+    summaryText: lr(r, o.length, I),
+    keyFacts: w,
+    unresolvedThreads: E,
+    styleGuide: C,
+    hardConstraints: p,
+    coverageChapterIds: o,
+    chapterRangeStart: i,
+    chapterRangeEnd: l,
+    sourceFingerprint: g
   };
 }
-async function upsertNarrativeSummary(scope, novelId, payload, volumeId) {
-  await db.$transaction(async (tx) => {
-    await tx.narrativeSummary.updateMany({
+async function rt(r, t, e, n) {
+  await h.$transaction(async (a) => {
+    await a.narrativeSummary.updateMany({
       where: {
-        novelId,
-        level: scope,
-        volumeId: scope === "volume" ? volumeId || null : null,
-        isLatest: true
+        novelId: t,
+        level: r,
+        volumeId: r === "volume" && n || null,
+        isLatest: !0
       },
       data: {
-        isLatest: false,
+        isLatest: !1,
         status: "stale"
       }
     });
-    const existing = await tx.narrativeSummary.findFirst({
+    const o = await a.narrativeSummary.findFirst({
       where: {
-        novelId,
-        level: scope,
-        volumeId: scope === "volume" ? volumeId || null : null,
-        sourceFingerprint: payload.sourceFingerprint
+        novelId: t,
+        level: r,
+        volumeId: r === "volume" && n || null,
+        sourceFingerprint: e.sourceFingerprint
       }
-    });
-    const data = {
-      novelId,
-      volumeId: scope === "volume" ? volumeId || null : null,
-      level: scope,
-      title: payload.title || null,
-      summaryText: payload.summaryText,
-      keyFacts: JSON.stringify(payload.keyFacts),
-      unresolvedThreads: JSON.stringify(payload.unresolvedThreads),
-      styleGuide: JSON.stringify(payload.styleGuide),
-      hardConstraints: JSON.stringify(payload.hardConstraints),
-      coverageChapterIds: JSON.stringify(payload.coverageChapterIds),
-      chapterRangeStart: payload.chapterRangeStart,
-      chapterRangeEnd: payload.chapterRangeEnd,
-      sourceFingerprint: payload.sourceFingerprint,
+    }), c = {
+      novelId: t,
+      volumeId: r === "volume" && n || null,
+      level: r,
+      title: e.title || null,
+      summaryText: e.summaryText,
+      keyFacts: JSON.stringify(e.keyFacts),
+      unresolvedThreads: JSON.stringify(e.unresolvedThreads),
+      styleGuide: JSON.stringify(e.styleGuide),
+      hardConstraints: JSON.stringify(e.hardConstraints),
+      coverageChapterIds: JSON.stringify(e.coverageChapterIds),
+      chapterRangeStart: e.chapterRangeStart,
+      chapterRangeEnd: e.chapterRangeEnd,
+      sourceFingerprint: e.sourceFingerprint,
       provider: "local",
       model: "heuristic-v1",
       promptVersion: "narrative-summary-v1",
@@ -852,261 +817,202 @@ async function upsertNarrativeSummary(scope, novelId, payload, volumeId) {
       status: "active",
       errorCode: null,
       errorDetail: null,
-      isLatest: true
+      isLatest: !0
     };
-    if (existing == null ? void 0 : existing.id) {
-      await tx.narrativeSummary.update({
-        where: { id: existing.id },
-        data
-      });
-    } else {
-      await tx.narrativeSummary.create({ data });
-    }
+    o != null && o.id ? await a.narrativeSummary.update({
+      where: { id: o.id },
+      data: c
+    }) : await a.narrativeSummary.create({ data: c });
   });
 }
-async function rebuildNarrativeSummaries(novelId, volumeId) {
+async function mr(r, t) {
   try {
-    const [volumePayload, novelPayload] = await Promise.all([
-      collectNarrativePayload("volume", novelId, volumeId),
-      collectNarrativePayload("novel", novelId, null)
+    const [e, n] = await Promise.all([
+      tt("volume", r, t),
+      tt("novel", r, null)
     ]);
-    if (volumePayload) {
-      await upsertNarrativeSummary("volume", novelId, volumePayload, volumeId);
-      console.log(`${LOG_PREFIX} [novel=${novelId}] narrative summary updated (level=volume, volume=${volumeId})`);
-    }
-    if (novelPayload) {
-      await upsertNarrativeSummary("novel", novelId, novelPayload, null);
-      console.log(`${LOG_PREFIX} [novel=${novelId}] narrative summary updated (level=novel)`);
-    }
-  } catch (error) {
-    console.error(`${LOG_PREFIX} [novel=${novelId}] narrative summary rebuild failed:`, error);
+    e && (await rt("volume", r, e, t), console.log(`${B} [novel=${r}] narrative summary updated (level=volume, volume=${t})`)), n && (await rt("novel", r, n, null), console.log(`${B} [novel=${r}] narrative summary updated (level=novel)`));
+  } catch (e) {
+    console.error(`${B} [novel=${r}] narrative summary rebuild failed:`, e);
   }
 }
-function scheduleNarrativeSummaryRebuild(novelId, volumeId) {
-  const key = `${novelId}:${volumeId}`;
-  const existing = narrativeTimers.get(key);
-  if (existing) {
-    clearTimeout(existing);
-  }
-  const timer = setTimeout(() => {
-    narrativeTimers.delete(key);
-    void rebuildNarrativeSummaries(novelId, volumeId);
+function pr(r, t) {
+  const e = `${r}:${t}`, n = Oe.get(e);
+  n && clearTimeout(n);
+  const a = setTimeout(() => {
+    Oe.delete(e), mr(r, t);
   }, 15e3);
-  narrativeTimers.set(key, timer);
+  Oe.set(e, a);
 }
-async function rebuildChapterSummary(chapterId, options) {
-  var _a;
-  const settings = loadAiSettings();
-  const force = Boolean(options == null ? void 0 : options.force);
-  const reason = (options == null ? void 0 : options.reason) || "save";
-  const isAiMode = settings.summary.summaryMode === "ai";
-  const effectiveMinIntervalMs = isAiMode ? Math.max(18e5, settings.summary.summaryMinIntervalMs) : settings.summary.summaryMinIntervalMs;
-  const effectiveMinWordDelta = isAiMode ? Math.max(800, settings.summary.summaryMinWordDelta) : settings.summary.summaryMinWordDelta;
-  const chapter = await db.chapter.findUnique({
-    where: { id: chapterId },
+async function $e(r, t) {
+  var s;
+  const e = Dt(), n = !!(t != null && t.force), a = (t == null ? void 0 : t.reason) || "save", o = e.summary.summaryMode === "ai", c = o ? Math.max(18e5, e.summary.summaryMinIntervalMs) : e.summary.summaryMinIntervalMs, i = o ? Math.max(800, e.summary.summaryMinWordDelta) : e.summary.summaryMinWordDelta, l = await h.chapter.findUnique({
+    where: { id: r },
     select: {
-      id: true,
-      title: true,
-      content: true,
-      wordCount: true,
-      order: true,
-      updatedAt: true,
-      volumeId: true,
-      volume: { select: { novelId: true } }
+      id: !0,
+      title: !0,
+      content: !0,
+      wordCount: !0,
+      order: !0,
+      updatedAt: !0,
+      volumeId: !0,
+      volume: { select: { novelId: !0 } }
     }
   });
-  if (!((_a = chapter == null ? void 0 : chapter.volume) == null ? void 0 : _a.novelId)) {
-    console.log(`${LOG_PREFIX} [${chapterId}] skip: chapter or novel relation missing`);
+  if (!((s = l == null ? void 0 : l.volume) != null && s.novelId)) {
+    console.log(`${B} [${r}] skip: chapter or novel relation missing`);
     return;
   }
-  if (!dbPathLogged) {
+  if (!Ye)
     try {
-      const rows = await db.$queryRawUnsafe("PRAGMA database_list;");
-      const mainDb = Array.isArray(rows) ? rows.find((row) => (row == null ? void 0 : row.name) === "main") : null;
-      console.log(`${LOG_PREFIX} sqlite main db path: ${(mainDb == null ? void 0 : mainDb.file) || "unknown"}`);
-    } catch (e) {
-      console.warn(`${LOG_PREFIX} failed to read sqlite db path via PRAGMA database_list`);
+      const d = await h.$queryRawUnsafe("PRAGMA database_list;"), y = Array.isArray(d) ? d.find((v) => (v == null ? void 0 : v.name) === "main") : null;
+      console.log(`${B} sqlite main db path: ${(y == null ? void 0 : y.file) || "unknown"}`);
+    } catch {
+      console.warn(`${B} failed to read sqlite db path via PRAGMA database_list`);
     } finally {
-      dbPathLogged = true;
+      Ye = !0;
     }
-  }
-  const sourceContent = chapter.content || "";
-  const sourceContentHash = createHash("sha256").update(sourceContent).digest("hex");
-  const now = Date.now();
-  const latest = await db.chapterSummary.findFirst({
+  const I = l.content || "", w = vt("sha256").update(I).digest("hex"), E = Date.now(), C = await h.chapterSummary.findFirst({
     where: {
-      chapterId: chapter.id,
-      isLatest: true,
+      chapterId: l.id,
+      isLatest: !0,
       status: "active",
       summaryType: "standard"
     },
     orderBy: { updatedAt: "desc" }
   });
-  if (!force && (latest == null ? void 0 : latest.sourceContentHash) === sourceContentHash) {
-    console.log(`${LOG_PREFIX} [${chapterId}] skip: same content hash`);
+  if (!n && (C == null ? void 0 : C.sourceContentHash) === w) {
+    console.log(`${B} [${r}] skip: same content hash`);
     return;
   }
-  const wordDelta = Math.abs((chapter.wordCount || 0) - Number((latest == null ? void 0 : latest.sourceWordCount) || 0));
-  const latestTime = (latest == null ? void 0 : latest.updatedAt) ? new Date(latest.updatedAt).getTime() : 0;
-  const sinceLastMs = latestTime > 0 ? now - latestTime : Number.MAX_SAFE_INTEGER;
-  if (!force && latestTime > 0 && sinceLastMs < effectiveMinIntervalMs && wordDelta < effectiveMinWordDelta) {
+  const p = Math.abs((l.wordCount || 0) - Number((C == null ? void 0 : C.sourceWordCount) || 0)), g = C != null && C.updatedAt ? new Date(C.updatedAt).getTime() : 0, f = g > 0 ? E - g : Number.MAX_SAFE_INTEGER;
+  if (!n && g > 0 && f < c && p < i) {
     console.log(
-      `${LOG_PREFIX} [${chapterId}] skip: throttled (deltaWords=${wordDelta}, sinceLastMs=${sinceLastMs}, minIntervalMs=${effectiveMinIntervalMs}, minWordDelta=${effectiveMinWordDelta})`
+      `${B} [${r}] skip: throttled (deltaWords=${p}, sinceLastMs=${f}, minIntervalMs=${c}, minWordDelta=${i})`
     );
     return;
   }
-  const plainText = extractPlainTextFromLexical$2(sourceContent);
+  const m = ar(I);
   console.log(
-    `${LOG_PREFIX} [${chapterId}] start rebuild (reason=${reason}, mode=${settings.summary.summaryMode}, words=${chapter.wordCount || plainText.length}, deltaWords=${wordDelta}, force=${force})`
+    `${B} [${r}] start rebuild (reason=${a}, mode=${e.summary.summaryMode}, words=${l.wordCount || m.length}, deltaWords=${p}, force=${n})`
   );
-  let summary = await buildLocalSummary(plainText, chapter.order ?? null);
-  if (settings.summary.summaryMode === "ai") {
+  let u = await et(m, l.order ?? null);
+  if (e.summary.summaryMode === "ai")
     try {
-      summary = await buildAiSummary(chapterId, plainText, settings, chapter.order ?? null);
-    } catch (error) {
-      console.warn(`${LOG_PREFIX} [${chapterId}] AI summary failed, fallback to local: ${(error == null ? void 0 : error.message) || "unknown error"}`);
-      const fallback = await buildLocalSummary(plainText, chapter.order ?? null);
-      summary = {
-        ...fallback,
+      u = await ur(r, m, e, l.order ?? null);
+    } catch (d) {
+      console.warn(`${B} [${r}] AI summary failed, fallback to local: ${(d == null ? void 0 : d.message) || "unknown error"}`), u = {
+        ...await et(m, l.order ?? null),
         errorCode: "AI_SUMMARY_FALLBACK",
-        errorDetail: (error == null ? void 0 : error.message) || "unknown ai summary error"
+        errorDetail: (d == null ? void 0 : d.message) || "unknown ai summary error"
       };
     }
-  }
-  await db.$transaction(async (tx) => {
-    await tx.chapterSummary.updateMany({
-      where: { chapterId: chapter.id, isLatest: true },
-      data: { isLatest: false, status: "stale" }
+  await h.$transaction(async (d) => {
+    await d.chapterSummary.updateMany({
+      where: { chapterId: l.id, isLatest: !0 },
+      data: { isLatest: !1, status: "stale" }
     });
-    const existing = await tx.chapterSummary.findFirst({
+    const y = await d.chapterSummary.findFirst({
       where: {
-        chapterId: chapter.id,
-        sourceContentHash,
+        chapterId: l.id,
+        sourceContentHash: w,
         summaryType: "standard"
       }
-    });
-    const payload = {
-      novelId: chapter.volume.novelId,
-      volumeId: chapter.volumeId,
-      chapterId: chapter.id,
+    }), v = {
+      novelId: l.volume.novelId,
+      volumeId: l.volumeId,
+      chapterId: l.id,
       summaryType: "standard",
-      summaryText: summary.summaryText,
-      compressedMemory: buildCompressedMemory(chapter.title || "", chapter.order ?? null, summary.summaryText, summary.keyFacts),
-      keyFacts: JSON.stringify(summary.keyFacts),
+      summaryText: u.summaryText,
+      compressedMemory: sr(l.title || "", l.order ?? null, u.summaryText, u.keyFacts),
+      keyFacts: JSON.stringify(u.keyFacts),
       entitiesSnapshot: JSON.stringify({}),
-      timelineHints: JSON.stringify(summary.timelineHints),
-      openQuestions: JSON.stringify(summary.openQuestions),
-      sourceContentHash,
-      sourceWordCount: chapter.wordCount || plainText.length,
-      sourceUpdatedAt: chapter.updatedAt,
-      chapterOrder: chapter.order ?? null,
-      provider: summary.provider,
-      model: summary.model,
-      promptVersion: summary.promptVersion,
-      temperature: summary.temperature,
-      maxTokens: summary.maxTokens,
-      inputTokens: summary.inputTokens,
-      outputTokens: summary.outputTokens,
-      latencyMs: summary.latencyMs,
+      timelineHints: JSON.stringify(u.timelineHints),
+      openQuestions: JSON.stringify(u.openQuestions),
+      sourceContentHash: w,
+      sourceWordCount: l.wordCount || m.length,
+      sourceUpdatedAt: l.updatedAt,
+      chapterOrder: l.order ?? null,
+      provider: u.provider,
+      model: u.model,
+      promptVersion: u.promptVersion,
+      temperature: u.temperature,
+      maxTokens: u.maxTokens,
+      inputTokens: u.inputTokens,
+      outputTokens: u.outputTokens,
+      latencyMs: u.latencyMs,
       qualityScore: null,
       status: "active",
-      errorCode: summary.errorCode || null,
-      errorDetail: summary.errorDetail || null,
-      isLatest: true
+      errorCode: u.errorCode || null,
+      errorDetail: u.errorDetail || null,
+      isLatest: !0
     };
-    if (existing == null ? void 0 : existing.id) {
-      await tx.chapterSummary.update({
-        where: { id: existing.id },
-        data: payload
-      });
-      console.log(`${LOG_PREFIX} [${chapterId}] done: updated existing summary`);
+    if (y != null && y.id) {
+      await d.chapterSummary.update({
+        where: { id: y.id },
+        data: v
+      }), console.log(`${B} [${r}] done: updated existing summary`);
       return;
     }
-    await tx.chapterSummary.create({
-      data: payload
-    });
-    console.log(`${LOG_PREFIX} [${chapterId}] done: created new summary`);
-  });
-  scheduleNarrativeSummaryRebuild(chapter.volume.novelId, chapter.volumeId);
+    await d.chapterSummary.create({
+      data: v
+    }), console.log(`${B} [${r}] done: created new summary`);
+  }), pr(l.volume.novelId, l.volumeId);
 }
-function scheduleChapterSummaryRebuild(chapterId, reason = "save") {
-  const settings = loadAiSettings();
-  if (reason === "manual") {
-    console.log(`${LOG_PREFIX} [${chapterId}] manual trigger received`);
-    void rebuildChapterSummary(chapterId, { force: true, reason: "manual" }).catch((error) => {
-      console.error(`${LOG_PREFIX} [${chapterId}] manual rebuild failed:`, error);
+function Ge(r, t = "save") {
+  const e = Dt();
+  if (t === "manual") {
+    console.log(`${B} [${r}] manual trigger received`), $e(r, { force: !0, reason: "manual" }).catch((i) => {
+      console.error(`${B} [${r}] manual rebuild failed:`, i);
     });
     return;
   }
-  if (settings.summary.summaryMode === "ai" && settings.summary.summaryTriggerPolicy === "manual") {
-    console.log(`${LOG_PREFIX} [${chapterId}] skip scheduling: ai mode manual-only policy`);
+  if (e.summary.summaryMode === "ai" && e.summary.summaryTriggerPolicy === "manual") {
+    console.log(`${B} [${r}] skip scheduling: ai mode manual-only policy`);
     return;
   }
-  if (settings.summary.summaryMode === "ai" && settings.summary.summaryTriggerPolicy === "finalized") {
-    const stableDelay = Math.max(6e4, settings.summary.summaryFinalizeStableMs);
-    const existingFinalize = finalizeTimers.get(chapterId);
-    if (existingFinalize)
-      clearTimeout(existingFinalize);
-    const timer2 = setTimeout(async () => {
-      finalizeTimers.delete(chapterId);
-      const chapter = await db.chapter.findUnique({
-        where: { id: chapterId },
-        select: { wordCount: true }
-      });
-      const wordCount = (chapter == null ? void 0 : chapter.wordCount) || 0;
-      if (wordCount < settings.summary.summaryFinalizeMinWords) {
+  if (e.summary.summaryMode === "ai" && e.summary.summaryTriggerPolicy === "finalized") {
+    const i = Math.max(6e4, e.summary.summaryFinalizeStableMs), l = ke.get(r);
+    l && clearTimeout(l);
+    const I = setTimeout(async () => {
+      ke.delete(r);
+      const w = await h.chapter.findUnique({
+        where: { id: r },
+        select: { wordCount: !0 }
+      }), E = (w == null ? void 0 : w.wordCount) || 0;
+      if (E < e.summary.summaryFinalizeMinWords) {
         console.log(
-          `${LOG_PREFIX} [${chapterId}] finalized trigger skipped (wordCount=${wordCount}, min=${settings.summary.summaryFinalizeMinWords})`
+          `${B} [${r}] finalized trigger skipped (wordCount=${E}, min=${e.summary.summaryFinalizeMinWords})`
         );
         return;
       }
-      console.log(`${LOG_PREFIX} [${chapterId}] finalized trigger fired after stable window ${stableDelay}ms`);
-      void rebuildChapterSummary(chapterId, { force: true, reason: "finalized" }).catch((error) => {
-        console.error(`${LOG_PREFIX} [${chapterId}] finalized rebuild failed:`, error);
+      console.log(`${B} [${r}] finalized trigger fired after stable window ${i}ms`), $e(r, { force: !0, reason: "finalized" }).catch((C) => {
+        console.error(`${B} [${r}] finalized rebuild failed:`, C);
       });
-    }, stableDelay);
-    finalizeTimers.set(chapterId, timer2);
-    console.log(`${LOG_PREFIX} [${chapterId}] finalized trigger scheduled (${stableDelay}ms stable window)`);
+    }, i);
+    ke.set(r, I), console.log(`${B} [${r}] finalized trigger scheduled (${i}ms stable window)`);
     return;
   }
-  const isAiMode = settings.summary.summaryMode === "ai";
-  const delay = isAiMode ? Math.max(3e5, settings.summary.summaryDebounceMs) : Math.max(1e3, settings.summary.summaryDebounceMs);
-  const existing = pendingTimers.get(chapterId);
-  if (isAiMode) {
-    if (existing) {
-      const count = (aiPendingCounters.get(chapterId) || 0) + 1;
-      aiPendingCounters.set(chapterId, count);
-      if (count % 10 === 0) {
-        console.log(`${LOG_PREFIX} [${chapterId}] ai mode coalescing saves (${count} updates queued, timer unchanged)`);
-      }
+  const n = e.summary.summaryMode === "ai", a = Math.max(n ? 3e5 : 1e3, e.summary.summaryDebounceMs), o = xe.get(r);
+  if (n) {
+    if (o) {
+      const i = (we.get(r) || 0) + 1;
+      we.set(r, i), i % 10 === 0 && console.log(`${B} [${r}] ai mode coalescing saves (${i} updates queued, timer unchanged)`);
       return;
     }
-    aiPendingCounters.set(chapterId, 1);
-    console.log(`${LOG_PREFIX} [${chapterId}] ai mode scheduled (${delay}ms, fixed window)`);
-  } else {
-    if (existing) {
-      clearTimeout(existing);
-      console.log(`${LOG_PREFIX} [${chapterId}] debounce reset (${delay}ms)`);
-    } else {
-      console.log(`${LOG_PREFIX} [${chapterId}] debounce scheduled (${delay}ms)`);
-    }
-  }
-  const timer = setTimeout(() => {
-    pendingTimers.delete(chapterId);
-    const queuedCount = aiPendingCounters.get(chapterId) || 0;
-    aiPendingCounters.delete(chapterId);
-    if (isAiMode) {
-      console.log(`${LOG_PREFIX} [${chapterId}] ai mode fired after coalescing ${queuedCount} saves`);
-    } else {
-      console.log(`${LOG_PREFIX} [${chapterId}] debounce fired, evaluating rebuild`);
-    }
-    void rebuildChapterSummary(chapterId).catch((error) => {
-      console.error(`${LOG_PREFIX} [${chapterId}] rebuild failed:`, error);
+    we.set(r, 1), console.log(`${B} [${r}] ai mode scheduled (${a}ms, fixed window)`);
+  } else
+    o ? (clearTimeout(o), console.log(`${B} [${r}] debounce reset (${a}ms)`)) : console.log(`${B} [${r}] debounce scheduled (${a}ms)`);
+  const c = setTimeout(() => {
+    xe.delete(r);
+    const i = we.get(r) || 0;
+    we.delete(r), console.log(n ? `${B} [${r}] ai mode fired after coalescing ${i} saves` : `${B} [${r}] debounce fired, evaluating rebuild`), $e(r).catch((l) => {
+      console.error(`${B} [${r}] rebuild failed:`, l);
     });
-  }, delay);
-  pendingTimers.set(chapterId, timer);
+  }, a);
+  xe.set(r, c);
 }
-function createCapabilityDefinitions(deps) {
+function fr(r) {
   return [
     {
       actionId: "novel.list",
@@ -1115,7 +1021,7 @@ function createCapabilityDefinitions(deps) {
       permission: "read",
       inputSchema: { type: "object", properties: {} },
       outputSchema: { type: "array" },
-      handler: async () => db.novel.findMany({ orderBy: { updatedAt: "desc" } })
+      handler: async () => h.novel.findMany({ orderBy: { updatedAt: "desc" } })
     },
     {
       actionId: "volume.list",
@@ -1130,16 +1036,15 @@ function createCapabilityDefinitions(deps) {
         required: ["novelId"]
       },
       outputSchema: { type: "array" },
-      handler: async (payload) => {
-        const input = payload;
-        if (!(input == null ? void 0 : input.novelId)) {
-          throw new AiActionError("INVALID_INPUT", "novelId is required");
-        }
-        return db.volume.findMany({
-          where: { novelId: input.novelId },
+      handler: async (t) => {
+        const e = t;
+        if (!(e != null && e.novelId))
+          throw new j("INVALID_INPUT", "novelId is required");
+        return h.volume.findMany({
+          where: { novelId: e.novelId },
           include: {
             chapters: {
-              select: { id: true, title: true, order: true, wordCount: true, updatedAt: true },
+              select: { id: !0, title: !0, order: !0, wordCount: !0, updatedAt: !0 },
               orderBy: { order: "asc" }
             }
           },
@@ -1160,13 +1065,12 @@ function createCapabilityDefinitions(deps) {
         required: []
       },
       outputSchema: { type: "object" },
-      handler: async (payload) => {
-        var _a;
-        const input = payload;
-        const title = ((_a = input == null ? void 0 : input.title) == null ? void 0 : _a.trim()) || `新作品 ${(/* @__PURE__ */ new Date()).toLocaleTimeString()}`;
-        return db.novel.create({
+      handler: async (t) => {
+        var a;
+        const e = t, n = ((a = e == null ? void 0 : e.title) == null ? void 0 : a.trim()) || `新作品 ${(/* @__PURE__ */ new Date()).toLocaleTimeString()}`;
+        return h.novel.create({
           data: {
-            title,
+            title: n,
             wordCount: 0,
             volumes: {
               create: {
@@ -1199,13 +1103,12 @@ function createCapabilityDefinitions(deps) {
         required: ["volumeId"]
       },
       outputSchema: { type: "array" },
-      handler: async (payload) => {
-        const input = payload;
-        if (!(input == null ? void 0 : input.volumeId)) {
-          throw new AiActionError("INVALID_INPUT", "volumeId is required");
-        }
-        return db.chapter.findMany({
-          where: { volumeId: input.volumeId },
+      handler: async (t) => {
+        const e = t;
+        if (!(e != null && e.volumeId))
+          throw new j("INVALID_INPUT", "volumeId is required");
+        return h.chapter.findMany({
+          where: { volumeId: e.volumeId },
           orderBy: { order: "asc" }
         });
       }
@@ -1225,25 +1128,24 @@ function createCapabilityDefinitions(deps) {
         required: ["volumeId"]
       },
       outputSchema: { type: "object" },
-      handler: async (payload) => {
-        var _a;
-        const input = payload;
-        if (!(input == null ? void 0 : input.volumeId)) {
-          throw new AiActionError("INVALID_INPUT", "volumeId is required");
-        }
-        let finalOrder = input.order;
-        if (!Number.isFinite(finalOrder)) {
-          const lastChapter = await db.chapter.findFirst({
-            where: { volumeId: input.volumeId },
+      handler: async (t) => {
+        var a;
+        const e = t;
+        if (!(e != null && e.volumeId))
+          throw new j("INVALID_INPUT", "volumeId is required");
+        let n = e.order;
+        if (!Number.isFinite(n)) {
+          const o = await h.chapter.findFirst({
+            where: { volumeId: e.volumeId },
             orderBy: { order: "desc" }
           });
-          finalOrder = ((lastChapter == null ? void 0 : lastChapter.order) || 0) + 1;
+          n = ((o == null ? void 0 : o.order) || 0) + 1;
         }
-        return db.chapter.create({
+        return h.chapter.create({
           data: {
-            volumeId: input.volumeId,
-            title: ((_a = input.title) == null ? void 0 : _a.trim()) || "",
-            order: finalOrder,
+            volumeId: e.volumeId,
+            title: ((a = e.title) == null ? void 0 : a.trim()) || "",
+            order: n,
             content: "",
             wordCount: 0
           }
@@ -1263,14 +1165,13 @@ function createCapabilityDefinitions(deps) {
         required: ["chapterId"]
       },
       outputSchema: { type: "object" },
-      handler: async (payload) => {
-        const input = payload;
-        if (!(input == null ? void 0 : input.chapterId)) {
-          throw new AiActionError("INVALID_INPUT", "chapterId is required");
-        }
-        return db.chapter.findUnique({
-          where: { id: input.chapterId },
-          include: { volume: { select: { novelId: true } } }
+      handler: async (t) => {
+        const e = t;
+        if (!(e != null && e.chapterId))
+          throw new j("INVALID_INPUT", "chapterId is required");
+        return h.chapter.findUnique({
+          where: { id: e.chapterId },
+          include: { volume: { select: { novelId: !0 } } }
         });
       }
     },
@@ -1292,50 +1193,44 @@ function createCapabilityDefinitions(deps) {
         required: ["chapterId", "content"]
       },
       outputSchema: { type: "object" },
-      handler: async (payload) => {
-        const input = payload;
-        if (!(input == null ? void 0 : input.chapterId)) {
-          throw new AiActionError("INVALID_INPUT", "chapterId is required");
-        }
-        if (typeof input.content !== "string") {
-          throw new AiActionError("INVALID_INPUT", "content is required");
-        }
-        const saveSource = input.source === "ai_ui" ? "ai_ui" : "ai_agent";
-        const chapter = await db.chapter.findUnique({
-          where: { id: input.chapterId },
-          select: { id: true, content: true, updatedAt: true, wordCount: true, volume: { select: { novelId: true } } }
+      handler: async (t) => {
+        const e = t;
+        if (!(e != null && e.chapterId))
+          throw new j("INVALID_INPUT", "chapterId is required");
+        if (typeof e.content != "string")
+          throw new j("INVALID_INPUT", "content is required");
+        const n = e.source === "ai_ui" ? "ai_ui" : "ai_agent", a = await h.chapter.findUnique({
+          where: { id: e.chapterId },
+          select: { id: !0, content: !0, updatedAt: !0, wordCount: !0, volume: { select: { novelId: !0 } } }
         });
-        if (!chapter || !chapter.volume) {
-          throw new AiActionError("NOT_FOUND", "Chapter or volume not found");
-        }
-        const newWordCount = input.content.length;
-        const delta = newWordCount - chapter.wordCount;
+        if (!a || !a.volume)
+          throw new j("NOT_FOUND", "Chapter or volume not found");
+        const o = e.content.length, c = o - a.wordCount;
         try {
-          const [, updatedChapter] = await db.$transaction([
-            db.novel.update({
-              where: { id: chapter.volume.novelId },
-              data: { wordCount: { increment: delta }, updatedAt: /* @__PURE__ */ new Date() }
+          const [, i] = await h.$transaction([
+            h.novel.update({
+              where: { id: a.volume.novelId },
+              data: { wordCount: { increment: c }, updatedAt: /* @__PURE__ */ new Date() }
             }),
-            db.chapter.update({
-              where: { id: input.chapterId },
-              data: { content: input.content, wordCount: newWordCount, updatedAt: /* @__PURE__ */ new Date() }
+            h.chapter.update({
+              where: { id: e.chapterId },
+              data: { content: e.content, wordCount: o, updatedAt: /* @__PURE__ */ new Date() }
             })
           ]);
-          scheduleChapterSummaryRebuild(input.chapterId);
-          return {
-            chapter: updatedChapter,
+          return Ge(e.chapterId), {
+            chapter: i,
             saveMeta: {
-              source: saveSource,
+              source: n,
               rollbackPoint: {
-                chapterId: chapter.id,
-                content: chapter.content,
-                updatedAt: chapter.updatedAt
+                chapterId: a.id,
+                content: a.content,
+                updatedAt: a.updatedAt
               }
             }
           };
-        } catch (error) {
-          const normalized = normalizeAiError(error);
-          throw new AiActionError("PERSISTENCE_ERROR", normalized.message);
+        } catch (i) {
+          const l = te(i);
+          throw new j("PERSISTENCE_ERROR", l.message);
         }
       }
     },
@@ -1373,32 +1268,31 @@ function createCapabilityDefinitions(deps) {
         required: ["novelId", "chapterId", "currentContent"]
       },
       outputSchema: { type: "object" },
-      handler: async (payload) => {
-        const input = payload;
-        if (!(input == null ? void 0 : input.novelId) || !input.chapterId || typeof input.currentContent !== "string") {
-          throw new AiActionError("INVALID_INPUT", "novelId, chapterId, currentContent are required");
-        }
+      handler: async (t) => {
+        const e = t;
+        if (!(e != null && e.novelId) || !e.chapterId || typeof e.currentContent != "string")
+          throw new j("INVALID_INPUT", "novelId, chapterId, currentContent are required");
         try {
-          return await deps.continueWriting({
-            locale: input.locale,
-            mode: input.mode,
-            novelId: input.novelId,
-            chapterId: input.chapterId,
-            currentContent: input.currentContent,
-            ideaIds: Array.isArray(input.ideaIds) ? input.ideaIds : void 0,
-            contextChapterCount: input.contextChapterCount,
-            recentRawChapterCount: input.recentRawChapterCount,
-            targetLength: input.targetLength,
-            style: input.style,
-            tone: input.tone,
-            pace: input.pace,
-            temperature: input.temperature,
-            userIntent: input.userIntent,
-            currentLocation: input.currentLocation,
-            overrideUserPrompt: input.overrideUserPrompt
+          return await r.continueWriting({
+            locale: e.locale,
+            mode: e.mode,
+            novelId: e.novelId,
+            chapterId: e.chapterId,
+            currentContent: e.currentContent,
+            ideaIds: Array.isArray(e.ideaIds) ? e.ideaIds : void 0,
+            contextChapterCount: e.contextChapterCount,
+            recentRawChapterCount: e.recentRawChapterCount,
+            targetLength: e.targetLength,
+            style: e.style,
+            tone: e.tone,
+            pace: e.pace,
+            temperature: e.temperature,
+            userIntent: e.userIntent,
+            currentLocation: e.currentLocation,
+            overrideUserPrompt: e.overrideUserPrompt
           });
-        } catch (error) {
-          throw normalizeAiError(error);
+        } catch (n) {
+          throw te(n);
         }
       }
     },
@@ -1415,16 +1309,15 @@ function createCapabilityDefinitions(deps) {
         required: ["novelId"]
       },
       outputSchema: { type: "array" },
-      handler: async (payload) => {
-        const input = payload;
-        if (!(input == null ? void 0 : input.novelId)) {
-          throw new AiActionError("INVALID_INPUT", "novelId is required");
-        }
-        return db.plotLine.findMany({
-          where: { novelId: input.novelId },
+      handler: async (t) => {
+        const e = t;
+        if (!(e != null && e.novelId))
+          throw new j("INVALID_INPUT", "novelId is required");
+        return h.plotLine.findMany({
+          where: { novelId: e.novelId },
           include: {
             points: {
-              include: { anchors: true },
+              include: { anchors: !0 },
               orderBy: { order: "asc" }
             }
           },
@@ -1445,13 +1338,12 @@ function createCapabilityDefinitions(deps) {
         required: ["novelId"]
       },
       outputSchema: { type: "array" },
-      handler: async (payload) => {
-        const input = payload;
-        if (!(input == null ? void 0 : input.novelId)) {
-          throw new AiActionError("INVALID_INPUT", "novelId is required");
-        }
-        return db.worldSetting.findMany({
-          where: { novelId: input.novelId },
+      handler: async (t) => {
+        const e = t;
+        if (!(e != null && e.novelId))
+          throw new j("INVALID_INPUT", "novelId is required");
+        return h.worldSetting.findMany({
+          where: { novelId: e.novelId },
           orderBy: { sortOrder: "asc" }
         });
       }
@@ -1469,13 +1361,12 @@ function createCapabilityDefinitions(deps) {
         required: ["novelId"]
       },
       outputSchema: { type: "array" },
-      handler: async (payload) => {
-        const input = payload;
-        if (!(input == null ? void 0 : input.novelId)) {
-          throw new AiActionError("INVALID_INPUT", "novelId is required");
-        }
-        return db.character.findMany({
-          where: { novelId: input.novelId },
+      handler: async (t) => {
+        const e = t;
+        if (!(e != null && e.novelId))
+          throw new j("INVALID_INPUT", "novelId is required");
+        return h.character.findMany({
+          where: { novelId: e.novelId },
           orderBy: { sortOrder: "asc" }
         });
       }
@@ -1493,13 +1384,12 @@ function createCapabilityDefinitions(deps) {
         required: ["novelId"]
       },
       outputSchema: { type: "array" },
-      handler: async (payload) => {
-        const input = payload;
-        if (!(input == null ? void 0 : input.novelId)) {
-          throw new AiActionError("INVALID_INPUT", "novelId is required");
-        }
-        return db.item.findMany({
-          where: { novelId: input.novelId },
+      handler: async (t) => {
+        const e = t;
+        if (!(e != null && e.novelId))
+          throw new j("INVALID_INPUT", "novelId is required");
+        return h.item.findMany({
+          where: { novelId: e.novelId },
           orderBy: { sortOrder: "asc" }
         });
       }
@@ -1517,13 +1407,12 @@ function createCapabilityDefinitions(deps) {
         required: ["novelId"]
       },
       outputSchema: { type: "array" },
-      handler: async (payload) => {
-        const input = payload;
-        if (!(input == null ? void 0 : input.novelId)) {
+      handler: async (t) => {
+        const e = t;
+        if (!(e != null && e.novelId))
           throw new Error("novelId is required");
-        }
-        return db.mapCanvas.findMany({
-          where: { novelId: input.novelId },
+        return h.mapCanvas.findMany({
+          where: { novelId: e.novelId },
           orderBy: { sortOrder: "asc" }
         });
       }
@@ -1544,405 +1433,343 @@ function createCapabilityDefinitions(deps) {
         required: ["novelId", "keyword"]
       },
       outputSchema: { type: "array" },
-      handler: async (payload) => {
-        const input = payload;
-        if (!(input == null ? void 0 : input.novelId) || !(input == null ? void 0 : input.keyword)) {
-          throw new AiActionError("INVALID_INPUT", "novelId and keyword are required");
-        }
-        return search(input.novelId, input.keyword, input.limit ?? 20, input.offset ?? 0);
+      handler: async (t) => {
+        const e = t;
+        if (!(e != null && e.novelId) || !(e != null && e.keyword))
+          throw new j("INVALID_INPUT", "novelId and keyword are required");
+        return Ct(e.novelId, e.keyword, e.limit ?? 20, e.offset ?? 0);
       }
     }
   ];
 }
-function splitArgs(raw) {
-  if (!raw.trim())
-    return [];
-  const matches = raw.match(/"[^"]*"|'[^']*'|\S+/g) || [];
-  return matches.map((token) => token.replace(/^['"]|['"]$/g, ""));
+function hr(r) {
+  return r.trim() ? (r.match(/"[^"]*"|'[^']*'|\S+/g) || []).map((e) => e.replace(/^['"]|['"]$/g, "")) : [];
 }
-class McpCliProvider {
-  constructor(settings) {
-    __publicField(this, "name", "mcp-cli");
-    this.settings = settings;
+class nt {
+  constructor(t) {
+    ee(this, "name", "mcp-cli");
+    this.settings = t;
   }
   async healthCheck() {
-    const { cliPath } = this.settings.mcpCli;
-    if (!cliPath.trim()) {
-      return { ok: false, detail: "MCP CLI path is empty" };
-    }
-    if (!fs.existsSync(cliPath)) {
-      return { ok: false, detail: "MCP CLI path does not exist" };
-    }
+    const { cliPath: t } = this.settings.mcpCli;
+    if (!t.trim())
+      return { ok: !1, detail: "MCP CLI path is empty" };
+    if (!z.existsSync(t))
+      return { ok: !1, detail: "MCP CLI path does not exist" };
     try {
-      const { stdout } = await this.runProcess(["--version"], "", this.settings.mcpCli.startupTimeoutMs);
-      return { ok: true, detail: (stdout || "MCP CLI is executable").slice(0, 200) };
-    } catch (error) {
-      return { ok: false, detail: `MCP CLI check failed: ${(error == null ? void 0 : error.message) || "unknown error"}` };
+      M("INFO", "McpCliProvider.healthCheck.request", "MCP CLI health check request", {
+        cliPath: t,
+        timeoutMs: this.settings.mcpCli.startupTimeoutMs
+      });
+      const { stdout: e } = await this.runProcess(["--version"], "", this.settings.mcpCli.startupTimeoutMs);
+      return M("INFO", "McpCliProvider.healthCheck.response", "MCP CLI health check response", {
+        cliPath: t,
+        stdout: e
+      }), { ok: !0, detail: (e || "MCP CLI is executable").slice(0, 200) };
+    } catch (e) {
+      return ie("McpCliProvider.healthCheck.error", e, { cliPath: t }), { ok: !1, detail: `MCP CLI check failed: ${(e == null ? void 0 : e.message) || "unknown error"}` };
     }
   }
-  async generate(req) {
-    const prompt = req.prompt.trim();
-    if (!prompt) {
+  async generate(t) {
+    const e = t.prompt.trim();
+    if (!e)
       return { text: "", model: "mcp-cli" };
-    }
-    const argsTemplate = this.settings.mcpCli.argsTemplate || "";
-    const hasPromptPlaceholder = argsTemplate.includes("{prompt}");
-    const parsedArgs = splitArgs(argsTemplate.replace("{prompt}", prompt));
-    const { stdout } = await this.runProcess(parsedArgs, hasPromptPlaceholder ? "" : prompt, this.settings.mcpCli.startupTimeoutMs);
-    return {
-      text: stdout.trim(),
+    const n = this.settings.mcpCli.argsTemplate || "", a = n.includes("{prompt}"), o = hr(n.replace("{prompt}", e));
+    M("INFO", "McpCliProvider.generate.request", "MCP CLI generate request", {
+      cliPath: this.settings.mcpCli.cliPath,
+      args: o,
+      prompt: a ? "" : e,
+      promptEmbeddedInArgs: a
+    });
+    const { stdout: c } = await this.runProcess(o, a ? "" : e, this.settings.mcpCli.startupTimeoutMs);
+    return M("INFO", "McpCliProvider.generate.response", "MCP CLI generate response", {
+      cliPath: this.settings.mcpCli.cliPath,
+      stdout: c
+    }), {
+      text: c.trim(),
       model: "mcp-cli"
     };
   }
-  async runProcess(args, stdinText, timeoutMs) {
-    const { cliPath, workingDir, envJson } = this.settings.mcpCli;
-    const extraEnv = this.parseEnvJson(envJson);
-    return new Promise((resolve, reject) => {
-      const child = spawn(cliPath, args, {
-        cwd: workingDir || process.cwd(),
-        env: { ...process.env, ...extraEnv },
+  async runProcess(t, e, n) {
+    const { cliPath: a, workingDir: o, envJson: c } = this.settings.mcpCli, i = this.parseEnvJson(c), l = Date.now();
+    return new Promise((I, w) => {
+      const E = Vt(a, t, {
+        cwd: o || process.cwd(),
+        env: { ...process.env, ...i },
         stdio: ["pipe", "pipe", "pipe"],
-        windowsHide: true
+        windowsHide: !0
       });
-      let stdout = "";
-      let stderr = "";
-      let done = false;
-      const timer = setTimeout(() => {
-        if (done)
-          return;
-        done = true;
-        child.kill("SIGTERM");
-        reject(new Error("MCP CLI process timeout"));
-      }, Math.max(1e3, timeoutMs));
-      child.stdout.on("data", (chunk) => {
-        stdout += chunk.toString();
-      });
-      child.stderr.on("data", (chunk) => {
-        stderr += chunk.toString();
-      });
-      child.on("error", (error) => {
-        if (done)
-          return;
-        done = true;
-        clearTimeout(timer);
-        reject(error);
-      });
-      child.on("close", (code) => {
-        if (done)
-          return;
-        done = true;
-        clearTimeout(timer);
-        if (code !== 0) {
-          reject(new Error(`MCP CLI exited with code ${code}: ${stderr.slice(0, 300)}`));
-          return;
+      let C = "", p = "", g = !1;
+      const f = setTimeout(() => {
+        g || (g = !0, E.kill("SIGTERM"), M("ERROR", "McpCliProvider.runProcess.timeout", "MCP CLI process timeout", {
+          cliPath: a,
+          args: t,
+          elapsedMs: Date.now() - l
+        }), w(new Error("MCP CLI process timeout")));
+      }, Math.max(1e3, n));
+      E.stdout.on("data", (m) => {
+        C += m.toString();
+      }), E.stderr.on("data", (m) => {
+        p += m.toString();
+      }), E.on("error", (m) => {
+        g || (g = !0, clearTimeout(f), ie("McpCliProvider.runProcess.error", m, {
+          cliPath: a,
+          args: t,
+          elapsedMs: Date.now() - l,
+          env: oe(i)
+        }), w(m));
+      }), E.on("close", (m) => {
+        if (!g) {
+          if (g = !0, clearTimeout(f), m !== 0) {
+            M("ERROR", "McpCliProvider.runProcess.exit", "MCP CLI exited with non-zero code", {
+              cliPath: a,
+              args: t,
+              code: m,
+              elapsedMs: Date.now() - l,
+              stderr: p
+            }), w(new Error(`MCP CLI exited with code ${m}: ${p.slice(0, 300)}`));
+            return;
+          }
+          M("INFO", "McpCliProvider.runProcess.exit", "MCP CLI process completed", {
+            cliPath: a,
+            args: t,
+            code: m,
+            elapsedMs: Date.now() - l,
+            stderr: p
+          }), I({ stdout: C, stderr: p });
         }
-        resolve({ stdout, stderr });
-      });
-      if (stdinText) {
-        child.stdin.write(stdinText);
-      }
-      child.stdin.end();
+      }), e && E.stdin.write(e), E.stdin.end();
     });
   }
-  parseEnvJson(raw) {
-    if (!raw.trim())
+  parseEnvJson(t) {
+    if (!t.trim())
       return {};
     try {
-      const parsed = JSON.parse(raw);
-      if (!parsed || typeof parsed !== "object")
+      const e = JSON.parse(t);
+      if (!e || typeof e != "object")
         return {};
-      const result = {};
-      for (const [key, value] of Object.entries(parsed)) {
-        result[key] = String(value ?? "");
-      }
-      return result;
+      const n = {};
+      for (const [a, o] of Object.entries(e))
+        n[a] = String(o ?? "");
+      return n;
     } catch {
       return {};
     }
   }
 }
-function uniqueArray(values) {
-  const seen = /* @__PURE__ */ new Set();
-  const output = [];
-  for (const raw of values) {
-    const item = String(raw || "").trim();
-    if (!item)
+function at(r) {
+  const t = /* @__PURE__ */ new Set(), e = [];
+  for (const n of r) {
+    const a = String(n || "").trim();
+    if (!a)
       continue;
-    const key = item.toLowerCase();
-    if (seen.has(key))
-      continue;
-    seen.add(key);
-    output.push(item);
+    const o = a.toLowerCase();
+    t.has(o) || (t.add(o), e.push(a));
   }
-  return output;
+  return e;
 }
-function extractPlainTextFromLexical$1(content) {
-  if (!(content == null ? void 0 : content.trim()))
+function Re(r) {
+  if (!(r != null && r.trim()))
     return "";
   try {
-    const parsed = JSON.parse(content);
-    const texts = [];
-    const walk = (node) => {
-      if (!node || typeof node !== "object")
-        return;
-      if (typeof node.text === "string") {
-        texts.push(node.text);
-      }
-      if (Array.isArray(node.children)) {
-        node.children.forEach(walk);
-      }
+    const t = JSON.parse(r), e = [], n = (a) => {
+      !a || typeof a != "object" || (typeof a.text == "string" && e.push(a.text), Array.isArray(a.children) && a.children.forEach(n));
     };
-    walk((parsed == null ? void 0 : parsed.root) || parsed);
-    return texts.join(" ").replace(/\s+/g, " ").trim();
+    return n((t == null ? void 0 : t.root) || t), e.join(" ").replace(/\s+/g, " ").trim();
   } catch {
-    return content.replace(/\s+/g, " ").trim();
+    return r.replace(/\s+/g, " ").trim();
   }
 }
-class ContextBuilder {
-  async buildForContinueWriting(payload) {
-    const contextChapterCount = Math.max(1, Math.min(8, payload.contextChapterCount ?? 3));
-    const recentRawChapterCount = Math.max(0, Math.min(contextChapterCount, payload.recentRawChapterCount ?? 2));
-    const [worldSettings, plotLines, characters, items, maps, recentChapters, currentChapter] = await Promise.all([
-      db.worldSetting.findMany({
-        where: { novelId: payload.novelId },
+class gr {
+  async buildForContinueWriting(t) {
+    const e = Math.max(1, Math.min(8, t.contextChapterCount ?? 3)), n = Math.max(0, Math.min(e, t.recentRawChapterCount ?? 2)), [a, o, c, i, l, I, w] = await Promise.all([
+      h.worldSetting.findMany({
+        where: { novelId: t.novelId },
         orderBy: { updatedAt: "desc" }
       }),
-      db.plotLine.findMany({
-        where: { novelId: payload.novelId },
-        include: { points: { include: { anchors: true } } },
+      h.plotLine.findMany({
+        where: { novelId: t.novelId },
+        include: { points: { include: { anchors: !0 } } },
         orderBy: { sortOrder: "asc" }
       }),
-      db.character.findMany({
-        where: { novelId: payload.novelId },
-        select: { name: true, role: true, description: true },
+      h.character.findMany({
+        where: { novelId: t.novelId },
+        select: { name: !0, role: !0, description: !0 },
         orderBy: { updatedAt: "desc" },
         take: 100
       }),
-      db.item.findMany({
-        where: { novelId: payload.novelId },
-        select: { name: true, type: true, description: true },
+      h.item.findMany({
+        where: { novelId: t.novelId },
+        select: { name: !0, type: !0, description: !0 },
         orderBy: { updatedAt: "desc" },
         take: 100
       }),
-      db.mapCanvas.findMany({
-        where: { novelId: payload.novelId },
-        select: { name: true, type: true, description: true },
+      h.mapCanvas.findMany({
+        where: { novelId: t.novelId },
+        select: { name: !0, type: !0, description: !0 },
         orderBy: { updatedAt: "desc" },
         take: 50
       }),
-      db.chapter.findMany({
+      h.chapter.findMany({
         where: {
-          id: { not: payload.chapterId },
-          volume: { novelId: payload.novelId }
+          id: { not: t.chapterId },
+          volume: { novelId: t.novelId }
         },
         select: {
-          id: true,
-          title: true,
-          content: true,
-          updatedAt: true
+          id: !0,
+          title: !0,
+          content: !0,
+          updatedAt: !0
         },
         orderBy: { updatedAt: "desc" },
-        take: contextChapterCount
+        take: e
       }),
-      db.chapter.findUnique({
-        where: { id: payload.chapterId },
-        select: { volumeId: true }
+      h.chapter.findUnique({
+        where: { id: t.chapterId },
+        select: { volumeId: !0 }
       })
-    ]);
-    const requestedIdeaIds = Array.isArray(payload.ideaIds) ? payload.ideaIds.map((id) => String(id)).filter(Boolean) : [];
-    const selectedIdeasRaw = requestedIdeaIds.length > 0 ? await db.idea.findMany({
+    ]), E = Array.isArray(t.ideaIds) ? t.ideaIds.map((N) => String(N)).filter(Boolean) : [], C = E.length > 0 ? await h.idea.findMany({
       where: {
-        novelId: payload.novelId,
-        id: { in: requestedIdeaIds }
+        novelId: t.novelId,
+        id: { in: E }
       },
-      include: { tags: true },
+      include: { tags: !0 },
       orderBy: { updatedAt: "desc" },
       take: 20
-    }) : [];
-    const recentChapterIds = recentChapters.map((chapter) => chapter.id);
-    const latestSummaries = recentChapterIds.length > 0 ? await db.chapterSummary.findMany({
+    }) : [], p = I.map((N) => N.id), g = p.length > 0 ? await h.chapterSummary.findMany({
       where: {
-        chapterId: { in: recentChapterIds },
-        isLatest: true,
+        chapterId: { in: p },
+        isLatest: !0,
         status: "active"
       },
       orderBy: { updatedAt: "desc" }
-    }) : [];
-    const summaryByChapterId = /* @__PURE__ */ new Map();
-    for (const summary of latestSummaries) {
-      if (!summaryByChapterId.has(summary.chapterId)) {
-        summaryByChapterId.set(summary.chapterId, summary);
-      }
-    }
-    const fallbackCount = { value: 0 };
-    const latestNarrativeSummaries = await db.narrativeSummary.findMany({
+    }) : [], f = /* @__PURE__ */ new Map();
+    for (const N of g)
+      f.has(N.chapterId) || f.set(N.chapterId, N);
+    const m = { value: 0 }, s = (await h.narrativeSummary.findMany({
       where: {
-        novelId: payload.novelId,
-        isLatest: true,
+        novelId: t.novelId,
+        isLatest: !0,
         status: "active",
         OR: [
           { level: "novel", volumeId: null },
-          ...(currentChapter == null ? void 0 : currentChapter.volumeId) ? [{ level: "volume", volumeId: currentChapter.volumeId }] : []
+          ...w != null && w.volumeId ? [{ level: "volume", volumeId: w.volumeId }] : []
         ]
       },
       orderBy: { updatedAt: "desc" },
       take: 2
-    });
-    const narrativeSummaries = latestNarrativeSummaries.map((item) => {
-      let keyFacts = [];
-      if (typeof item.keyFacts === "string" && item.keyFacts.trim()) {
+    })).map((N) => {
+      let Z = [];
+      if (typeof N.keyFacts == "string" && N.keyFacts.trim())
         try {
-          const parsed = JSON.parse(item.keyFacts);
-          if (Array.isArray(parsed)) {
-            keyFacts = uniqueArray(
-              parsed.map((fact) => String(fact || "").trim()).filter(Boolean).slice(0, 12)
-            ).slice(0, 5);
-          }
+          const X = JSON.parse(N.keyFacts);
+          Array.isArray(X) && (Z = at(
+            X.map((ce) => String(ce || "").trim()).filter(Boolean).slice(0, 12)
+          ).slice(0, 5));
         } catch {
-          keyFacts = [];
+          Z = [];
         }
-      }
       return {
-        level: item.level === "volume" ? "volume" : "novel",
-        title: String(item.title || ""),
-        summaryText: String(item.summaryText || "").slice(0, 1200),
-        keyFacts
+        level: N.level === "volume" ? "volume" : "novel",
+        title: String(N.title || ""),
+        summaryText: String(N.summaryText || "").slice(0, 1200),
+        keyFacts: Z
       };
-    });
-    const recentChapterItems = recentChapters.map((chapter, index) => ({
-      chapterId: chapter.id,
-      title: chapter.title || "",
+    }), d = I.map((N, Z) => ({
+      chapterId: N.id,
+      title: N.title || "",
       excerpt: (() => {
-        if (index < recentRawChapterCount) {
-          return extractPlainTextFromLexical$1(chapter.content || "").slice(-1200);
-        }
-        const summary = summaryByChapterId.get(chapter.id);
-        const summaryText = (summary == null ? void 0 : summary.compressedMemory) || (summary == null ? void 0 : summary.summaryText);
-        if (typeof summaryText === "string" && summaryText.trim()) {
-          return summaryText.slice(-1200);
-        }
-        fallbackCount.value += 1;
-        return extractPlainTextFromLexical$1(chapter.content || "").slice(-1200);
+        if (Z < n)
+          return Re(N.content || "").slice(-1200);
+        const X = f.get(N.id), ce = (X == null ? void 0 : X.compressedMemory) || (X == null ? void 0 : X.summaryText);
+        return typeof ce == "string" && ce.trim() ? ce.slice(-1200) : (m.value += 1, Re(N.content || "").slice(-1200));
       })()
-    }));
-    const currentChapterBeforeCursor = extractPlainTextFromLexical$1(payload.currentContent || "").slice(-2400);
-    const selectedIdeas = selectedIdeasRaw.map((idea) => ({
-      ideaId: idea.id,
-      content: (idea.content || "").slice(0, 800),
-      quote: typeof idea.quote === "string" ? idea.quote.slice(0, 300) : void 0,
-      tags: Array.isArray(idea.tags) ? idea.tags.map((tag) => String(tag.name || "").trim()).filter(Boolean).slice(0, 12) : []
-    }));
-    const entityIndex = {
+    })), y = Re(t.currentContent || "").slice(-2400), v = C.map((N) => ({
+      ideaId: N.id,
+      content: (N.content || "").slice(0, 800),
+      quote: typeof N.quote == "string" ? N.quote.slice(0, 300) : void 0,
+      tags: Array.isArray(N.tags) ? N.tags.map((Z) => String(Z.name || "").trim()).filter(Boolean).slice(0, 12) : []
+    })), _ = {
       characters: new Set(
-        characters.map((item) => String((item == null ? void 0 : item.name) || "").trim()).filter(Boolean)
+        c.map((N) => String((N == null ? void 0 : N.name) || "").trim()).filter(Boolean)
       ),
       items: new Set(
-        items.map((item) => String((item == null ? void 0 : item.name) || "").trim()).filter(Boolean)
+        i.map((N) => String((N == null ? void 0 : N.name) || "").trim()).filter(Boolean)
       ),
       worldSettings: new Set(
-        worldSettings.map((item) => String((item == null ? void 0 : item.name) || "").trim()).filter(Boolean)
+        a.map((N) => String((N == null ? void 0 : N.name) || "").trim()).filter(Boolean)
       )
-    };
-    const entityMatches = [];
-    const mentionRegex = /@([^\s@，。！？,!.;；:："'“”‘’()[\]{}<>]+)/g;
-    for (const idea of selectedIdeas) {
-      const text = `${idea.content || ""}
-${idea.quote || ""}`;
-      const hits = Array.from(text.matchAll(mentionRegex));
-      for (const hit of hits) {
-        const name = String(hit[1] || "").trim();
-        if (!name)
-          continue;
-        if (entityIndex.characters.has(name)) {
-          entityMatches.push({ name, kind: "character" });
-        } else if (entityIndex.items.has(name)) {
-          entityMatches.push({ name, kind: "item" });
-        } else if (entityIndex.worldSettings.has(name)) {
-          entityMatches.push({ name, kind: "worldSetting" });
-        }
+    }, D = [], k = /@([^\s@，。！？,!.;；:："'“”‘’()[\]{}<>]+)/g;
+    for (const N of v) {
+      const Z = `${N.content || ""}
+${N.quote || ""}`, X = Array.from(Z.matchAll(k));
+      for (const ce of X) {
+        const de = String(ce[1] || "").trim();
+        de && (_.characters.has(de) ? D.push({ name: de, kind: "character" }) : _.items.has(de) ? D.push({ name: de, kind: "item" }) : _.worldSettings.has(de) && D.push({ name: de, kind: "worldSetting" }));
       }
     }
-    const selectedIdeaEntities = uniqueArray(entityMatches.map((item) => `${item.kind}:${item.name}`)).map((encoded) => {
-      const [kind, ...nameRest] = encoded.split(":");
-      const name = nameRest.join(":");
+    const P = at(D.map((N) => `${N.kind}:${N.name}`)).map((N) => {
+      const [Z, ...X] = N.split(":");
       return {
-        name,
-        kind: kind === "character" || kind === "item" || kind === "worldSetting" ? kind : "character"
+        name: X.join(":"),
+        kind: Z === "character" || Z === "item" || Z === "worldSetting" ? Z : "character"
       };
-    }).slice(0, 20);
-    const currentLocation = String(payload.currentLocation || "").trim().slice(0, 120);
-    const missingIdeaCount = Math.max(0, requestedIdeaIds.length - selectedIdeas.length);
-    const warnings = [];
-    if (fallbackCount.value > 0) {
-      warnings.push(`${fallbackCount.value} chapter summaries missing; fell back to chapter text excerpts.`);
-    }
-    if (missingIdeaCount > 0) {
-      warnings.push(`${missingIdeaCount} selected ideas not found; ignored.`);
-    }
-    return {
+    }).slice(0, 20), $ = String(t.currentLocation || "").trim().slice(0, 120), K = Math.max(0, E.length - v.length), Q = [];
+    return m.value > 0 && Q.push(`${m.value} chapter summaries missing; fell back to chapter text excerpts.`), K > 0 && Q.push(`${K} selected ideas not found; ignored.`), {
       hardContext: {
-        worldSettings,
-        plotLines,
-        characters,
-        items,
-        maps
+        worldSettings: a,
+        plotLines: o,
+        characters: c,
+        items: i,
+        maps: l
       },
       dynamicContext: {
-        recentChapters: recentChapterItems,
-        selectedIdeas,
-        selectedIdeaEntities,
-        currentChapterBeforeCursor,
-        ...currentLocation ? { currentLocation } : {},
-        narrativeSummaries
+        recentChapters: d,
+        selectedIdeas: v,
+        selectedIdeaEntities: P,
+        currentChapterBeforeCursor: y,
+        ...$ ? { currentLocation: $ } : {},
+        narrativeSummaries: s
       },
       params: {
-        mode: payload.mode === "new_chapter" ? "new_chapter" : "continue_chapter",
-        contextChapterCount,
-        style: payload.style || "default",
-        tone: payload.tone || "balanced",
-        pace: payload.pace || "medium",
-        targetLength: payload.targetLength ?? 500
+        mode: t.mode === "new_chapter" ? "new_chapter" : "continue_chapter",
+        contextChapterCount: e,
+        style: t.style || "default",
+        tone: t.tone || "balanced",
+        pace: t.pace || "medium",
+        targetLength: Math.max(100, Math.min(4e3, t.targetLength ?? 500))
       },
       usedContext: [
         "world_settings_full",
         "plot_outline_full",
         "characters_items_maps_snapshot",
-        `recent_chapter_summary_memory_preferred_${contextChapterCount}`,
-        `recent_chapter_raw_text_${recentRawChapterCount}`,
-        narrativeSummaries.length > 0 ? `narrative_summaries_${narrativeSummaries.length}` : "narrative_summaries_0",
-        selectedIdeas.length > 0 ? `selected_ideas_${selectedIdeas.length}` : "selected_ideas_0",
-        selectedIdeaEntities.length > 0 ? `selected_idea_entities_${selectedIdeaEntities.length}` : "selected_idea_entities_0",
-        ...currentLocation ? ["current_location"] : [],
+        `recent_chapter_summary_memory_preferred_${e}`,
+        `recent_chapter_raw_text_${n}`,
+        s.length > 0 ? `narrative_summaries_${s.length}` : "narrative_summaries_0",
+        v.length > 0 ? `selected_ideas_${v.length}` : "selected_ideas_0",
+        P.length > 0 ? `selected_idea_entities_${P.length}` : "selected_idea_entities_0",
+        ...$ ? ["current_location"] : [],
         "current_chapter_before_cursor"
       ],
-      warnings
+      warnings: Q
     };
   }
 }
-const MAX_IMAGE_SIZE_BYTES = 10 * 1024 * 1024;
-const DRAFT_MAX_FIELD_LENGTH = 2e3;
-const VALID_PLOT_POINT_TYPES = /* @__PURE__ */ new Set(["foreshadowing", "mystery", "promise", "event"]);
-const VALID_PLOT_POINT_STATUS = /* @__PURE__ */ new Set(["active", "resolved"]);
-const VALID_ITEM_TYPES = /* @__PURE__ */ new Set(["item", "skill", "location"]);
-const VALID_MAP_TYPES = /* @__PURE__ */ new Set(["world", "region", "scene"]);
-const CREATIVE_ASSET_SECTIONS = ["plotLines", "plotPoints", "characters", "items", "skills", "maps"];
-const CREATIVE_SECTION_KEYWORDS = {
+const Fe = 10 * 1024 * 1024, yr = 2e3, ot = /* @__PURE__ */ new Set(["foreshadowing", "mystery", "promise", "event"]), it = /* @__PURE__ */ new Set(["active", "resolved"]), wr = /* @__PURE__ */ new Set(["item", "skill", "location"]), vr = /* @__PURE__ */ new Set(["world", "region", "scene"]), Ae = ["plotLines", "plotPoints", "characters", "items", "skills", "maps"], Ir = {
   plotLines: ["主线", "支线", "故事线", "剧情线", "plot line", "story line"],
   plotPoints: ["要点", "情节点", "剧情点", "事件", "桥段", "转折", "冲突", "plot point", "scene beat"],
   characters: ["角色", "龙套", "配角", "人物", "反派", "主角", "npc", "character"],
   items: ["物品", "道具", "装备", "宝物", "武器", "法宝", "artifact", "item"],
   skills: ["技能", "招式", "能力", "法术", "功法", "绝招", "spell", "skill"],
   maps: ["地图", "场景", "地点", "区域", "城市", "宗门地图", "world map", "map", "location"]
-};
-const OPENCLAW_REQUIRED_ACTIONS = [
+}, Ue = [
   "novel.list",
   "volume.list",
   "chapter.list",
   "chapter.create",
   "chapter.save",
   "chapter.generate"
-];
-const CAPABILITY_COVERAGE_BASELINE = [
+], Cr = [
   {
     moduleId: "novel_volume_chapter",
     title: "小说/卷章管理",
@@ -1992,8 +1819,7 @@ const CAPABILITY_COVERAGE_BASELINE = [
     title: "备份恢复",
     requiredActions: []
   }
-];
-const DEFAULT_AI_SETTINGS = {
+], ue = {
   providerType: "http",
   http: {
     baseUrl: "",
@@ -2002,7 +1828,7 @@ const DEFAULT_AI_SETTINGS = {
     imageModel: "doubao-seedream-5-0-260128",
     imageSize: "2K",
     imageOutputFormat: "png",
-    imageWatermark: false,
+    imageWatermark: !1,
     timeoutMs: 6e4,
     maxTokens: 2048,
     temperature: 0.7
@@ -2032,48 +1858,30 @@ const DEFAULT_AI_SETTINGS = {
     recentChapterRawCount: 2
   }
 };
-function toProfileJson(profile) {
-  return JSON.stringify(profile ?? {});
+function Be(r) {
+  return JSON.stringify(r ?? {});
 }
-function mimeToExt(mimeType) {
-  const mime = (mimeType || "").toLowerCase();
-  if (mime.includes("jpeg") || mime.includes("jpg"))
-    return "jpg";
-  if (mime.includes("webp"))
-    return "webp";
-  if (mime.includes("gif"))
-    return "gif";
-  if (mime.includes("bmp"))
-    return "bmp";
-  return "png";
+function Er(r) {
+  const t = (r || "").toLowerCase();
+  return t.includes("jpeg") || t.includes("jpg") ? "jpg" : t.includes("webp") ? "webp" : t.includes("gif") ? "gif" : t.includes("bmp") ? "bmp" : "png";
 }
-function sanitizeFileName(name) {
-  return name.replace(/[^a-zA-Z0-9._-]/g, "_");
+function Sr(r) {
+  return r.replace(/[^a-zA-Z0-9._-]/g, "_");
 }
-function extractPlainTextFromLexical(content) {
-  if (!(content == null ? void 0 : content.trim()))
+function _r(r) {
+  if (!(r != null && r.trim()))
     return "";
   try {
-    const parsed = JSON.parse(content);
-    const texts = [];
-    const walk = (node) => {
-      if (!node || typeof node !== "object")
-        return;
-      if (typeof node.text === "string") {
-        texts.push(node.text);
-      }
-      if (Array.isArray(node.children)) {
-        node.children.forEach(walk);
-      }
+    const t = JSON.parse(r), e = [], n = (a) => {
+      !a || typeof a != "object" || (typeof a.text == "string" && e.push(a.text), Array.isArray(a.children) && a.children.forEach(n));
     };
-    walk((parsed == null ? void 0 : parsed.root) || parsed);
-    return texts.join(" ").replace(/\s+/g, " ").trim();
+    return n((t == null ? void 0 : t.root) || t), e.join(" ").replace(/\s+/g, " ").trim();
   } catch {
-    return content.replace(/\s+/g, " ").trim();
+    return r.replace(/\s+/g, " ").trim();
   }
 }
-function resolveMapStylePrompt(style) {
-  switch (style) {
+function Ar(r) {
+  switch (r) {
     case "realistic":
       return "Style: realistic cartography, natural terrain textures, high geographic plausibility.";
     case "fantasy":
@@ -2086,126 +1894,101 @@ function resolveMapStylePrompt(style) {
       return "";
   }
 }
-function buildRawPromptPreview(systemPrompt, userPrompt) {
-  const sections = [];
-  if (systemPrompt == null ? void 0 : systemPrompt.trim()) {
-    sections.push(`[System Prompt]
-${systemPrompt.trim()}`);
-  }
-  sections.push(`[User Prompt]
-${userPrompt.trim()}`);
-  return sections.join("\n\n");
+function st(r, t) {
+  const e = [];
+  return r != null && r.trim() && e.push(`[System Prompt]
+${r.trim()}`), e.push(`[User Prompt]
+${t.trim()}`), e.join(`
+
+`);
 }
-function trimText(value, maxLen) {
-  const text = typeof value === "string" ? value.trim() : "";
-  if (!text)
-    return "";
-  return text.length > maxLen ? text.slice(0, maxLen) : text;
+function O(r, t) {
+  const e = typeof r == "string" ? r.trim() : "";
+  return e ? e.length > t ? e.slice(0, t) : e : "";
 }
-function dedupeStrings(values, maxCount) {
-  const seen = /* @__PURE__ */ new Set();
-  const output = [];
-  for (const value of values) {
-    const text = String(value || "").trim();
-    if (!text)
+function Dr(r, t) {
+  const e = /* @__PURE__ */ new Set(), n = [];
+  for (const a of r) {
+    const o = String(a || "").trim();
+    if (!o)
       continue;
-    const key = text.toLowerCase();
-    if (seen.has(key))
-      continue;
-    seen.add(key);
-    output.push(text);
-    if (output.length >= maxCount)
+    const c = o.toLowerCase();
+    if (!e.has(c) && (e.add(c), n.push(o), n.length >= t))
       break;
   }
-  return output;
+  return n;
 }
-class AiService {
-  constructor(userDataPathGetter) {
-    __publicField(this, "userDataPath");
-    __publicField(this, "settingsFilePath");
-    __publicField(this, "mapImageStatsPath");
-    __publicField(this, "settingsCache");
-    __publicField(this, "mapImageStatsCache");
-    __publicField(this, "capabilityDefinitions");
-    __publicField(this, "capabilityRegistry");
-    __publicField(this, "contextBuilder");
-    this.userDataPath = userDataPathGetter();
-    this.settingsFilePath = path.join(this.userDataPath, "ai-settings.json");
-    this.mapImageStatsPath = path.join(this.userDataPath, "ai-map-image-stats.json");
-    this.settingsCache = this.loadSettings();
-    this.mapImageStatsCache = this.loadMapImageStats();
-    this.contextBuilder = new ContextBuilder();
-    this.capabilityDefinitions = createCapabilityDefinitions({
-      continueWriting: (payload) => this.continueWriting(payload)
-    });
-    this.capabilityRegistry = new Map(
-      this.capabilityDefinitions.map((definition) => [definition.actionId, definition.handler])
+class Nr {
+  constructor(t) {
+    ee(this, "userDataPath");
+    ee(this, "settingsFilePath");
+    ee(this, "mapImageStatsPath");
+    ee(this, "settingsCache");
+    ee(this, "mapImageStatsCache");
+    ee(this, "capabilityDefinitions");
+    ee(this, "capabilityRegistry");
+    ee(this, "contextBuilder");
+    this.userDataPath = t(), this.settingsFilePath = L.join(this.userDataPath, "ai-settings.json"), this.mapImageStatsPath = L.join(this.userDataPath, "ai-map-image-stats.json"), this.settingsCache = this.loadSettings(), this.mapImageStatsCache = this.loadMapImageStats(), this.contextBuilder = new gr(), this.capabilityDefinitions = fr({
+      continueWriting: (e) => this.continueWriting(e)
+    }), this.capabilityRegistry = new Map(
+      this.capabilityDefinitions.map((e) => [e.actionId, e.handler])
     );
   }
   listActions() {
-    return this.capabilityDefinitions.map((definition) => ({
-      actionId: definition.actionId,
-      title: definition.title,
-      description: definition.description,
-      permission: definition.permission,
-      inputSchema: definition.inputSchema,
-      outputSchema: definition.outputSchema
+    return this.capabilityDefinitions.map((t) => ({
+      actionId: t.actionId,
+      title: t.title,
+      description: t.description,
+      permission: t.permission,
+      inputSchema: t.inputSchema,
+      outputSchema: t.outputSchema
     }));
   }
   getCapabilityCoverage() {
-    const supportedActionSet = new Set(this.capabilityDefinitions.map((definition) => definition.actionId));
-    const modules = CAPABILITY_COVERAGE_BASELINE.map((module) => {
-      const missingActions = module.requiredActions.filter((actionId) => !supportedActionSet.has(actionId));
-      const supportedActions = module.requiredActions.filter((actionId) => supportedActionSet.has(actionId));
-      const coverage = module.requiredActions.length === 0 ? 0 : Math.round(supportedActions.length / module.requiredActions.length * 100);
+    const t = new Set(this.capabilityDefinitions.map((c) => c.actionId)), e = Cr.map((c) => {
+      const i = c.requiredActions.filter((w) => !t.has(w)), l = c.requiredActions.filter((w) => t.has(w)), I = c.requiredActions.length === 0 ? 0 : Math.round(l.length / c.requiredActions.length * 100);
       return {
-        moduleId: module.moduleId,
-        title: module.title,
-        requiredActions: [...module.requiredActions],
-        supportedActions,
-        missingActions,
-        coverage
+        moduleId: c.moduleId,
+        title: c.title,
+        requiredActions: [...c.requiredActions],
+        supportedActions: l,
+        missingActions: i,
+        coverage: I
       };
-    });
-    const totalRequired = modules.reduce((acc, item) => acc + item.requiredActions.length, 0);
-    const totalSupported = modules.reduce((acc, item) => acc + item.supportedActions.length, 0);
-    const overallCoverage = totalRequired === 0 ? 0 : Math.round(totalSupported / totalRequired * 100);
+    }), n = e.reduce((c, i) => c + i.requiredActions.length, 0), a = e.reduce((c, i) => c + i.supportedActions.length, 0);
     return {
-      overallCoverage,
-      totalRequired,
-      totalSupported,
-      modules
+      overallCoverage: n === 0 ? 0 : Math.round(a / n * 100),
+      totalRequired: n,
+      totalSupported: a,
+      modules: e
     };
   }
   getMcpToolsManifest() {
-    const tools = this.capabilityDefinitions.map((definition) => ({
-      name: definition.actionId,
-      description: `${definition.title}. ${definition.description}`,
-      inputSchema: definition.inputSchema
-    }));
-    return { tools };
+    return { tools: this.capabilityDefinitions.map((e) => ({
+      name: e.actionId,
+      description: `${e.title}. ${e.description}`,
+      inputSchema: e.inputSchema
+    })) };
   }
   getOpenClawManifest() {
-    const tools = this.capabilityDefinitions.map((definition) => ({
-      name: definition.actionId,
-      description: `${definition.title}. ${definition.description}`,
-      parameters: definition.inputSchema
-    }));
     return {
       schemaVersion: "openclaw.tool.v1",
-      tools
+      tools: this.capabilityDefinitions.map((e) => ({
+        name: e.actionId,
+        description: `${e.title}. ${e.description}`,
+        parameters: e.inputSchema
+      }))
     };
   }
   getOpenClawSkillManifest() {
-    const skills = this.capabilityDefinitions.map((definition) => ({
-      name: definition.actionId,
-      title: definition.title,
-      description: definition.description,
-      inputSchema: definition.inputSchema
-    }));
     return {
       schemaVersion: "openclaw.skill.v1",
-      skills
+      skills: this.capabilityDefinitions.map((e) => ({
+        name: e.actionId,
+        title: e.title,
+        description: e.description,
+        inputSchema: e.inputSchema
+      }))
     };
   }
   getSettings() {
@@ -2214,229 +1997,202 @@ class AiService {
   getMapImageStats() {
     return this.mapImageStatsCache;
   }
-  updateSettings(partial) {
-    this.settingsCache = {
+  updateSettings(t) {
+    return this.settingsCache = {
       ...this.settingsCache,
-      ...partial,
-      http: { ...this.settingsCache.http, ...partial.http ?? {} },
-      mcpCli: { ...this.settingsCache.mcpCli, ...partial.mcpCli ?? {} },
-      proxy: { ...this.settingsCache.proxy, ...partial.proxy ?? {} },
-      summary: { ...this.settingsCache.summary, ...partial.summary ?? {} }
-    };
-    this.persistSettings();
-    return this.settingsCache;
+      ...t,
+      http: { ...this.settingsCache.http, ...t.http ?? {} },
+      mcpCli: { ...this.settingsCache.mcpCli, ...t.mcpCli ?? {} },
+      proxy: { ...this.settingsCache.proxy, ...t.proxy ?? {} },
+      summary: { ...this.settingsCache.summary, ...t.summary ?? {} }
+    }, this.persistSettings(), this.settingsCache;
   }
   async testConnection() {
     return this.getProvider().healthCheck();
   }
   async testMcp() {
-    const provider = new McpCliProvider(this.settingsCache);
-    return provider.healthCheck();
+    return new nt(this.settingsCache).healthCheck();
   }
   async testOpenClawMcp() {
-    const result = await this.testOpenClawSmoke({ kind: "mcp" });
-    return { ok: result.ok, detail: result.detail };
+    const t = await this.testOpenClawSmoke({ kind: "mcp" });
+    return { ok: t.ok, detail: t.detail };
   }
   async testOpenClawSkill() {
-    const result = await this.testOpenClawSmoke({ kind: "skill" });
-    return { ok: result.ok, detail: result.detail };
+    const t = await this.testOpenClawSmoke({ kind: "skill" });
+    return { ok: t.ok, detail: t.detail };
   }
-  async testOpenClawSmoke(payload) {
-    var _a, _b;
-    const kind = payload.kind === "skill" ? "skill" : "mcp";
-    const actionNames = kind === "mcp" ? this.getOpenClawManifest().tools.map((tool) => tool.name) : this.getOpenClawSkillManifest().skills.map((skill) => skill.name);
-    if (!actionNames.length) {
+  async testOpenClawSmoke(t) {
+    var m, u;
+    const e = t.kind === "skill" ? "skill" : "mcp", n = e === "mcp" ? this.getOpenClawManifest().tools.map((s) => s.name) : this.getOpenClawSkillManifest().skills.map((s) => s.name);
+    if (!n.length)
       return {
-        ok: false,
-        kind,
-        detail: kind === "mcp" ? "No OpenClaw MCP tools available" : "No OpenClaw skills available",
-        missingActions: [...OPENCLAW_REQUIRED_ACTIONS],
+        ok: !1,
+        kind: e,
+        detail: e === "mcp" ? "No OpenClaw MCP tools available" : "No OpenClaw skills available",
+        missingActions: [...Ue],
         checks: []
       };
-    }
-    const missingActions = OPENCLAW_REQUIRED_ACTIONS.filter((actionId) => !actionNames.includes(actionId));
-    const checks = [];
-    const pushCheck = (actionId, ok2, detail, skipped) => {
-      checks.push({ actionId, ok: ok2, detail, ...skipped ? { skipped: true } : {} });
+    const a = Ue.filter((s) => !n.includes(s)), o = [], c = (s, d, y, v) => {
+      o.push({ actionId: s, ok: d, detail: y, ...v ? { skipped: !0 } : {} });
     };
-    if (missingActions.length) {
-      pushCheck("manifest.coverage", false, `Missing required actions: ${missingActions.join(", ")}`);
-    } else {
-      pushCheck("manifest.coverage", true, `All required actions are covered (${OPENCLAW_REQUIRED_ACTIONS.length})`);
-    }
-    const invoke = (actionId, input) => kind === "mcp" ? this.invokeOpenClawTool({ name: actionId, arguments: input }) : this.invokeOpenClawSkill({ name: actionId, input });
-    const novelResult = await invoke("novel.list");
-    if (!novelResult.ok) {
-      pushCheck("novel.list", false, novelResult.error || "invoke failed");
+    a.length ? c("manifest.coverage", !1, `Missing required actions: ${a.join(", ")}`) : c("manifest.coverage", !0, `All required actions are covered (${Ue.length})`);
+    const i = (s, d) => e === "mcp" ? this.invokeOpenClawTool({ name: s, arguments: d }) : this.invokeOpenClawSkill({ name: s, input: d }), l = await i("novel.list");
+    if (!l.ok)
+      return c("novel.list", !1, l.error || "invoke failed"), {
+        ok: !1,
+        kind: e,
+        detail: `OpenClaw ${e.toUpperCase()} smoke failed at novel.list: ${l.error || "unknown error"}`,
+        missingActions: a,
+        checks: o
+      };
+    c("novel.list", !0, "invoke ok");
+    const w = (m = (Array.isArray(l.data) ? l.data : []).find((s) => typeof (s == null ? void 0 : s.id) == "string")) == null ? void 0 : m.id;
+    if (!w) {
+      c("volume.list", !0, "no novels in database; skipped", !0), c("chapter.list", !0, "no novels in database; skipped", !0);
+      const s = a.length === 0;
       return {
-        ok: false,
-        kind,
-        detail: `OpenClaw ${kind.toUpperCase()} smoke failed at novel.list: ${novelResult.error || "unknown error"}`,
-        missingActions,
-        checks
+        ok: s,
+        kind: e,
+        detail: s ? `OpenClaw ${e.toUpperCase()} smoke passed (manifest coverage ok, invoke ok, nested checks skipped due to empty data)` : `OpenClaw ${e.toUpperCase()} smoke partial pass (invoke ok, but manifest missing required actions: ${a.join(", ")})`,
+        missingActions: a,
+        checks: o
       };
     }
-    pushCheck("novel.list", true, "invoke ok");
-    const novels = Array.isArray(novelResult.data) ? novelResult.data : [];
-    const firstNovelId = (_a = novels.find((item) => typeof (item == null ? void 0 : item.id) === "string")) == null ? void 0 : _a.id;
-    if (!firstNovelId) {
-      pushCheck("volume.list", true, "no novels in database; skipped", true);
-      pushCheck("chapter.list", true, "no novels in database; skipped", true);
-      const ok2 = missingActions.length === 0;
+    const E = await i("volume.list", { novelId: w });
+    if (!E.ok)
+      return c("volume.list", !1, E.error || "invoke failed"), {
+        ok: !1,
+        kind: e,
+        detail: `OpenClaw ${e.toUpperCase()} smoke failed at volume.list: ${E.error || "unknown error"}`,
+        missingActions: a,
+        checks: o
+      };
+    c("volume.list", !0, "invoke ok");
+    const p = (u = (Array.isArray(E.data) ? E.data : []).find((s) => typeof (s == null ? void 0 : s.id) == "string")) == null ? void 0 : u.id;
+    if (!p) {
+      c("chapter.list", !0, "no volumes under first novel; skipped", !0);
+      const s = a.length === 0;
       return {
-        ok: ok2,
-        kind,
-        detail: ok2 ? `OpenClaw ${kind.toUpperCase()} smoke passed (manifest coverage ok, invoke ok, nested checks skipped due to empty data)` : `OpenClaw ${kind.toUpperCase()} smoke partial pass (invoke ok, but manifest missing required actions: ${missingActions.join(", ")})`,
-        missingActions,
-        checks
+        ok: s,
+        kind: e,
+        detail: s ? `OpenClaw ${e.toUpperCase()} smoke passed (manifest coverage ok, read-chain invoke ok)` : `OpenClaw ${e.toUpperCase()} smoke partial pass (read-chain ok, but manifest missing required actions: ${a.join(", ")})`,
+        missingActions: a,
+        checks: o
       };
     }
-    const volumeResult = await invoke("volume.list", { novelId: firstNovelId });
-    if (!volumeResult.ok) {
-      pushCheck("volume.list", false, volumeResult.error || "invoke failed");
-      return {
-        ok: false,
-        kind,
-        detail: `OpenClaw ${kind.toUpperCase()} smoke failed at volume.list: ${volumeResult.error || "unknown error"}`,
-        missingActions,
-        checks
+    const g = await i("chapter.list", { volumeId: p });
+    if (!g.ok)
+      return c("chapter.list", !1, g.error || "invoke failed"), {
+        ok: !1,
+        kind: e,
+        detail: `OpenClaw ${e.toUpperCase()} smoke failed at chapter.list: ${g.error || "unknown error"}`,
+        missingActions: a,
+        checks: o
       };
-    }
-    pushCheck("volume.list", true, "invoke ok");
-    const volumes = Array.isArray(volumeResult.data) ? volumeResult.data : [];
-    const firstVolumeId = (_b = volumes.find((item) => typeof (item == null ? void 0 : item.id) === "string")) == null ? void 0 : _b.id;
-    if (!firstVolumeId) {
-      pushCheck("chapter.list", true, "no volumes under first novel; skipped", true);
-      const ok2 = missingActions.length === 0;
-      return {
-        ok: ok2,
-        kind,
-        detail: ok2 ? `OpenClaw ${kind.toUpperCase()} smoke passed (manifest coverage ok, read-chain invoke ok)` : `OpenClaw ${kind.toUpperCase()} smoke partial pass (read-chain ok, but manifest missing required actions: ${missingActions.join(", ")})`,
-        missingActions,
-        checks
-      };
-    }
-    const chapterResult = await invoke("chapter.list", { volumeId: firstVolumeId });
-    if (!chapterResult.ok) {
-      pushCheck("chapter.list", false, chapterResult.error || "invoke failed");
-      return {
-        ok: false,
-        kind,
-        detail: `OpenClaw ${kind.toUpperCase()} smoke failed at chapter.list: ${chapterResult.error || "unknown error"}`,
-        missingActions,
-        checks
-      };
-    }
-    pushCheck("chapter.list", true, "invoke ok");
-    const ok = missingActions.length === 0;
+    c("chapter.list", !0, "invoke ok");
+    const f = a.length === 0;
     return {
-      ok,
-      kind,
-      detail: ok ? `OpenClaw ${kind.toUpperCase()} smoke passed (manifest coverage + read-chain invoke all ok)` : `OpenClaw ${kind.toUpperCase()} smoke partial pass (invoke ok, but manifest missing required actions: ${missingActions.join(", ")})`,
-      missingActions,
-      checks
+      ok: f,
+      kind: e,
+      detail: f ? `OpenClaw ${e.toUpperCase()} smoke passed (manifest coverage + read-chain invoke all ok)` : `OpenClaw ${e.toUpperCase()} smoke partial pass (invoke ok, but manifest missing required actions: ${a.join(", ")})`,
+      missingActions: a,
+      checks: o
     };
   }
   async testProxy() {
-    const proxy = this.settingsCache.proxy;
-    if (proxy.mode !== "custom") {
-      return { ok: true, detail: `Proxy mode is ${proxy.mode}` };
-    }
-    const hasAnyProxy = Boolean(proxy.httpProxy || proxy.httpsProxy || proxy.allProxy);
-    if (!hasAnyProxy) {
-      return { ok: false, detail: "Custom proxy mode requires at least one proxy value" };
-    }
-    return { ok: true, detail: "Custom proxy configuration looks valid" };
+    const t = this.settingsCache.proxy;
+    return t.mode !== "custom" ? { ok: !0, detail: `Proxy mode is ${t.mode}` } : !(t.httpProxy || t.httpsProxy || t.allProxy) ? { ok: !1, detail: "Custom proxy mode requires at least one proxy value" } : { ok: !0, detail: "Custom proxy configuration looks valid" };
   }
-  async testGenerate(prompt) {
-    var _a;
+  async testGenerate(t) {
+    var e;
     try {
-      const provider = this.getProvider();
-      const result = await provider.generate({
+      return { ok: !0, text: ((e = (await this.getProvider().generate({
         systemPrompt: "You are a concise assistant.",
-        prompt: (prompt || "请用一句话回复：AI 生成测试成功").trim(),
+        prompt: (t || "请用一句话回复：AI 生成测试成功").trim(),
         maxTokens: 128,
         temperature: 0.2
-      });
-      return { ok: true, text: ((_a = result.text) == null ? void 0 : _a.slice(0, 500)) || "" };
-    } catch (error) {
-      return { ok: false, detail: (error == null ? void 0 : error.message) || "test generate failed" };
+      })).text) == null ? void 0 : e.slice(0, 500)) || "" };
+    } catch (n) {
+      return { ok: !1, detail: (n == null ? void 0 : n.message) || "test generate failed" };
     }
   }
-  async generateTitle(payload) {
-    var _a, _b;
-    const provider = this.getProvider();
-    const style = payload.style ?? "stable";
-    const count = Math.max(5, Math.min(10, payload.count ?? 6));
-    const currentPlain = extractPlainTextFromLexical(payload.content).slice(0, 3600);
-    const currentExcerpt = currentPlain.slice(-1400);
-    const novel = await db.novel.findUnique({
-      where: { id: payload.novelId },
-      select: { title: true, description: true }
+  async generateTitle(t) {
+    var m, u;
+    M("INFO", "AiService.generateTitle.start", "Generate title start", {
+      chapterId: t.chapterId,
+      novelId: t.novelId,
+      providerType: this.settingsCache.providerType
     });
-    const chapter = await db.chapter.findUnique({
-      where: { id: payload.chapterId },
+    const e = this.getProvider(), n = Math.max(5, Math.min(10, t.count ?? 6)), o = _r(t.content).slice(0, 4e3), c = await h.novel.findUnique({
+      where: { id: t.novelId },
+      select: { title: !0, description: !0 }
+    }), i = await h.chapter.findUnique({
+      where: { id: t.chapterId },
       select: {
-        id: true,
-        title: true,
-        order: true,
-        volumeId: true,
+        id: !0,
+        title: !0,
+        order: !0,
+        volumeId: !0,
         volume: {
           select: {
-            id: true,
-            title: true,
-            order: true
+            id: !0,
+            title: !0,
+            order: !0
           }
         }
       }
-    });
-    const recentChapters = await db.chapter.findMany({
+    }), I = (await h.chapter.findMany({
       where: {
-        volume: { novelId: payload.novelId },
-        id: { not: payload.chapterId }
+        volume: { novelId: t.novelId },
+        id: { not: t.chapterId }
       },
       select: {
-        id: true,
-        title: true,
-        content: true,
-        updatedAt: true
+        title: !0,
+        order: !0,
+        volume: {
+          select: {
+            title: !0,
+            order: !0
+          }
+        }
       },
-      orderBy: { updatedAt: "desc" },
-      take: 3
-    });
-    const recentSummaries = recentChapters.map((item, index) => {
-      const plain = extractPlainTextFromLexical(item.content);
+      orderBy: [
+        { volume: { order: "desc" } },
+        { order: "desc" }
+      ],
+      take: 30
+    })).map((s, d) => {
+      var y, v;
       return {
-        index: index + 1,
-        title: item.title || `Chapter-${index + 1}`,
-        summary: plain.slice(0, 180)
+        index: d + 1,
+        volumeTitle: ((y = s.volume) == null ? void 0 : y.title) || "",
+        volumeOrder: ((v = s.volume) == null ? void 0 : v.order) || 0,
+        chapterOrder: s.order || 0,
+        title: s.title || `Chapter-${d + 1}`
       };
-    });
-    const systemPrompt = [
+    }), w = [
       "You are a Chinese novel title assistant.",
       "Generate concise chapter title candidates based on provided context.",
       "Return STRICT JSON only. No markdown.",
       'JSON shape: {"candidates":[{"title":"...","styleTag":"..."}]}',
       "Each styleTag must be short Chinese phrase like: 稳健推进, 悬念强化, 意象抒情."
-    ].join(" ");
-    const response = await provider.generate({
-      systemPrompt,
+    ].join(" "), E = await e.generate({
+      systemPrompt: w,
       prompt: JSON.stringify({
         task: "chapter_title_generation",
-        style,
-        count,
+        count: n,
         novel: {
-          title: (novel == null ? void 0 : novel.title) || "",
-          description: (novel == null ? void 0 : novel.description) || ""
+          title: (c == null ? void 0 : c.title) || "",
+          description: (c == null ? void 0 : c.description) || ""
         },
         chapter: {
-          title: (chapter == null ? void 0 : chapter.title) || "",
-          order: (chapter == null ? void 0 : chapter.order) || 0,
-          volumeTitle: ((_a = chapter == null ? void 0 : chapter.volume) == null ? void 0 : _a.title) || "",
-          volumeOrder: ((_b = chapter == null ? void 0 : chapter.volume) == null ? void 0 : _b.order) || 0
+          title: (i == null ? void 0 : i.title) || "",
+          order: (i == null ? void 0 : i.order) || 0,
+          volumeTitle: ((m = i == null ? void 0 : i.volume) == null ? void 0 : m.title) || "",
+          volumeOrder: ((u = i == null ? void 0 : i.volume) == null ? void 0 : u.order) || 0
         },
-        recentChapterSummaries: recentSummaries,
-        currentChapterExcerpt: currentExcerpt,
+        recentChapterTitles: I,
+        currentChapterFullText: o,
         constraints: [
           "title length <= 16 Chinese characters preferred",
           "avoid spoilers and proper nouns overuse",
@@ -2445,135 +2201,163 @@ class AiService {
       }),
       maxTokens: this.settingsCache.http.maxTokens,
       temperature: this.settingsCache.http.temperature
-    });
-    const parsed = (() => {
+    }), C = (() => {
       try {
-        return JSON.parse(response.text);
+        return JSON.parse(E.text);
       } catch {
         return null;
       }
-    })();
-    const normalizedFromJson = Array.isArray(parsed == null ? void 0 : parsed.candidates) ? parsed.candidates.map((item) => ({
-      title: String((item == null ? void 0 : item.title) || "").trim(),
-      styleTag: String((item == null ? void 0 : item.styleTag) || "").trim() || "稳健推进"
-    })).filter((item) => Boolean(item.title)).slice(0, count) : [];
-    if (normalizedFromJson.length > 0) {
-      return { candidates: normalizedFromJson };
-    }
-    const normalizedFromLines = response.text.split("\n").map((line) => line.replace(/^[-\d.\s]+/, "").trim()).filter(Boolean).slice(0, count).map((title) => ({ title, styleTag: "稳健推进" }));
-    if (normalizedFromLines.length > 0) {
-      return { candidates: normalizedFromLines };
-    }
-    const fallbackBase = ((chapter == null ? void 0 : chapter.title) || currentExcerpt.slice(0, 12) || "新章节").trim();
-    return {
-      candidates: Array.from({ length: count }, (_, i) => ({
-        title: `${fallbackBase} · ${i + 1}`,
+    })(), p = Array.isArray(C == null ? void 0 : C.candidates) ? C.candidates.map((s) => ({
+      title: String((s == null ? void 0 : s.title) || "").trim(),
+      styleTag: String((s == null ? void 0 : s.styleTag) || "").trim() || "稳健推进"
+    })).filter((s) => !!s.title).slice(0, n) : [];
+    if (p.length > 0)
+      return M("INFO", "AiService.generateTitle.success", "Generate title success", {
+        chapterId: t.chapterId,
+        candidateCount: p.length
+      }), { candidates: p };
+    const g = E.text.split(`
+`).map((s) => s.replace(/^[-\d.\s]+/, "").trim()).filter(Boolean).slice(0, n).map((s) => ({ title: s, styleTag: "稳健推进" }));
+    if (g.length > 0)
+      return M("INFO", "AiService.generateTitle.success", "Generate title success", {
+        chapterId: t.chapterId,
+        candidateCount: g.length
+      }), { candidates: g };
+    const f = ((i == null ? void 0 : i.title) || o.slice(0, 12) || "新章节").trim();
+    return M("INFO", "AiService.generateTitle.success", "Generate title success", {
+      chapterId: t.chapterId,
+      candidateCount: n
+    }), {
+      candidates: Array.from({ length: n }, (s, d) => ({
+        title: `${f} · ${d + 1}`,
         styleTag: "稳健推进"
       }))
     };
   }
-  async previewContinuePrompt(payload) {
-    const bundle = await this.buildContinuePromptBundle(payload);
-    return {
-      structured: bundle.structured,
-      rawPrompt: buildRawPromptPreview(bundle.systemPrompt, bundle.effectiveUserPrompt),
-      editableUserPrompt: bundle.defaultUserPrompt,
-      usedContext: bundle.usedContext,
-      warnings: bundle.warnings
+  async previewContinuePrompt(t) {
+    M("INFO", "AiService.previewContinuePrompt.start", "Preview continue prompt start", {
+      chapterId: t.chapterId,
+      novelId: t.novelId,
+      contextChapterCount: t.contextChapterCount
+    });
+    const e = await this.buildContinuePromptBundle(t);
+    return M("INFO", "AiService.previewContinuePrompt.success", "Preview continue prompt success", {
+      chapterId: t.chapterId
+    }), {
+      structured: e.structured,
+      rawPrompt: st(e.systemPrompt, e.effectiveUserPrompt),
+      editableUserPrompt: e.defaultUserPrompt,
+      usedContext: e.usedContext,
+      warnings: e.warnings
     };
   }
-  async continueWriting(payload) {
-    const provider = this.getProvider();
-    const bundle = await this.buildContinuePromptBundle(payload);
-    const generationTemperature = Number.isFinite(payload.temperature) ? Math.max(0, Math.min(2, Number(payload.temperature))) : this.settingsCache.http.temperature;
-    const response = await provider.generate({
-      systemPrompt: bundle.systemPrompt,
-      prompt: bundle.effectiveUserPrompt,
+  async continueWriting(t) {
+    M("INFO", "AiService.continueWriting.start", "Continue writing start", {
+      chapterId: t.chapterId,
+      novelId: t.novelId,
+      providerType: this.settingsCache.providerType,
+      targetLength: t.targetLength,
+      contextChapterCount: t.contextChapterCount
+    });
+    const e = this.getProvider(), n = await this.buildContinuePromptBundle(t), a = Number.isFinite(t.temperature) ? Math.max(0, Math.min(2, Number(t.temperature))) : this.settingsCache.http.temperature, o = await e.generate({
+      systemPrompt: n.systemPrompt,
+      prompt: n.effectiveUserPrompt,
       maxTokens: this.settingsCache.http.maxTokens,
-      temperature: generationTemperature
+      temperature: a
+    }), c = await this.checkConsistency({
+      novelId: t.novelId,
+      text: o.text
+    }), i = {
+      text: o.text,
+      usedContext: n.usedContext,
+      warnings: n.warnings,
+      consistency: c
+    };
+    return M("INFO", "AiService.continueWriting.success", "Continue writing success", {
+      chapterId: t.chapterId,
+      warningCount: n.warnings.length,
+      generatedLength: i.text.length
+    }), i;
+  }
+  async checkConsistency(t) {
+    const e = [];
+    return (await h.worldSetting.findMany({ where: { novelId: t.novelId } })).length === 0 && e.push("No world settings found for consistency baseline."), t.text.length < 20 && e.push("Generated text is too short."), { ok: e.length === 0, issues: e };
+  }
+  async previewCreativeAssetsPrompt(t) {
+    var n;
+    M("INFO", "AiService.previewCreativeAssetsPrompt.start", "Preview creative assets prompt start", {
+      novelId: t.novelId,
+      briefLength: ((n = t.brief) == null ? void 0 : n.length) ?? 0,
+      targetSections: t.targetSections
     });
-    const consistency = await this.checkConsistency({
-      novelId: payload.novelId,
-      text: response.text
-    });
-    return {
-      text: response.text,
-      usedContext: bundle.usedContext,
-      warnings: bundle.warnings,
-      consistency
+    const e = await this.buildCreativeAssetsPromptBundle(t);
+    return M("INFO", "AiService.previewCreativeAssetsPrompt.success", "Preview creative assets prompt success", {
+      novelId: t.novelId
+    }), {
+      structured: e.structured,
+      rawPrompt: st(e.systemPrompt, e.effectiveUserPrompt),
+      editableUserPrompt: e.defaultUserPrompt,
+      usedContext: e.usedContext
     };
   }
-  async checkConsistency(payload) {
-    const issues = [];
-    const worldSettings = await db.worldSetting.findMany({ where: { novelId: payload.novelId } });
-    if (worldSettings.length === 0) {
-      issues.push("No world settings found for consistency baseline.");
-    }
-    if (payload.text.length < 20) {
-      issues.push("Generated text is too short.");
-    }
-    return { ok: issues.length === 0, issues };
+  inferCreativeTargetSections(t) {
+    const e = String(t || "").trim().toLowerCase();
+    if (!e)
+      return [...Ae];
+    const n = [];
+    for (const a of Ae)
+      Ir[a].some((c) => e.includes(c.toLowerCase())) && n.push(a);
+    return n.length > 0 ? n : [...Ae];
   }
-  async previewCreativeAssetsPrompt(payload) {
-    const bundle = await this.buildCreativeAssetsPromptBundle(payload);
-    return {
-      structured: bundle.structured,
-      rawPrompt: buildRawPromptPreview(bundle.systemPrompt, bundle.effectiveUserPrompt),
-      editableUserPrompt: bundle.defaultUserPrompt,
-      usedContext: bundle.usedContext
-    };
+  resolveCreativeTargetSections(t) {
+    const n = (Array.isArray(t.targetSections) ? t.targetSections : []).filter((a) => Ae.includes(a));
+    return n.length > 0 ? n : this.inferCreativeTargetSections(t.brief);
   }
-  inferCreativeTargetSections(brief) {
-    const normalized = String(brief || "").trim().toLowerCase();
-    if (!normalized)
-      return [...CREATIVE_ASSET_SECTIONS];
-    const picked = [];
-    for (const section of CREATIVE_ASSET_SECTIONS) {
-      const keywords = CREATIVE_SECTION_KEYWORDS[section];
-      if (keywords.some((keyword) => normalized.includes(keyword.toLowerCase()))) {
-        picked.push(section);
-      }
-    }
-    return picked.length > 0 ? picked : [...CREATIVE_ASSET_SECTIONS];
+  buildEmptyCreativeDraft(t) {
+    const e = {};
+    for (const n of t)
+      e[n] = [];
+    return e;
   }
-  resolveCreativeTargetSections(payload) {
-    const requested = Array.isArray(payload.targetSections) ? payload.targetSections : [];
-    const picked = requested.filter((value) => CREATIVE_ASSET_SECTIONS.includes(value));
-    return picked.length > 0 ? picked : this.inferCreativeTargetSections(payload.brief);
-  }
-  buildEmptyCreativeDraft(targetSections) {
-    const output = {};
-    for (const key of targetSections) {
-      output[key] = [];
-    }
-    return output;
-  }
-  async generateCreativeAssets(payload) {
-    const provider = this.getProvider();
-    const bundle = await this.buildCreativeAssetsPromptBundle(payload);
-    const targetSections = this.resolveCreativeTargetSections(payload);
-    const response = await provider.generate({
-      systemPrompt: bundle.systemPrompt,
-      prompt: bundle.effectiveUserPrompt,
+  async generateCreativeAssets(t) {
+    var I, w, E, C, p, g, f, m, u, s, d, y, v;
+    M("INFO", "AiService.generateCreativeAssets.start", "Generate creative assets start", {
+      novelId: t.novelId,
+      briefLength: ((I = t.brief) == null ? void 0 : I.length) ?? 0,
+      providerType: this.settingsCache.providerType,
+      targetSections: t.targetSections
+    });
+    const e = this.getProvider(), n = await this.buildCreativeAssetsPromptBundle(t), a = this.resolveCreativeTargetSections(t), o = await e.generate({
+      systemPrompt: n.systemPrompt,
+      prompt: n.effectiveUserPrompt,
       maxTokens: this.settingsCache.http.maxTokens,
       temperature: this.settingsCache.http.temperature
     });
     try {
-      const parsed = JSON.parse(response.text);
-      if (parsed && typeof parsed === "object") {
-        const filtered = this.buildEmptyCreativeDraft(targetSections);
-        for (const section of targetSections) {
-          const list = parsed == null ? void 0 : parsed[section];
-          filtered[section] = Array.isArray(list) ? list : [];
+      const _ = JSON.parse(o.text);
+      if (_ && typeof _ == "object") {
+        const D = this.buildEmptyCreativeDraft(a);
+        for (const k of a) {
+          const P = _ == null ? void 0 : _[k];
+          D[k] = Array.isArray(P) ? P : [];
         }
-        return { draft: filtered };
+        return M("INFO", "AiService.generateCreativeAssets.success", "Generate creative assets success", {
+          novelId: t.novelId,
+          counts: {
+            plotLines: ((w = D.plotLines) == null ? void 0 : w.length) ?? 0,
+            plotPoints: ((E = D.plotPoints) == null ? void 0 : E.length) ?? 0,
+            characters: ((C = D.characters) == null ? void 0 : C.length) ?? 0,
+            items: ((p = D.items) == null ? void 0 : p.length) ?? 0,
+            skills: ((g = D.skills) == null ? void 0 : g.length) ?? 0,
+            maps: ((f = D.maps) == null ? void 0 : f.length) ?? 0
+          }
+        }), { draft: D };
       }
     } catch {
     }
-    const suffix = randomUUID().slice(0, 6);
-    const fallbackDraft = {
+    const c = qt().slice(0, 6), i = {
       plotLines: [{
-        name: `主线-${suffix}`,
+        name: `主线-${c}`,
         description: "AI 生成的主线草稿",
         color: "#6366f1",
         points: [{ title: "开端事件", description: "引发主线的关键事件", type: "event", status: "active" }]
@@ -2584,253 +2368,206 @@ class AiService {
         type: "event",
         status: "active"
       }],
-      characters: [{ name: `角色-${suffix}`, role: "protagonist", description: "AI 生成角色草稿", profile: { goal: "完成使命" } }],
-      items: [{ name: `物品-${suffix}`, type: "item", description: "AI 生成物品草稿", profile: { rarity: "rare" } }],
-      skills: [{ name: `技能-${suffix}`, description: "AI 生成技能草稿", profile: { rank: "A" } }],
-      maps: [{ name: `世界地图-${suffix}`, type: "world", description: "AI 生成地图草稿", imagePrompt: "fantasy world map" }]
-    };
-    const filteredFallback = this.buildEmptyCreativeDraft(targetSections);
-    for (const section of targetSections) {
-      filteredFallback[section] = fallbackDraft[section] ?? [];
-    }
-    return {
-      draft: filteredFallback
+      characters: [{ name: `角色-${c}`, role: "protagonist", description: "AI 生成角色草稿", profile: { goal: "完成使命" } }],
+      items: [{ name: `物品-${c}`, type: "item", description: "AI 生成物品草稿", profile: { rarity: "rare" } }],
+      skills: [{ name: `技能-${c}`, description: "AI 生成技能草稿", profile: { rank: "A" } }],
+      maps: [{ name: `世界地图-${c}`, type: "world", description: "AI 生成地图草稿", imagePrompt: "fantasy world map" }]
+    }, l = this.buildEmptyCreativeDraft(a);
+    for (const _ of a)
+      l[_] = i[_] ?? [];
+    return M("INFO", "AiService.generateCreativeAssets.success", "Generate creative assets success", {
+      novelId: t.novelId,
+      counts: {
+        plotLines: ((m = l.plotLines) == null ? void 0 : m.length) ?? 0,
+        plotPoints: ((u = l.plotPoints) == null ? void 0 : u.length) ?? 0,
+        characters: ((s = l.characters) == null ? void 0 : s.length) ?? 0,
+        items: ((d = l.items) == null ? void 0 : d.length) ?? 0,
+        skills: ((y = l.skills) == null ? void 0 : y.length) ?? 0,
+        maps: ((v = l.maps) == null ? void 0 : v.length) ?? 0
+      }
+    }), {
+      draft: l
     };
   }
-  async validateCreativeAssetsDraft(payload) {
-    var _a, _b;
-    const errors2 = [];
-    const warnings = [];
-    const pushError = (issue) => errors2.push(issue);
-    const sanitizeText = (value, scope, maxLen = DRAFT_MAX_FIELD_LENGTH) => {
-      const text = typeof value === "string" ? value.trim() : "";
-      if (!text)
-        return "";
-      if (text.length <= maxLen)
-        return text;
-      warnings.push(`${scope} exceeds ${maxLen} chars and was truncated`);
-      return text.slice(0, maxLen);
-    };
-    const sanitizeProfile = (value, scope) => {
-      if (!value || typeof value !== "object" || Array.isArray(value))
+  async validateCreativeAssetsDraft(t) {
+    var f, m;
+    const e = [], n = [], a = (u) => e.push(u), o = (u, s, d = yr) => {
+      const y = typeof u == "string" ? u.trim() : "";
+      return y ? y.length <= d ? y : (n.push(`${s} exceeds ${d} chars and was truncated`), y.slice(0, d)) : "";
+    }, c = (u, s) => {
+      if (!u || typeof u != "object" || Array.isArray(u))
         return {};
-      const output = {};
-      for (const [key, val] of Object.entries(value)) {
-        const safeKey = sanitizeText(key, `${scope}.key`, 64);
-        const safeVal = sanitizeText(val, `${scope}.${key}`, 500);
-        if (safeKey && safeVal)
-          output[safeKey] = safeVal;
+      const d = {};
+      for (const [y, v] of Object.entries(u)) {
+        const _ = o(y, `${s}.key`, 64), D = o(v, `${s}.${y}`, 500);
+        _ && D && (d[_] = D);
       }
-      return output;
-    };
-    const normalized = {
-      plotLines: (payload.draft.plotLines ?? []).map((line, index) => ({
-        name: sanitizeText(line.name, `plotLines[${index}].name`, 120),
-        description: sanitizeText(line.description, `plotLines[${index}].description`),
-        color: sanitizeText(line.color, `plotLines[${index}].color`, 16) || "#6366f1",
-        points: (line.points ?? []).map((point, pointIndex) => {
-          const type = sanitizeText(point.type, `plotLines[${index}].points[${pointIndex}].type`, 32) || "event";
-          const status = sanitizeText(point.status, `plotLines[${index}].points[${pointIndex}].status`, 32) || "active";
+      return d;
+    }, i = {
+      plotLines: (t.draft.plotLines ?? []).map((u, s) => ({
+        name: o(u.name, `plotLines[${s}].name`, 120),
+        description: o(u.description, `plotLines[${s}].description`),
+        color: o(u.color, `plotLines[${s}].color`, 16) || "#6366f1",
+        points: (u.points ?? []).map((d, y) => {
+          const v = o(d.type, `plotLines[${s}].points[${y}].type`, 32) || "event", _ = o(d.status, `plotLines[${s}].points[${y}].status`, 32) || "active";
           return {
-            title: sanitizeText(point.title, `plotLines[${index}].points[${pointIndex}].title`, 120),
-            description: sanitizeText(point.description, `plotLines[${index}].points[${pointIndex}].description`),
-            type: VALID_PLOT_POINT_TYPES.has(type) ? type : "event",
-            status: VALID_PLOT_POINT_STATUS.has(status) ? status : "active"
+            title: o(d.title, `plotLines[${s}].points[${y}].title`, 120),
+            description: o(d.description, `plotLines[${s}].points[${y}].description`),
+            type: ot.has(v) ? v : "event",
+            status: it.has(_) ? _ : "active"
           };
         })
       })),
-      plotPoints: (payload.draft.plotPoints ?? []).map((point, index) => {
-        const type = sanitizeText(point.type, `plotPoints[${index}].type`, 32) || "event";
-        const status = sanitizeText(point.status, `plotPoints[${index}].status`, 32) || "active";
+      plotPoints: (t.draft.plotPoints ?? []).map((u, s) => {
+        const d = o(u.type, `plotPoints[${s}].type`, 32) || "event", y = o(u.status, `plotPoints[${s}].status`, 32) || "active";
         return {
-          title: sanitizeText(point.title, `plotPoints[${index}].title`, 120),
-          description: sanitizeText(point.description, `plotPoints[${index}].description`),
-          type: VALID_PLOT_POINT_TYPES.has(type) ? type : "event",
-          status: VALID_PLOT_POINT_STATUS.has(status) ? status : "active",
-          plotLineName: sanitizeText(point.plotLineName, `plotPoints[${index}].plotLineName`, 120)
+          title: o(u.title, `plotPoints[${s}].title`, 120),
+          description: o(u.description, `plotPoints[${s}].description`),
+          type: ot.has(d) ? d : "event",
+          status: it.has(y) ? y : "active",
+          plotLineName: o(u.plotLineName, `plotPoints[${s}].plotLineName`, 120)
         };
       }),
-      characters: (payload.draft.characters ?? []).map((item, index) => ({
-        name: sanitizeText(item.name, `characters[${index}].name`, 120),
-        role: sanitizeText(item.role, `characters[${index}].role`, 64),
-        description: sanitizeText(item.description, `characters[${index}].description`),
-        profile: sanitizeProfile(item.profile, `characters[${index}].profile`)
+      characters: (t.draft.characters ?? []).map((u, s) => ({
+        name: o(u.name, `characters[${s}].name`, 120),
+        role: o(u.role, `characters[${s}].role`, 64),
+        description: o(u.description, `characters[${s}].description`),
+        profile: c(u.profile, `characters[${s}].profile`)
       })),
-      items: (payload.draft.items ?? []).map((item, index) => {
-        const itemType = sanitizeText(item.type, `items[${index}].type`, 32) || "item";
+      items: (t.draft.items ?? []).map((u, s) => {
+        const d = o(u.type, `items[${s}].type`, 32) || "item";
         return {
-          name: sanitizeText(item.name, `items[${index}].name`, 120),
-          type: VALID_ITEM_TYPES.has(itemType) ? itemType : "item",
-          description: sanitizeText(item.description, `items[${index}].description`),
-          profile: sanitizeProfile(item.profile, `items[${index}].profile`)
+          name: o(u.name, `items[${s}].name`, 120),
+          type: wr.has(d) ? d : "item",
+          description: o(u.description, `items[${s}].description`),
+          profile: c(u.profile, `items[${s}].profile`)
         };
       }),
-      skills: (payload.draft.skills ?? []).map((skill, index) => ({
-        name: sanitizeText(skill.name, `skills[${index}].name`, 120),
-        description: sanitizeText(skill.description, `skills[${index}].description`),
-        profile: sanitizeProfile(skill.profile, `skills[${index}].profile`)
+      skills: (t.draft.skills ?? []).map((u, s) => ({
+        name: o(u.name, `skills[${s}].name`, 120),
+        description: o(u.description, `skills[${s}].description`),
+        profile: c(u.profile, `skills[${s}].profile`)
       })),
-      maps: (payload.draft.maps ?? []).map((map, index) => {
-        const mapType = sanitizeText(map.type, `maps[${index}].type`, 32) || "world";
+      maps: (t.draft.maps ?? []).map((u, s) => {
+        const d = o(u.type, `maps[${s}].type`, 32) || "world";
         return {
-          name: sanitizeText(map.name, `maps[${index}].name`, 120),
-          type: VALID_MAP_TYPES.has(mapType) ? mapType : "world",
-          description: sanitizeText(map.description, `maps[${index}].description`),
-          imagePrompt: sanitizeText(map.imagePrompt, `maps[${index}].imagePrompt`),
-          imageUrl: sanitizeText(map.imageUrl, `maps[${index}].imageUrl`, 2048),
-          imageBase64: sanitizeText(map.imageBase64, `maps[${index}].imageBase64`, 4 * 1024 * 1024),
-          mimeType: sanitizeText(map.mimeType, `maps[${index}].mimeType`, 64)
+          name: o(u.name, `maps[${s}].name`, 120),
+          type: vr.has(d) ? d : "world",
+          description: o(u.description, `maps[${s}].description`),
+          imagePrompt: o(u.imagePrompt, `maps[${s}].imagePrompt`),
+          imageUrl: o(u.imageUrl, `maps[${s}].imageUrl`, 2048),
+          imageBase64: o(u.imageBase64, `maps[${s}].imageBase64`, 4194304),
+          mimeType: o(u.mimeType, `maps[${s}].mimeType`, 64)
         };
       })
     };
-    for (const [index, line] of (normalized.plotLines ?? []).entries()) {
-      if (!line.name) {
-        pushError({ scope: `plotLines[${index}]`, code: "INVALID_INPUT", detail: "Plot line name is required" });
-      }
-      for (const [pointIndex, point] of (line.points ?? []).entries()) {
-        if (!point.title) {
-          pushError({ scope: `plotLines[${index}].points[${pointIndex}]`, code: "INVALID_INPUT", detail: "Plot point title is required" });
-        }
-      }
+    for (const [u, s] of (i.plotLines ?? []).entries()) {
+      s.name || a({ scope: `plotLines[${u}]`, code: "INVALID_INPUT", detail: "Plot line name is required" });
+      for (const [d, y] of (s.points ?? []).entries())
+        y.title || a({ scope: `plotLines[${u}].points[${d}]`, code: "INVALID_INPUT", detail: "Plot point title is required" });
     }
-    for (const [index, point] of (normalized.plotPoints ?? []).entries()) {
-      if (!point.title) {
-        pushError({ scope: `plotPoints[${index}]`, code: "INVALID_INPUT", detail: "Plot point title is required" });
-      }
-    }
-    for (const [index, character] of (normalized.characters ?? []).entries()) {
-      if (!character.name) {
-        pushError({ scope: `characters[${index}]`, code: "INVALID_INPUT", detail: "Character name is required" });
-      }
-    }
-    for (const [index, item] of (normalized.items ?? []).entries()) {
-      if (!item.name) {
-        pushError({ scope: `items[${index}]`, code: "INVALID_INPUT", detail: "Item name is required" });
-      }
-    }
-    for (const [index, skill] of (normalized.skills ?? []).entries()) {
-      if (!skill.name) {
-        pushError({ scope: `skills[${index}]`, code: "INVALID_INPUT", detail: "Skill name is required" });
-      }
-    }
-    for (const [index, map] of (normalized.maps ?? []).entries()) {
-      if (!map.name) {
-        pushError({ scope: `maps[${index}]`, code: "INVALID_INPUT", detail: "Map name is required" });
-      }
-      const sourceCount = Number(Boolean(map.imageBase64)) + Number(Boolean(map.imageUrl)) + Number(Boolean(map.imagePrompt));
-      if (sourceCount > 1) {
-        pushError({
-          scope: `maps[${index}]`,
-          name: map.name,
-          code: "INVALID_INPUT",
-          detail: "Map image input must use only one source: imageBase64, imageUrl, or imagePrompt"
-        });
-      }
-      if (map.imageUrl && !/^https?:\/\//i.test(map.imageUrl)) {
-        pushError({
-          scope: `maps[${index}].imageUrl`,
-          name: map.name,
-          code: "INVALID_INPUT",
-          detail: "Map imageUrl must start with http:// or https://"
-        });
-      }
-      if (map.imageBase64) {
+    for (const [u, s] of (i.plotPoints ?? []).entries())
+      s.title || a({ scope: `plotPoints[${u}]`, code: "INVALID_INPUT", detail: "Plot point title is required" });
+    for (const [u, s] of (i.characters ?? []).entries())
+      s.name || a({ scope: `characters[${u}]`, code: "INVALID_INPUT", detail: "Character name is required" });
+    for (const [u, s] of (i.items ?? []).entries())
+      s.name || a({ scope: `items[${u}]`, code: "INVALID_INPUT", detail: "Item name is required" });
+    for (const [u, s] of (i.skills ?? []).entries())
+      s.name || a({ scope: `skills[${u}]`, code: "INVALID_INPUT", detail: "Skill name is required" });
+    for (const [u, s] of (i.maps ?? []).entries())
+      if (s.name || a({ scope: `maps[${u}]`, code: "INVALID_INPUT", detail: "Map name is required" }), +!!s.imageBase64 + +!!s.imageUrl + +!!s.imagePrompt > 1 && a({
+        scope: `maps[${u}]`,
+        name: s.name,
+        code: "INVALID_INPUT",
+        detail: "Map image input must use only one source: imageBase64, imageUrl, or imagePrompt"
+      }), s.imageUrl && !/^https?:\/\//i.test(s.imageUrl) && a({
+        scope: `maps[${u}].imageUrl`,
+        name: s.name,
+        code: "INVALID_INPUT",
+        detail: "Map imageUrl must start with http:// or https://"
+      }), s.imageBase64)
         try {
-          const size = Buffer.from(map.imageBase64, "base64").length;
-          if (size === 0) {
-            pushError({
-              scope: `maps[${index}].imageBase64`,
-              name: map.name,
-              code: "INVALID_INPUT",
-              detail: "Map imageBase64 is invalid"
-            });
-          }
-          if (size > MAX_IMAGE_SIZE_BYTES) {
-            pushError({
-              scope: `maps[${index}].imageBase64`,
-              name: map.name,
-              code: "INVALID_INPUT",
-              detail: `Map imageBase64 exceeds ${MAX_IMAGE_SIZE_BYTES} bytes`
-            });
-          }
+          const y = Buffer.from(s.imageBase64, "base64").length;
+          y === 0 && a({
+            scope: `maps[${u}].imageBase64`,
+            name: s.name,
+            code: "INVALID_INPUT",
+            detail: "Map imageBase64 is invalid"
+          }), y > Fe && a({
+            scope: `maps[${u}].imageBase64`,
+            name: s.name,
+            code: "INVALID_INPUT",
+            detail: `Map imageBase64 exceeds ${Fe} bytes`
+          });
         } catch {
-          pushError({
-            scope: `maps[${index}].imageBase64`,
-            name: map.name,
+          a({
+            scope: `maps[${u}].imageBase64`,
+            name: s.name,
             code: "INVALID_INPUT",
             detail: "Map imageBase64 is invalid"
           });
         }
-      }
-    }
-    const checkDraftDuplicates = (items, scope) => {
-      const seen = /* @__PURE__ */ new Set();
-      for (const item of items) {
-        const normalizedName = (item.name || "").trim().toLowerCase();
-        if (!normalizedName)
-          continue;
-        if (seen.has(normalizedName)) {
-          pushError({
-            scope,
-            name: item.name,
-            code: "CONFLICT",
-            detail: `Duplicate name in current draft: ${item.name}`
-          });
-          continue;
-        }
-        seen.add(normalizedName);
-      }
-    };
-    checkDraftDuplicates(normalized.plotLines ?? [], "plotLines");
-    checkDraftDuplicates(normalized.characters ?? [], "characters");
-    checkDraftDuplicates(normalized.items ?? [], "items");
-    checkDraftDuplicates(normalized.skills ?? [], "skills");
-    checkDraftDuplicates(normalized.maps ?? [], "maps");
-    const [existingPlotLines, existingCharacters, existingItems, existingMaps] = await Promise.all([
-      db.plotLine.findMany({ where: { novelId: payload.novelId }, select: { name: true } }),
-      db.character.findMany({ where: { novelId: payload.novelId }, select: { name: true } }),
-      db.item.findMany({ where: { novelId: payload.novelId }, select: { name: true } }),
-      db.mapCanvas.findMany({ where: { novelId: payload.novelId }, select: { name: true } })
-    ]);
-    const existingNameSets = {
-      plotLines: new Set(existingPlotLines.map((row) => row.name.trim().toLowerCase())),
-      characters: new Set(existingCharacters.map((row) => row.name.trim().toLowerCase())),
-      items: new Set(existingItems.map((row) => row.name.trim().toLowerCase())),
-      maps: new Set(existingMaps.map((row) => row.name.trim().toLowerCase()))
-    };
-    const checkExistingConflicts = (items, category, scope) => {
-      for (const item of items) {
-        const normalizedName = (item.name || "").trim().toLowerCase();
-        if (!normalizedName)
-          continue;
-        if (existingNameSets[category].has(normalizedName)) {
-          pushError({
-            scope,
-            name: item.name,
-            code: "CONFLICT",
-            detail: `Name already exists in novel: ${item.name}`
-          });
+    const l = (u, s) => {
+      const d = /* @__PURE__ */ new Set();
+      for (const y of u) {
+        const v = (y.name || "").trim().toLowerCase();
+        if (v) {
+          if (d.has(v)) {
+            a({
+              scope: s,
+              name: y.name,
+              code: "CONFLICT",
+              detail: `Duplicate name in current draft: ${y.name}`
+            });
+            continue;
+          }
+          d.add(v);
         }
       }
     };
-    checkExistingConflicts(normalized.plotLines ?? [], "plotLines", "plotLines");
-    checkExistingConflicts(normalized.characters ?? [], "characters", "characters");
-    checkExistingConflicts(normalized.items ?? [], "items", "items");
-    checkExistingConflicts(normalized.skills ?? [], "items", "skills");
-    checkExistingConflicts(normalized.maps ?? [], "maps", "maps");
-    if ((((_a = normalized.plotPoints) == null ? void 0 : _a.length) ?? 0) > 0 && (((_b = normalized.plotLines) == null ? void 0 : _b.length) ?? 0) === 0) {
-      warnings.push("Draft has plotPoints but no plotLines. System will create a default plot line when persisting.");
-    }
-    return {
-      ok: errors2.length === 0,
-      errors: errors2,
-      warnings,
-      normalizedDraft: normalized
+    l(i.plotLines ?? [], "plotLines"), l(i.characters ?? [], "characters"), l(i.items ?? [], "items"), l(i.skills ?? [], "skills"), l(i.maps ?? [], "maps");
+    const [I, w, E, C] = await Promise.all([
+      h.plotLine.findMany({ where: { novelId: t.novelId }, select: { name: !0 } }),
+      h.character.findMany({ where: { novelId: t.novelId }, select: { name: !0 } }),
+      h.item.findMany({ where: { novelId: t.novelId }, select: { name: !0 } }),
+      h.mapCanvas.findMany({ where: { novelId: t.novelId }, select: { name: !0 } })
+    ]), p = {
+      plotLines: new Set(I.map((u) => u.name.trim().toLowerCase())),
+      characters: new Set(w.map((u) => u.name.trim().toLowerCase())),
+      items: new Set(E.map((u) => u.name.trim().toLowerCase())),
+      maps: new Set(C.map((u) => u.name.trim().toLowerCase()))
+    }, g = (u, s, d) => {
+      for (const y of u) {
+        const v = (y.name || "").trim().toLowerCase();
+        v && p[s].has(v) && a({
+          scope: d,
+          name: y.name,
+          code: "CONFLICT",
+          detail: `Name already exists in novel: ${y.name}`
+        });
+      }
+    };
+    return g(i.plotLines ?? [], "plotLines", "plotLines"), g(i.characters ?? [], "characters", "characters"), g(i.items ?? [], "items", "items"), g(i.skills ?? [], "items", "skills"), g(i.maps ?? [], "maps", "maps"), (((f = i.plotPoints) == null ? void 0 : f.length) ?? 0) > 0 && (((m = i.plotLines) == null ? void 0 : m.length) ?? 0) === 0 && n.push("Draft has plotPoints but no plotLines. System will create a default plot line when persisting."), {
+      ok: e.length === 0,
+      errors: e,
+      warnings: n,
+      normalizedDraft: i
     };
   }
-  async confirmCreativeAssets(payload) {
-    const validation = await this.validateCreativeAssetsDraft(payload);
-    const zeroCreated = {
+  async confirmCreativeAssets(t) {
+    var l, I, w, E, C, p;
+    M("INFO", "AiService.confirmCreativeAssets.start", "Confirm creative assets start", {
+      novelId: t.novelId,
+      draftCounts: oe({
+        plotLines: ((l = t.draft.plotLines) == null ? void 0 : l.length) ?? 0,
+        plotPoints: ((I = t.draft.plotPoints) == null ? void 0 : I.length) ?? 0,
+        characters: ((w = t.draft.characters) == null ? void 0 : w.length) ?? 0,
+        items: ((E = t.draft.items) == null ? void 0 : E.length) ?? 0,
+        skills: ((C = t.draft.skills) == null ? void 0 : C.length) ?? 0,
+        maps: ((p = t.draft.maps) == null ? void 0 : p.length) ?? 0
+      })
+    });
+    const e = await this.validateCreativeAssetsDraft(t), n = {
       plotLines: 0,
       plotPoints: 0,
       characters: 0,
@@ -2839,525 +2576,494 @@ class AiService {
       maps: 0,
       mapImages: 0
     };
-    if (!validation.ok) {
-      return {
-        success: false,
-        created: zeroCreated,
-        warnings: validation.warnings,
-        errors: validation.errors,
+    if (!e.ok)
+      return M("WARN", "AiService.confirmCreativeAssets.validationFailed", "Confirm creative assets validation failed", {
+        novelId: t.novelId,
+        errors: e.errors,
+        warnings: e.warnings
+      }), {
+        success: !1,
+        created: n,
+        warnings: e.warnings,
+        errors: e.errors,
         transactionMode: "atomic"
       };
-    }
-    const draft = validation.normalizedDraft;
-    const provider = this.getProvider();
-    const createdFiles = [];
-    let committedCreated = { ...zeroCreated };
+    const a = e.normalizedDraft, o = this.getProvider(), c = [];
+    let i = { ...n };
     try {
-      await db.$transaction(async (tx) => {
-        const localCreated = { ...zeroCreated };
-        const plotLineIdByName = /* @__PURE__ */ new Map();
-        for (const plotLine of draft.plotLines ?? []) {
-          const createdLine = await tx.plotLine.create({
+      await h.$transaction(async (f) => {
+        const m = { ...n }, u = /* @__PURE__ */ new Map();
+        for (const d of a.plotLines ?? []) {
+          const y = await f.plotLine.create({
             data: {
-              novelId: payload.novelId,
-              name: plotLine.name,
-              description: plotLine.description || null,
-              color: plotLine.color || "#6366f1",
-              sortOrder: Date.now() + localCreated.plotLines
+              novelId: t.novelId,
+              name: d.name,
+              description: d.description || null,
+              color: d.color || "#6366f1",
+              sortOrder: Date.now() + m.plotLines
             }
           });
-          plotLineIdByName.set(plotLine.name.toLowerCase(), createdLine.id);
-          localCreated.plotLines += 1;
-          for (const point of plotLine.points ?? []) {
-            await tx.plotPoint.create({
+          u.set(d.name.toLowerCase(), y.id), m.plotLines += 1;
+          for (const v of d.points ?? [])
+            await f.plotPoint.create({
               data: {
-                novelId: payload.novelId,
-                plotLineId: createdLine.id,
-                title: point.title,
-                description: point.description || null,
-                type: point.type || "event",
-                status: point.status || "active",
-                order: Date.now() + localCreated.plotPoints
+                novelId: t.novelId,
+                plotLineId: y.id,
+                title: v.title,
+                description: v.description || null,
+                type: v.type || "event",
+                status: v.status || "active",
+                order: Date.now() + m.plotPoints
               }
-            });
-            localCreated.plotPoints += 1;
-          }
+            }), m.plotPoints += 1;
         }
-        const resolvePlotLineIdForLoosePoint = async (plotLineName) => {
-          const lookupName = (plotLineName || "").trim().toLowerCase();
-          if (lookupName && plotLineIdByName.has(lookupName)) {
-            return plotLineIdByName.get(lookupName);
-          }
-          const firstLineId = plotLineIdByName.values().next().value;
-          if (firstLineId)
-            return firstLineId;
-          const defaultName = "AI 主线";
-          const autoLine = await tx.plotLine.create({
+        const s = async (d) => {
+          const y = (d || "").trim().toLowerCase();
+          if (y && u.has(y))
+            return u.get(y);
+          const v = u.values().next().value;
+          if (v)
+            return v;
+          const _ = "AI 主线", D = await f.plotLine.create({
             data: {
-              novelId: payload.novelId,
-              name: defaultName,
+              novelId: t.novelId,
+              name: _,
               description: "Auto-created for loose plot points",
               color: "#6366f1",
-              sortOrder: Date.now() + localCreated.plotLines
+              sortOrder: Date.now() + m.plotLines
             }
           });
-          plotLineIdByName.set(defaultName.toLowerCase(), autoLine.id);
-          localCreated.plotLines += 1;
-          return autoLine.id;
+          return u.set(_.toLowerCase(), D.id), m.plotLines += 1, D.id;
         };
-        for (const point of draft.plotPoints ?? []) {
-          const lineId = await resolvePlotLineIdForLoosePoint(point.plotLineName);
-          await tx.plotPoint.create({
+        for (const d of a.plotPoints ?? []) {
+          const y = await s(d.plotLineName);
+          await f.plotPoint.create({
             data: {
-              novelId: payload.novelId,
-              plotLineId: lineId,
-              title: point.title,
-              description: point.description || null,
-              type: point.type || "event",
-              status: point.status || "active",
-              order: Date.now() + localCreated.plotPoints
+              novelId: t.novelId,
+              plotLineId: y,
+              title: d.title,
+              description: d.description || null,
+              type: d.type || "event",
+              status: d.status || "active",
+              order: Date.now() + m.plotPoints
             }
-          });
-          localCreated.plotPoints += 1;
+          }), m.plotPoints += 1;
         }
-        for (const character of draft.characters ?? []) {
-          await tx.character.create({
+        for (const d of a.characters ?? [])
+          await f.character.create({
             data: {
-              novelId: payload.novelId,
-              name: character.name,
-              role: character.role || null,
-              description: character.description || null,
-              profile: toProfileJson(character.profile),
-              sortOrder: Date.now() + localCreated.characters
+              novelId: t.novelId,
+              name: d.name,
+              role: d.role || null,
+              description: d.description || null,
+              profile: Be(d.profile),
+              sortOrder: Date.now() + m.characters
             }
-          });
-          localCreated.characters += 1;
-        }
-        for (const item of draft.items ?? []) {
-          await tx.item.create({
+          }), m.characters += 1;
+        for (const d of a.items ?? [])
+          await f.item.create({
             data: {
-              novelId: payload.novelId,
-              name: item.name,
-              type: item.type || "item",
-              description: item.description || null,
-              profile: toProfileJson(item.profile),
-              sortOrder: Date.now() + localCreated.items
+              novelId: t.novelId,
+              name: d.name,
+              type: d.type || "item",
+              description: d.description || null,
+              profile: Be(d.profile),
+              sortOrder: Date.now() + m.items
             }
-          });
-          localCreated.items += 1;
-        }
-        for (const skill of draft.skills ?? []) {
-          await tx.item.create({
+          }), m.items += 1;
+        for (const d of a.skills ?? [])
+          await f.item.create({
             data: {
-              novelId: payload.novelId,
-              name: skill.name,
+              novelId: t.novelId,
+              name: d.name,
               type: "skill",
-              description: skill.description || null,
-              profile: toProfileJson(skill.profile),
-              sortOrder: Date.now() + localCreated.items + localCreated.skills
+              description: d.description || null,
+              profile: Be(d.profile),
+              sortOrder: Date.now() + m.items + m.skills
             }
-          });
-          localCreated.skills += 1;
-        }
-        for (const mapDraft of draft.maps ?? []) {
-          const map = await tx.mapCanvas.create({
+          }), m.skills += 1;
+        for (const d of a.maps ?? []) {
+          const y = await f.mapCanvas.create({
             data: {
-              novelId: payload.novelId,
-              name: mapDraft.name,
-              type: mapDraft.type || "world",
-              description: mapDraft.description || null,
-              sortOrder: Date.now() + localCreated.maps
+              novelId: t.novelId,
+              name: d.name,
+              type: d.type || "world",
+              description: d.description || null,
+              sortOrder: Date.now() + m.maps
             }
           });
-          localCreated.maps += 1;
-          let imageInput = null;
-          if (mapDraft.imageBase64 || mapDraft.imageUrl) {
-            imageInput = {
-              imageBase64: mapDraft.imageBase64,
-              imageUrl: mapDraft.imageUrl,
-              mimeType: mapDraft.mimeType
+          m.maps += 1;
+          let v = null;
+          if (d.imageBase64 || d.imageUrl)
+            v = {
+              imageBase64: d.imageBase64,
+              imageUrl: d.imageUrl,
+              mimeType: d.mimeType
             };
-          } else if (mapDraft.imagePrompt) {
-            if (!provider.generateImage) {
-              throw new AiActionError("INVALID_INPUT", `Provider ${provider.name} does not support image generation`);
-            }
-            const generated = await provider.generateImage({ prompt: mapDraft.imagePrompt });
-            if (!(generated == null ? void 0 : generated.imageBase64) && !(generated == null ? void 0 : generated.imageUrl)) {
-              throw new AiActionError("PROVIDER_UNAVAILABLE", `Map image generation returned empty data for ${mapDraft.name}`);
-            }
-            imageInput = {
-              imageBase64: generated.imageBase64,
-              imageUrl: generated.imageUrl,
-              mimeType: generated.mimeType
+          else if (d.imagePrompt) {
+            if (!o.generateImage)
+              throw new j("INVALID_INPUT", `Provider ${o.name} does not support image generation`);
+            const _ = await o.generateImage({ prompt: d.imagePrompt });
+            if (!(_ != null && _.imageBase64) && !(_ != null && _.imageUrl))
+              throw new j("PROVIDER_UNAVAILABLE", `Map image generation returned empty data for ${d.name}`);
+            v = {
+              imageBase64: _.imageBase64,
+              imageUrl: _.imageUrl,
+              mimeType: _.mimeType
             };
           }
-          if (imageInput) {
-            const saved = await this.saveImageAsset(payload.novelId, map.id, imageInput);
-            createdFiles.push(saved.absolutePath);
-            await tx.mapCanvas.update({
-              where: { id: map.id },
-              data: { background: saved.relativePath }
-            });
-            localCreated.mapImages += 1;
+          if (v) {
+            const _ = await this.saveImageAsset(t.novelId, y.id, v);
+            c.push(_.absolutePath), await f.mapCanvas.update({
+              where: { id: y.id },
+              data: { background: _.relativePath }
+            }), m.mapImages += 1;
           }
         }
-        committedCreated = localCreated;
+        i = m;
       });
-      return {
-        success: true,
-        created: committedCreated,
-        warnings: validation.warnings,
+      const g = {
+        success: !0,
+        created: i,
+        warnings: e.warnings,
         transactionMode: "atomic"
       };
-    } catch (error) {
-      for (const file of createdFiles) {
+      return M("INFO", "AiService.confirmCreativeAssets.success", "Confirm creative assets success", {
+        novelId: t.novelId,
+        created: i,
+        warningCount: e.warnings.length
+      }), g;
+    } catch (g) {
+      ie("AiService.confirmCreativeAssets.error", g, {
+        novelId: t.novelId
+      });
+      for (const u of c)
         try {
-          if (fs.existsSync(file))
-            fs.unlinkSync(file);
+          z.existsSync(u) && z.unlinkSync(u);
         } catch {
         }
-      }
-      const normalized = normalizeAiError(error);
-      const issueCode = normalized.code === "INVALID_INPUT" ? "INVALID_INPUT" : normalized.code === "CONFLICT" ? "CONFLICT" : normalized.code === "UNKNOWN" ? "UNKNOWN" : "PERSISTENCE_ERROR";
+      const f = te(g), m = f.code === "INVALID_INPUT" ? "INVALID_INPUT" : f.code === "CONFLICT" ? "CONFLICT" : f.code === "UNKNOWN" ? "UNKNOWN" : "PERSISTENCE_ERROR";
       return {
-        success: false,
-        created: zeroCreated,
-        warnings: validation.warnings,
+        success: !1,
+        created: n,
+        warnings: e.warnings,
         errors: [
           {
             scope: "confirmCreativeAssets",
-            code: issueCode,
-            detail: normalized.message || "Creative assets persistence failed"
+            code: m,
+            detail: f.message || "Creative assets persistence failed"
           }
         ],
         transactionMode: "atomic"
       };
     }
   }
-  async previewMapPrompt(payload) {
-    const bundle = await this.buildMapPromptBundle(payload);
-    return {
-      structured: bundle.structured,
-      rawPrompt: bundle.effectiveUserPrompt,
-      editableUserPrompt: bundle.defaultUserPrompt,
-      usedWorldLore: bundle.usedWorldLore
+  async previewMapPrompt(t) {
+    var n;
+    M("INFO", "AiService.previewMapPrompt.start", "Preview map prompt start", {
+      novelId: t.novelId,
+      mapId: t.mapId,
+      promptLength: ((n = t.prompt) == null ? void 0 : n.length) ?? 0
+    });
+    const e = await this.buildMapPromptBundle(t);
+    return M("INFO", "AiService.previewMapPrompt.success", "Preview map prompt success", {
+      novelId: t.novelId,
+      mapId: t.mapId
+    }), {
+      structured: e.structured,
+      rawPrompt: e.effectiveUserPrompt,
+      editableUserPrompt: e.defaultUserPrompt,
+      usedWorldLore: e.usedWorldLore
     };
   }
-  async generateMapImage(payload) {
-    var _a, _b, _c;
-    const startTime = Date.now();
-    const finalize = (result) => {
-      this.recordMapImageCall({
-        ok: result.ok,
-        code: result.code,
-        detail: result.detail,
-        latencyMs: Date.now() - startTime
-      });
-      return result;
-    };
+  async generateMapImage(t) {
+    var a, o, c, i;
+    M("INFO", "AiService.generateMapImage.start", "Generate map image start", {
+      novelId: t.novelId,
+      mapId: t.mapId,
+      promptLength: ((a = t.prompt) == null ? void 0 : a.length) ?? 0,
+      providerType: this.settingsCache.providerType
+    });
+    const e = Date.now(), n = (l) => (this.recordMapImageCall({
+      ok: l.ok,
+      code: l.code,
+      detail: l.detail,
+      latencyMs: Date.now() - e
+    }), l);
     try {
-      const hasBasePrompt = Boolean((_a = payload.prompt) == null ? void 0 : _a.trim());
-      const hasOverridePrompt = Boolean((_b = payload.overrideUserPrompt) == null ? void 0 : _b.trim());
-      if (!hasBasePrompt && !hasOverridePrompt) {
-        return finalize({ ok: false, code: "INVALID_INPUT", detail: "Map prompt is empty" });
-      }
-      const provider = this.getProvider();
-      if (!provider.generateImage) {
-        return finalize({ ok: false, code: "INVALID_INPUT", detail: `Provider ${provider.name} does not support image generation` });
-      }
-      const bundle = await this.buildMapPromptBundle(payload);
-      const generated = await provider.generateImage({
-        prompt: bundle.effectiveUserPrompt,
+      const l = !!((o = t.prompt) != null && o.trim()), I = !!((c = t.overrideUserPrompt) != null && c.trim());
+      if (!l && !I)
+        return n({ ok: !1, code: "INVALID_INPUT", detail: "Map prompt is empty" });
+      const w = this.getProvider();
+      if (!w.generateImage)
+        return n({ ok: !1, code: "INVALID_INPUT", detail: `Provider ${w.name} does not support image generation` });
+      const E = await this.buildMapPromptBundle(t), C = await w.generateImage({
+        prompt: E.effectiveUserPrompt,
         model: this.settingsCache.http.imageModel || void 0,
-        size: payload.imageSize || this.settingsCache.http.imageSize || void 0,
+        size: t.imageSize || this.settingsCache.http.imageSize || void 0,
         outputFormat: this.settingsCache.http.imageOutputFormat || void 0,
         watermark: this.settingsCache.http.imageWatermark
       });
-      if (!generated.imageBase64 && !generated.imageUrl) {
-        return finalize({ ok: false, code: "PROVIDER_UNAVAILABLE", detail: "Provider did not return any image data" });
-      }
-      let mapId = payload.mapId;
-      if (!mapId) {
-        const createdMap = await db.mapCanvas.create({
-          data: {
-            novelId: payload.novelId,
-            name: ((_c = payload.mapName) == null ? void 0 : _c.trim()) || `AI 地图 ${(/* @__PURE__ */ new Date()).toLocaleString()}`,
-            type: payload.mapType || "world",
-            description: `Generated by AI with prompt: ${payload.prompt}`,
-            sortOrder: Date.now()
-          }
-        });
-        mapId = createdMap.id;
-      }
-      if (!mapId) {
-        throw new AiActionError("PERSISTENCE_ERROR", "Map id is missing after map creation");
-      }
-      const saved = await this.saveImageAsset(payload.novelId, mapId, {
-        imageBase64: generated.imageBase64,
-        imageUrl: generated.imageUrl,
-        mimeType: generated.mimeType
+      if (!C.imageBase64 && !C.imageUrl)
+        return n({ ok: !1, code: "PROVIDER_UNAVAILABLE", detail: "Provider did not return any image data" });
+      let p = t.mapId;
+      if (p || (p = (await h.mapCanvas.create({
+        data: {
+          novelId: t.novelId,
+          name: ((i = t.mapName) == null ? void 0 : i.trim()) || `AI 地图 ${(/* @__PURE__ */ new Date()).toLocaleString()}`,
+          type: t.mapType || "world",
+          description: `Generated by AI with prompt: ${t.prompt}`,
+          sortOrder: Date.now()
+        }
+      })).id), !p)
+        throw new j("PERSISTENCE_ERROR", "Map id is missing after map creation");
+      const g = await this.saveImageAsset(t.novelId, p, {
+        imageBase64: C.imageBase64,
+        imageUrl: C.imageUrl,
+        mimeType: C.mimeType
       });
-      await db.mapCanvas.update({
-        where: { id: mapId },
-        data: { background: saved.relativePath }
+      await h.mapCanvas.update({
+        where: { id: p },
+        data: { background: g.relativePath }
       });
-      return finalize({
-        ok: true,
+      const f = n({
+        ok: !0,
         detail: "Map image generated and stored successfully",
-        mapId,
-        path: saved.relativePath
+        mapId: p,
+        path: g.relativePath
       });
-    } catch (error) {
-      const normalized = normalizeAiError(error);
-      return finalize({
-        ok: false,
-        code: normalized.code,
-        detail: normalized.message || "Map generation failed"
+      return M("INFO", "AiService.generateMapImage.success", "Generate map image success", {
+        novelId: t.novelId,
+        mapId: p,
+        imagePath: g.relativePath
+      }), f;
+    } catch (l) {
+      ie("AiService.generateMapImage.error", l, {
+        novelId: t.novelId,
+        mapId: t.mapId
+      });
+      const I = te(l);
+      return n({
+        ok: !1,
+        code: I.code,
+        detail: I.message || "Map generation failed"
       });
     }
   }
-  async executeAction(input) {
-    const handler = this.capabilityRegistry.get(input.actionId);
-    if (!handler) {
-      throw new AiActionError("INVALID_INPUT", `Unknown actionId: ${input.actionId}`);
-    }
+  async executeAction(t) {
+    const e = this.capabilityRegistry.get(t.actionId);
+    if (!e)
+      throw new j("INVALID_INPUT", `Unknown actionId: ${t.actionId}`);
     try {
-      return await handler(input.payload);
-    } catch (error) {
-      throw normalizeAiError(error);
+      return await e(t.payload);
+    } catch (n) {
+      throw te(n);
     }
   }
-  async invokeOpenClawTool(input) {
+  async invokeOpenClawTool(t) {
     try {
-      const data = await this.executeAction({
-        actionId: input.name,
-        payload: input.arguments
-      });
-      return { ok: true, data };
-    } catch (error) {
-      const normalized = normalizeAiError(error);
+      return { ok: !0, data: await this.executeAction({
+        actionId: t.name,
+        payload: t.arguments
+      }) };
+    } catch (e) {
+      const n = te(e);
       return {
-        ok: false,
-        error: formatAiErrorForDisplay(normalized.code, normalized.message || "OpenClaw invoke failed"),
-        code: normalized.code
+        ok: !1,
+        error: ge(n.code, n.message || "OpenClaw invoke failed"),
+        code: n.code
       };
     }
   }
-  async invokeOpenClawSkill(input) {
+  async invokeOpenClawSkill(t) {
     try {
-      const data = await this.executeAction({
-        actionId: input.name,
-        payload: input.input
-      });
-      return { ok: true, data };
-    } catch (error) {
-      const normalized = normalizeAiError(error);
+      return { ok: !0, data: await this.executeAction({
+        actionId: t.name,
+        payload: t.input
+      }) };
+    } catch (e) {
+      const n = te(e);
       return {
-        ok: false,
-        error: formatAiErrorForDisplay(normalized.code, normalized.message || "OpenClaw skill invoke failed"),
-        code: normalized.code
+        ok: !1,
+        error: ge(n.code, n.message || "OpenClaw skill invoke failed"),
+        code: n.code
       };
     }
   }
-  compactContinueHardContext(input) {
-    const worldSettings = Array.isArray(input.worldSettings) ? input.worldSettings : [];
-    const plotLines = Array.isArray(input.plotLines) ? input.plotLines : [];
-    const characters = Array.isArray(input.characters) ? input.characters : [];
-    const items = Array.isArray(input.items) ? input.items : [];
-    const maps = Array.isArray(input.maps) ? input.maps : [];
+  compactContinueHardContext(t) {
+    const e = Array.isArray(t.worldSettings) ? t.worldSettings : [], n = Array.isArray(t.plotLines) ? t.plotLines : [], a = Array.isArray(t.characters) ? t.characters : [], o = Array.isArray(t.items) ? t.items : [], c = Array.isArray(t.maps) ? t.maps : [];
     return {
-      worldSettings: worldSettings.slice(0, 60).map((item) => ({
-        name: trimText(item == null ? void 0 : item.name, 80),
-        type: trimText(item == null ? void 0 : item.type, 32) || "other",
-        content: trimText(item == null ? void 0 : item.content, 300) || trimText(item == null ? void 0 : item.description, 300)
-      })).filter((item) => item.content),
-      plotLines: plotLines.slice(0, 40).map((line) => ({
-        name: trimText(line == null ? void 0 : line.name, 100),
-        description: trimText(line == null ? void 0 : line.description, 260),
-        points: Array.isArray(line == null ? void 0 : line.points) ? line.points.filter((point) => String((point == null ? void 0 : point.status) || "").trim().toLowerCase() !== "resolved").slice(0, 12).map((point) => ({
-          title: trimText(point == null ? void 0 : point.title, 100),
-          description: trimText(point == null ? void 0 : point.description, 220),
-          type: trimText(point == null ? void 0 : point.type, 24) || "event",
-          status: trimText(point == null ? void 0 : point.status, 24) || "active"
-        })).filter((point) => point.title || point.description) : []
-      })).filter((line) => {
-        var _a;
-        return line.name || (((_a = line.points) == null ? void 0 : _a.length) ?? 0) > 0;
+      worldSettings: e.slice(0, 60).map((i) => ({
+        name: O(i == null ? void 0 : i.name, 80),
+        type: O(i == null ? void 0 : i.type, 32) || "other",
+        content: O(i == null ? void 0 : i.content, 300) || O(i == null ? void 0 : i.description, 300)
+      })).filter((i) => i.content),
+      plotLines: n.slice(0, 40).map((i) => ({
+        name: O(i == null ? void 0 : i.name, 100),
+        description: O(i == null ? void 0 : i.description, 260),
+        points: Array.isArray(i == null ? void 0 : i.points) ? i.points.filter((l) => String((l == null ? void 0 : l.status) || "").trim().toLowerCase() !== "resolved").slice(0, 12).map((l) => ({
+          title: O(l == null ? void 0 : l.title, 100),
+          description: O(l == null ? void 0 : l.description, 220),
+          type: O(l == null ? void 0 : l.type, 24) || "event",
+          status: O(l == null ? void 0 : l.status, 24) || "active"
+        })).filter((l) => l.title || l.description) : []
+      })).filter((i) => {
+        var l;
+        return i.name || (((l = i.points) == null ? void 0 : l.length) ?? 0) > 0;
       }),
-      characters: characters.slice(0, 120).map((item) => ({
-        name: trimText(item == null ? void 0 : item.name, 80),
-        role: trimText(item == null ? void 0 : item.role, 32),
-        description: trimText(item == null ? void 0 : item.description, 220)
-      })).filter((item) => item.name && (item.role || item.description)),
-      items: items.slice(0, 120).map((item) => ({
-        name: trimText(item == null ? void 0 : item.name, 80),
-        type: trimText(item == null ? void 0 : item.type, 32) || "item",
-        description: trimText(item == null ? void 0 : item.description, 220)
-      })).filter((item) => item.name && item.description),
-      maps: maps.slice(0, 60).map((item) => ({
-        name: trimText(item == null ? void 0 : item.name, 80),
-        type: trimText(item == null ? void 0 : item.type, 24) || "world",
-        description: trimText(item == null ? void 0 : item.description, 220)
-      })).filter((item) => item.name && item.description)
+      characters: a.slice(0, 120).map((i) => ({
+        name: O(i == null ? void 0 : i.name, 80),
+        role: O(i == null ? void 0 : i.role, 32),
+        description: O(i == null ? void 0 : i.description, 220)
+      })).filter((i) => i.name && (i.role || i.description)),
+      items: o.slice(0, 120).map((i) => ({
+        name: O(i == null ? void 0 : i.name, 80),
+        type: O(i == null ? void 0 : i.type, 32) || "item",
+        description: O(i == null ? void 0 : i.description, 220)
+      })).filter((i) => i.name && i.description),
+      maps: c.slice(0, 60).map((i) => ({
+        name: O(i == null ? void 0 : i.name, 80),
+        type: O(i == null ? void 0 : i.type, 24) || "world",
+        description: O(i == null ? void 0 : i.description, 220)
+      })).filter((i) => i.name && i.description)
     };
   }
-  compactContinueDynamicContext(input) {
-    const recentChapters = Array.isArray(input.recentChapters) ? input.recentChapters : [];
-    const selectedIdeas = Array.isArray(input.selectedIdeas) ? input.selectedIdeas : [];
-    const selectedIdeaEntities = Array.isArray(input.selectedIdeaEntities) ? input.selectedIdeaEntities : [];
-    const narrativeSummaries = Array.isArray(input.narrativeSummaries) ? input.narrativeSummaries : [];
-    const currentLocation = trimText(input.currentLocation, 120);
+  compactContinueDynamicContext(t) {
+    const e = Array.isArray(t.recentChapters) ? t.recentChapters : [], n = Array.isArray(t.selectedIdeas) ? t.selectedIdeas : [], a = Array.isArray(t.selectedIdeaEntities) ? t.selectedIdeaEntities : [], o = Array.isArray(t.narrativeSummaries) ? t.narrativeSummaries : [], c = O(t.currentLocation, 120);
     return {
-      recentChapters: recentChapters.slice(0, 8).map((chapter) => ({
-        title: trimText(chapter == null ? void 0 : chapter.title, 120),
-        excerpt: trimText(chapter == null ? void 0 : chapter.excerpt, 1200)
-      })).filter((chapter) => chapter.title || chapter.excerpt),
-      selectedIdeas: selectedIdeas.slice(0, 20).map((idea) => ({
-        content: trimText(idea == null ? void 0 : idea.content, 800),
-        quote: trimText(idea == null ? void 0 : idea.quote, 300),
-        tags: Array.isArray(idea == null ? void 0 : idea.tags) ? idea.tags.slice(0, 12).map((tag) => trimText(tag, 32)).filter(Boolean) : []
-      })).filter((idea) => idea.content || idea.quote),
-      selectedIdeaEntities: selectedIdeaEntities.slice(0, 20).map((entity) => ({
-        name: trimText(entity == null ? void 0 : entity.name, 80),
-        kind: trimText(entity == null ? void 0 : entity.kind, 24)
-      })).filter((entity) => entity.name && entity.kind),
-      currentChapterBeforeCursor: trimText(input.currentChapterBeforeCursor, 2600),
-      ...currentLocation ? { currentLocation } : {},
-      narrativeSummaries: narrativeSummaries.slice(0, 4).map((item) => ({
-        level: (item == null ? void 0 : item.level) === "volume" ? "volume" : "novel",
-        title: trimText(item == null ? void 0 : item.title, 100),
-        summaryText: trimText(item == null ? void 0 : item.summaryText, 1200),
-        keyFacts: Array.isArray(item == null ? void 0 : item.keyFacts) ? dedupeStrings(item.keyFacts.map((fact) => trimText(fact, 160)).filter(Boolean), 5) : []
+      recentChapters: e.slice(0, 8).map((i) => ({
+        title: O(i == null ? void 0 : i.title, 120),
+        excerpt: O(i == null ? void 0 : i.excerpt, 1200)
+      })).filter((i) => i.title || i.excerpt),
+      selectedIdeas: n.slice(0, 20).map((i) => ({
+        content: O(i == null ? void 0 : i.content, 800),
+        quote: O(i == null ? void 0 : i.quote, 300),
+        tags: Array.isArray(i == null ? void 0 : i.tags) ? i.tags.slice(0, 12).map((l) => O(l, 32)).filter(Boolean) : []
+      })).filter((i) => i.content || i.quote),
+      selectedIdeaEntities: a.slice(0, 20).map((i) => ({
+        name: O(i == null ? void 0 : i.name, 80),
+        kind: O(i == null ? void 0 : i.kind, 24)
+      })).filter((i) => i.name && i.kind),
+      currentChapterBeforeCursor: O(t.currentChapterBeforeCursor, 2600),
+      ...c ? { currentLocation: c } : {},
+      narrativeSummaries: o.slice(0, 4).map((i) => ({
+        level: (i == null ? void 0 : i.level) === "volume" ? "volume" : "novel",
+        title: O(i == null ? void 0 : i.title, 100),
+        summaryText: O(i == null ? void 0 : i.summaryText, 1200),
+        keyFacts: Array.isArray(i == null ? void 0 : i.keyFacts) ? Dr(i.keyFacts.map((l) => O(l, 160)).filter(Boolean), 5) : []
       }))
     };
   }
-  async buildContinuePromptBundle(payload) {
-    var _a;
-    const isZh = /^zh/i.test(String(payload.locale || "").trim());
-    const writeMode = payload.mode === "new_chapter" ? "new_chapter" : "continue_chapter";
-    const context = await this.contextBuilder.buildForContinueWriting({
-      ...payload,
-      mode: writeMode,
-      recentRawChapterCount: payload.recentRawChapterCount ?? this.settingsCache.summary.recentChapterRawCount
-    });
-    const compactHardContext = this.compactContinueHardContext(context.hardContext);
-    const compactDynamicContext = this.compactContinueDynamicContext(context.dynamicContext);
-    const normalizedUserIntent = trimText(payload.userIntent, 800);
-    const normalizedCurrentLocation = trimText(payload.currentLocation, 120);
-    const writeParamsForPrompt = {
-      ...context.params,
-      targetLength: isZh ? `约${Math.max(100, Number(context.params.targetLength || 500))}汉字` : `about ${Math.max(100, Number(context.params.targetLength || 500))} Chinese characters`
-    };
-    const systemPrompt = isZh ? "你是中文小说续写助手。严格遵守世界观和大纲，不得破坏既有设定与人物行为逻辑。" : "Continue writing with strict consistency to world settings and plot outline. Do not break established lore.";
-    const promptSections = [
-      `WriteMode=${writeMode}`,
+  async buildContinuePromptBundle(t) {
+    var f;
+    const e = /^zh/i.test(String(t.locale || "").trim()), n = t.mode === "new_chapter" ? "new_chapter" : "continue_chapter", a = await this.contextBuilder.buildForContinueWriting({
+      ...t,
+      mode: n,
+      recentRawChapterCount: t.recentRawChapterCount ?? this.settingsCache.summary.recentChapterRawCount
+    }), o = this.compactContinueHardContext(a.hardContext), c = this.compactContinueDynamicContext(a.dynamicContext), i = O(t.userIntent, 800), l = O(t.currentLocation, 120), I = {
+      ...a.params,
+      targetLength: e ? `约${Math.max(100, Math.min(4e3, Number(a.params.targetLength || 500)))}汉字` : `about ${Math.max(100, Math.min(4e3, Number(a.params.targetLength || 500)))} Chinese characters`
+    }, w = e ? "你是中文小说续写助手。严格遵守世界观和大纲，不得破坏既有设定与人物行为逻辑。" : "Continue writing with strict consistency to world settings and plot outline. Do not break established lore.", C = [
+      `WriteMode=${n}`,
       `HardContext=
-${JSON.stringify(compactHardContext, null, 2).slice(0, 18e3)}`,
+${JSON.stringify(o, null, 2).slice(0, 18e3)}`,
       `DynamicContext=
-${JSON.stringify(compactDynamicContext, null, 2).slice(0, 12e3)}`,
+${JSON.stringify(c, null, 2).slice(0, 12e3)}`,
       `WriteParams=
-${JSON.stringify(writeParamsForPrompt, null, 2)}`,
-      ...normalizedUserIntent ? [`UserIntent=${normalizedUserIntent}`] : [],
-      ...normalizedCurrentLocation ? [`CurrentLocation=${normalizedCurrentLocation}`] : [],
-      writeMode === "new_chapter" ? isZh ? "Constraint=基于大纲与世界观写出新章节开场，不得复述已有段落。" : "Constraint=Start a fresh chapter opening based on outline and world context. Do not echo prior chapter paragraphs." : isZh ? "Constraint=仅输出新增续写内容，不得重复当前章节或上下文已出现段落。" : "Constraint=Output must be NEW continuation content only. Do not restate prior paragraphs from current chapter or context.",
-      isZh ? "Constraint=@实体名 表示对上下文中同名角色/物品/地点/设定的引用，续写时应保持实体设定一致。" : "Constraint=@EntityName means referencing the same named entity from context; keep entity traits consistent.",
-      ...normalizedUserIntent ? [isZh ? "Constraint=尽量满足用户意图，但不得违反世界观与主线大纲。" : "Constraint=Prioritize the user intent when possible, but never violate established world settings and plot outline."] : [],
-      isZh ? "Constraint=请严格遵守 HardContext 中的世界观、角色性格和物品设定；情节推进需与已有情节点保持一致。" : "Constraint=Strictly follow HardContext lore, character traits, and item settings; keep progression aligned with existing plot points.",
-      isZh ? "Constraint=你的任务是续写光标后的新内容，不要重复 currentChapterBeforeCursor 里的任何句子。" : "Constraint=Write only the continuation after cursor; do not repeat any sentence from currentChapterBeforeCursor."
-    ];
-    const defaultUserPrompt = promptSections.join("\n\n");
-    const effectiveUserPrompt = ((_a = payload.overrideUserPrompt) == null ? void 0 : _a.trim()) ? payload.overrideUserPrompt.trim() : defaultUserPrompt;
-    const structuredParams = {
-      ...context.params,
-      ...normalizedUserIntent ? { userIntent: normalizedUserIntent } : {},
-      ...normalizedCurrentLocation ? { currentLocation: normalizedCurrentLocation } : {}
+${JSON.stringify(I, null, 2)}`,
+      ...i ? [`UserIntent=${i}`] : [],
+      ...l ? [`CurrentLocation=${l}`] : [],
+      n === "new_chapter" ? e ? "Constraint=基于大纲与世界观写出新章节开场，不得复述已有段落。" : "Constraint=Start a fresh chapter opening based on outline and world context. Do not echo prior chapter paragraphs." : e ? "Constraint=仅输出新增续写内容，不得重复当前章节或上下文已出现段落。" : "Constraint=Output must be NEW continuation content only. Do not restate prior paragraphs from current chapter or context.",
+      e ? "Constraint=@实体名 表示对上下文中同名角色/物品/地点/设定的引用，续写时应保持实体设定一致。" : "Constraint=@EntityName means referencing the same named entity from context; keep entity traits consistent.",
+      ...i ? [e ? "Constraint=尽量满足用户意图，但不得违反世界观与主线大纲。" : "Constraint=Prioritize the user intent when possible, but never violate established world settings and plot outline."] : [],
+      e ? "Constraint=请严格遵守 HardContext 中的世界观、角色性格和物品设定；情节推进需与已有情节点保持一致。" : "Constraint=Strictly follow HardContext lore, character traits, and item settings; keep progression aligned with existing plot points.",
+      e ? "Constraint=你的任务是续写光标后的新内容，不要重复 currentChapterBeforeCursor 里的任何句子。" : "Constraint=Write only the continuation after cursor; do not repeat any sentence from currentChapterBeforeCursor."
+    ].join(`
+
+`), p = (f = t.overrideUserPrompt) != null && f.trim() ? t.overrideUserPrompt.trim() : C, g = {
+      ...a.params,
+      ...i ? { userIntent: i } : {},
+      ...l ? { currentLocation: l } : {}
     };
     return {
-      systemPrompt,
-      defaultUserPrompt,
-      effectiveUserPrompt,
+      systemPrompt: w,
+      defaultUserPrompt: C,
+      effectiveUserPrompt: p,
       structured: {
-        goal: writeMode === "new_chapter" ? isZh ? "生成新章节开场内容。" : "Generate opening content for a new chapter." : isZh ? "仅生成续写新增内容。" : "Generate continuation content only.",
-        contextRefs: context.usedContext,
-        params: structuredParams,
+        goal: n === "new_chapter" ? e ? "生成新章节开场内容。" : "Generate opening content for a new chapter." : e ? "仅生成续写新增内容。" : "Generate continuation content only.",
+        contextRefs: a.usedContext,
+        params: g,
         constraints: [
-          ...isZh ? ["严格遵守世界观与大纲一致性。"] : ["Keep strict consistency with world settings and outline."],
-          ...normalizedUserIntent ? [isZh ? "在不冲突时优先满足用户意图。" : "Respect user intent when it does not conflict with hard context."] : [],
-          ...isZh ? ["不得重复已有段落。", "只输出生成的续写正文。"] : ["Do not repeat existing paragraphs.", "Output only generated chapter text."]
+          ...e ? ["严格遵守世界观与大纲一致性。"] : ["Keep strict consistency with world settings and outline."],
+          ...i ? [e ? "在不冲突时优先满足用户意图。" : "Respect user intent when it does not conflict with hard context."] : [],
+          ...e ? ["不得重复已有段落。", "只输出生成的续写正文。"] : ["Do not repeat existing paragraphs.", "Output only generated chapter text."]
         ]
       },
-      usedContext: context.usedContext,
-      warnings: context.warnings
+      usedContext: a.usedContext,
+      warnings: a.warnings
     };
   }
-  async buildCreativeAssetsPromptBundle(payload) {
-    var _a;
-    const targetSections = this.resolveCreativeTargetSections(payload);
-    const [novel, worldSettings, counts] = await Promise.all([
-      db.novel.findUnique({
-        where: { id: payload.novelId },
-        select: { id: true, title: true, description: true }
+  async buildCreativeAssetsPromptBundle(t) {
+    var f;
+    const e = this.resolveCreativeTargetSections(t), [n, a, o] = await Promise.all([
+      h.novel.findUnique({
+        where: { id: t.novelId },
+        select: { id: !0, title: !0, description: !0 }
       }),
-      db.worldSetting.findMany({
-        where: { novelId: payload.novelId },
+      h.worldSetting.findMany({
+        where: { novelId: t.novelId },
         orderBy: { updatedAt: "desc" },
         take: 8,
-        select: { name: true, content: true }
+        select: { name: !0, content: !0 }
       }),
       Promise.all([
-        db.plotLine.count({ where: { novelId: payload.novelId } }),
-        db.character.count({ where: { novelId: payload.novelId } }),
-        db.item.count({ where: { novelId: payload.novelId } }),
-        db.mapCanvas.count({ where: { novelId: payload.novelId } })
+        h.plotLine.count({ where: { novelId: t.novelId } }),
+        h.character.count({ where: { novelId: t.novelId } }),
+        h.item.count({ where: { novelId: t.novelId } }),
+        h.mapCanvas.count({ where: { novelId: t.novelId } })
       ])
-    ]);
-    const [plotLineCount, characterCount, itemCount, mapCount] = counts;
-    const usedContext = [
-      `Novel: ${(novel == null ? void 0 : novel.title) || payload.novelId}`,
-      `World settings referenced: ${worldSettings.length}`,
-      `Existing entities: plotLines=${plotLineCount}, characters=${characterCount}, items=${itemCount}, maps=${mapCount}`
-    ];
-    const systemPrompt = "Generate structured creative assets in strict JSON format. Output only requested sections.";
-    const outputSchema = {
+    ]), [c, i, l, I] = o, w = [
+      `Novel: ${(n == null ? void 0 : n.title) || t.novelId}`,
+      `World settings referenced: ${a.length}`,
+      `Existing entities: plotLines=${c}, characters=${i}, items=${l}, maps=${I}`
+    ], E = "Generate structured creative assets in strict JSON format. Output only requested sections.", C = {
       plotLines: [{ name: "string", description: "string?" }],
       plotPoints: [{ title: "string", description: "string?", plotLineName: "string?" }],
       characters: [{ name: "string", role: "string?", description: "string?" }],
       items: [{ name: "string", type: "item|skill|location", description: "string?" }],
       skills: [{ name: "string", description: "string?" }],
       maps: [{ name: "string", type: "world|region|scene", description: "string?", imagePrompt: "string?" }]
-    };
-    const defaultUserPrompt = JSON.stringify({
+    }, p = JSON.stringify({
       task: "creative_assets_generation",
-      brief: payload.brief,
+      brief: t.brief,
       novel: {
-        title: (novel == null ? void 0 : novel.title) || "",
-        description: (novel == null ? void 0 : novel.description) || ""
+        title: (n == null ? void 0 : n.title) || "",
+        description: (n == null ? void 0 : n.description) || ""
       },
-      worldSettings: worldSettings.map((item) => ({
-        name: String(item.name || ""),
-        description: String(item.content || "").slice(0, 180)
+      worldSettings: a.map((m) => ({
+        name: String(m.name || ""),
+        description: String(m.content || "").slice(0, 180)
       })),
-      targetSections,
-      outputShape: targetSections,
-      outputSchema,
+      targetSections: e,
+      outputShape: e,
+      outputSchema: C,
       constraints: [
         "return strict JSON only",
         "output only requested sections; all unrequested sections must be empty arrays",
         "avoid duplicate names against existing entities",
         "fields should be concise and directly usable"
       ]
-    });
-    const effectiveUserPrompt = ((_a = payload.overrideUserPrompt) == null ? void 0 : _a.trim()) ? payload.overrideUserPrompt.trim() : defaultUserPrompt;
+    }), g = (f = t.overrideUserPrompt) != null && f.trim() ? t.overrideUserPrompt.trim() : p;
     return {
-      systemPrompt,
-      defaultUserPrompt,
-      effectiveUserPrompt,
+      systemPrompt: E,
+      defaultUserPrompt: p,
+      effectiveUserPrompt: g,
       structured: {
         goal: "Generate editable draft assets for outline, world and map creation.",
-        contextRefs: usedContext,
+        contextRefs: w,
         params: {
-          briefLength: payload.brief.trim().length,
-          sections: targetSections
+          briefLength: t.brief.trim().length,
+          sections: e
         },
         constraints: [
           "Output strict JSON.",
@@ -3366,50 +3072,47 @@ ${JSON.stringify(writeParamsForPrompt, null, 2)}`,
           "Avoid obvious name conflicts."
         ]
       },
-      usedContext
+      usedContext: w
     };
   }
-  async buildMapPromptBundle(payload) {
-    var _a;
-    const worldSettings = await db.worldSetting.findMany({
-      where: { novelId: payload.novelId },
+  async buildMapPromptBundle(t) {
+    var l;
+    const n = (await h.worldSetting.findMany({
+      where: { novelId: t.novelId },
       orderBy: { updatedAt: "desc" },
       take: 8,
-      select: { id: true, name: true, content: true }
-    });
-    const usedWorldLore = worldSettings.map((item) => ({
-      id: item.id,
-      title: String(item.name || "Untitled"),
-      excerpt: String(item.content || "").slice(0, 180)
-    }));
-    const stylePrompt = resolveMapStylePrompt(payload.styleTemplate);
-    const loreBlock = usedWorldLore.length > 0 ? usedWorldLore.map((item, index) => `${index + 1}. ${item.title}: ${item.excerpt}`).join("\n") : "No explicit world lore provided.";
-    const defaultUserPrompt = [
-      stylePrompt || "Style: follow user requested style.",
-      `ImageSize=${payload.imageSize || this.settingsCache.http.imageSize || "2K"}`,
+      select: { id: !0, name: !0, content: !0 }
+    })).map((I) => ({
+      id: I.id,
+      title: String(I.name || "Untitled"),
+      excerpt: String(I.content || "").slice(0, 180)
+    })), a = Ar(t.styleTemplate), o = n.length > 0 ? n.map((I, w) => `${w + 1}. ${I.title}: ${I.excerpt}`).join(`
+`) : "No explicit world lore provided.", c = [
+      a || "Style: follow user requested style.",
+      `ImageSize=${t.imageSize || this.settingsCache.http.imageSize || "2K"}`,
       "Task: Generate a clean map background image.",
-      `UserRequest=${payload.prompt}`,
+      `UserRequest=${t.prompt}`,
       "WorldLore:",
-      loreBlock,
+      o,
       "Constraints:",
       "- avoid text labels or UI marks",
       "- keep high readability for map canvas editing",
       "- preserve coherence with world lore"
-    ].join("\n");
-    const effectiveUserPrompt = ((_a = payload.overrideUserPrompt) == null ? void 0 : _a.trim()) ? payload.overrideUserPrompt.trim() : defaultUserPrompt;
+    ].join(`
+`), i = (l = t.overrideUserPrompt) != null && l.trim() ? t.overrideUserPrompt.trim() : c;
     return {
-      defaultUserPrompt,
-      effectiveUserPrompt,
+      defaultUserPrompt: c,
+      effectiveUserPrompt: i,
       structured: {
         goal: "Generate map background image aligned with world lore.",
         contextRefs: [
-          `Map type: ${payload.mapType || "world"}`,
-          `Map name: ${payload.mapName || "(new map)"}`,
-          `World lore refs: ${usedWorldLore.length}`
+          `Map type: ${t.mapType || "world"}`,
+          `Map name: ${t.mapName || "(new map)"}`,
+          `World lore refs: ${n.length}`
         ],
         params: {
-          imageSize: payload.imageSize || this.settingsCache.http.imageSize || "2K",
-          styleTemplate: payload.styleTemplate || "default"
+          imageSize: t.imageSize || this.settingsCache.http.imageSize || "2K",
+          styleTemplate: t.styleTemplate || "default"
         },
         constraints: [
           "No labels or UI overlays in generated image.",
@@ -3417,85 +3120,67 @@ ${JSON.stringify(writeParamsForPrompt, null, 2)}`,
           "Use world lore when available."
         ]
       },
-      usedWorldLore
+      usedWorldLore: n
     };
   }
   getProvider() {
-    return this.settingsCache.providerType === "mcp-cli" ? new McpCliProvider(this.settingsCache) : new HttpProvider(this.settingsCache);
+    return this.settingsCache.providerType === "mcp-cli" ? new nt(this.settingsCache) : new _t(this.settingsCache);
   }
-  async saveImageAsset(novelId, mapId, input) {
-    let mimeType = input.mimeType || "image/png";
-    let buffer;
-    if (input.imageBase64) {
-      buffer = Buffer.from(input.imageBase64, "base64");
-    } else if (input.imageUrl) {
-      const res = await fetch(input.imageUrl);
-      if (!res.ok) {
-        throw new Error(`Image download failed: ${res.status}`);
-      }
-      const headerMime = res.headers.get("content-type") || "";
-      if (headerMime)
-        mimeType = headerMime;
-      const arrayBuffer = await res.arrayBuffer();
-      buffer = Buffer.from(arrayBuffer);
-    } else {
+  async saveImageAsset(t, e, n) {
+    let a = n.mimeType || "image/png", o;
+    if (n.imageBase64)
+      o = Buffer.from(n.imageBase64, "base64");
+    else if (n.imageUrl) {
+      const w = await fetch(n.imageUrl);
+      if (!w.ok)
+        throw new Error(`Image download failed: ${w.status}`);
+      const E = w.headers.get("content-type") || "";
+      E && (a = E);
+      const C = await w.arrayBuffer();
+      o = Buffer.from(C);
+    } else
       throw new Error("No image data provided");
-    }
-    if (buffer.length === 0) {
+    if (o.length === 0)
       throw new Error("Image data is empty");
-    }
-    if (buffer.length > MAX_IMAGE_SIZE_BYTES) {
+    if (o.length > Fe)
       throw new Error("Image exceeds maximum size limit");
-    }
-    if (!mimeType.startsWith("image/")) {
-      throw new Error(`Invalid mime type: ${mimeType}`);
-    }
-    const ext = mimeToExt(mimeType);
-    const mapsDir = path.join(this.userDataPath, "maps", novelId);
-    if (!fs.existsSync(mapsDir)) {
-      fs.mkdirSync(mapsDir, { recursive: true });
-    }
-    const filename = sanitizeFileName(`ai-${mapId}-${Date.now()}.${ext}`);
-    const absolutePath = path.join(mapsDir, filename);
-    fs.writeFileSync(absolutePath, buffer);
-    return {
-      relativePath: `maps/${novelId}/${filename}`,
-      absolutePath
+    if (!a.startsWith("image/"))
+      throw new Error(`Invalid mime type: ${a}`);
+    const c = Er(a), i = L.join(this.userDataPath, "maps", t);
+    z.existsSync(i) || z.mkdirSync(i, { recursive: !0 });
+    const l = Sr(`ai-${e}-${Date.now()}.${c}`), I = L.join(i, l);
+    return z.writeFileSync(I, o), {
+      relativePath: `maps/${t}/${l}`,
+      absolutePath: I
     };
   }
   loadSettings() {
     try {
-      if (!fs.existsSync(this.settingsFilePath)) {
-        return DEFAULT_AI_SETTINGS;
-      }
-      const raw = fs.readFileSync(this.settingsFilePath, "utf8");
-      const parsed = JSON.parse(raw);
+      if (!z.existsSync(this.settingsFilePath))
+        return ue;
+      const t = z.readFileSync(this.settingsFilePath, "utf8"), e = JSON.parse(t);
       return {
-        ...DEFAULT_AI_SETTINGS,
-        ...parsed,
-        http: { ...DEFAULT_AI_SETTINGS.http, ...parsed.http ?? {} },
-        mcpCli: { ...DEFAULT_AI_SETTINGS.mcpCli, ...parsed.mcpCli ?? {} },
-        proxy: { ...DEFAULT_AI_SETTINGS.proxy, ...parsed.proxy ?? {} },
-        summary: { ...DEFAULT_AI_SETTINGS.summary, ...parsed.summary ?? {} }
+        ...ue,
+        ...e,
+        http: { ...ue.http, ...e.http ?? {} },
+        mcpCli: { ...ue.mcpCli, ...e.mcpCli ?? {} },
+        proxy: { ...ue.proxy, ...e.proxy ?? {} },
+        summary: { ...ue.summary, ...e.summary ?? {} }
       };
-    } catch (error) {
-      console.error("[AI] Failed to load settings, fallback to defaults:", error);
-      return DEFAULT_AI_SETTINGS;
+    } catch (t) {
+      return console.error("[AI] Failed to load settings, fallback to defaults:", t), ue;
     }
   }
   persistSettings() {
     try {
-      const dir = path.dirname(this.settingsFilePath);
-      if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true });
-      }
-      fs.writeFileSync(this.settingsFilePath, JSON.stringify(this.settingsCache, null, 2), "utf8");
-    } catch (error) {
-      console.error("[AI] Failed to persist settings:", error);
+      const t = L.dirname(this.settingsFilePath);
+      z.existsSync(t) || z.mkdirSync(t, { recursive: !0 }), z.writeFileSync(this.settingsFilePath, JSON.stringify(this.settingsCache, null, 2), "utf8");
+    } catch (t) {
+      console.error("[AI] Failed to persist settings:", t);
     }
   }
   loadMapImageStats() {
-    const fallback = {
+    const t = {
       totalCalls: 0,
       successCalls: 0,
       failedCalls: 0,
@@ -3503,150 +3188,125 @@ ${JSON.stringify(writeParamsForPrompt, null, 2)}`,
       updatedAt: (/* @__PURE__ */ new Date(0)).toISOString()
     };
     try {
-      if (!fs.existsSync(this.mapImageStatsPath)) {
-        return fallback;
-      }
-      const raw = fs.readFileSync(this.mapImageStatsPath, "utf8");
-      const parsed = JSON.parse(raw);
+      if (!z.existsSync(this.mapImageStatsPath))
+        return t;
+      const e = z.readFileSync(this.mapImageStatsPath, "utf8"), n = JSON.parse(e);
       return {
-        totalCalls: parsed.totalCalls ?? 0,
-        successCalls: parsed.successCalls ?? 0,
-        failedCalls: parsed.failedCalls ?? 0,
-        rateLimitFailures: parsed.rateLimitFailures ?? 0,
-        lastFailureCode: parsed.lastFailureCode || void 0,
-        lastFailureAt: parsed.lastFailureAt || void 0,
-        updatedAt: parsed.updatedAt || fallback.updatedAt
+        totalCalls: n.totalCalls ?? 0,
+        successCalls: n.successCalls ?? 0,
+        failedCalls: n.failedCalls ?? 0,
+        rateLimitFailures: n.rateLimitFailures ?? 0,
+        lastFailureCode: n.lastFailureCode || void 0,
+        lastFailureAt: n.lastFailureAt || void 0,
+        updatedAt: n.updatedAt || t.updatedAt
       };
-    } catch (error) {
-      console.warn("[AI] Failed to load map image stats, fallback to defaults:", error);
-      return fallback;
+    } catch (e) {
+      return console.warn("[AI] Failed to load map image stats, fallback to defaults:", e), t;
     }
   }
   persistMapImageStats() {
     try {
-      const dir = path.dirname(this.mapImageStatsPath);
-      if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true });
-      }
-      fs.writeFileSync(this.mapImageStatsPath, JSON.stringify(this.mapImageStatsCache, null, 2), "utf8");
-    } catch (error) {
-      console.warn("[AI] Failed to persist map image stats:", error);
+      const t = L.dirname(this.mapImageStatsPath);
+      z.existsSync(t) || z.mkdirSync(t, { recursive: !0 }), z.writeFileSync(this.mapImageStatsPath, JSON.stringify(this.mapImageStatsCache, null, 2), "utf8");
+    } catch (t) {
+      console.warn("[AI] Failed to persist map image stats:", t);
     }
   }
-  recordMapImageCall(input) {
-    const codeText = (input.code || "").toLowerCase();
-    const detailText = (input.detail || "").toLowerCase();
-    const isRateLimit = codeText.includes("rate") || codeText.includes("429") || detailText.includes("429") || detailText.includes("rate limit") || detailText.includes("quota");
+  recordMapImageCall(t) {
+    const e = (t.code || "").toLowerCase(), n = (t.detail || "").toLowerCase(), a = e.includes("rate") || e.includes("429") || n.includes("429") || n.includes("rate limit") || n.includes("quota");
     this.mapImageStatsCache = {
       ...this.mapImageStatsCache,
       totalCalls: this.mapImageStatsCache.totalCalls + 1,
-      successCalls: this.mapImageStatsCache.successCalls + (input.ok ? 1 : 0),
-      failedCalls: this.mapImageStatsCache.failedCalls + (input.ok ? 0 : 1),
-      rateLimitFailures: this.mapImageStatsCache.rateLimitFailures + (!input.ok && isRateLimit ? 1 : 0),
-      lastFailureCode: input.ok ? this.mapImageStatsCache.lastFailureCode : input.code || "UNKNOWN",
-      lastFailureAt: input.ok ? this.mapImageStatsCache.lastFailureAt : (/* @__PURE__ */ new Date()).toISOString(),
+      successCalls: this.mapImageStatsCache.successCalls + (t.ok ? 1 : 0),
+      failedCalls: this.mapImageStatsCache.failedCalls + (t.ok ? 0 : 1),
+      rateLimitFailures: this.mapImageStatsCache.rateLimitFailures + (!t.ok && a ? 1 : 0),
+      lastFailureCode: t.ok ? this.mapImageStatsCache.lastFailureCode : t.code || "UNKNOWN",
+      lastFailureAt: t.ok ? this.mapImageStatsCache.lastFailureAt : (/* @__PURE__ */ new Date()).toISOString(),
       updatedAt: (/* @__PURE__ */ new Date()).toISOString()
-    };
-    this.persistMapImageStats();
+    }, this.persistMapImageStats();
   }
 }
-const API_BASE = "http://localhost:8080/api/sync";
-class SyncManager {
+const ct = "http://localhost:8080/api/sync";
+class Lr {
   // Get the global sync cursor
   async getCursor() {
-    const state = await db.syncState.findUnique({ where: { id: "global" } });
-    return state ? Number(state.cursor) : 0;
+    const t = await h.syncState.findUnique({ where: { id: "global" } });
+    return t ? Number(t.cursor) : 0;
   }
-  async setCursor(val) {
-    await db.syncState.upsert({
+  async setCursor(t) {
+    await h.syncState.upsert({
       where: { id: "global" },
-      create: { id: "global", cursor: BigInt(val) },
-      update: { cursor: BigInt(val) }
+      create: { id: "global", cursor: BigInt(t) },
+      update: { cursor: BigInt(t) }
     });
   }
   async pull() {
-    var _a, _b;
-    const cursor = await this.getCursor();
-    console.log("[Sync] Pulling from cursor:", cursor);
+    var e, n;
+    const t = await this.getCursor();
+    console.log("[Sync] Pulling from cursor:", t);
     try {
-      const response = await fetch(`${API_BASE}/pull`, {
+      const a = await fetch(`${ct}/pull`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ lastSyncCursor: cursor })
+        body: JSON.stringify({ lastSyncCursor: t })
       });
-      if (!response.ok)
-        throw new Error(`Pull failed: ${response.statusText}`);
-      const result = await response.json();
-      const { newSyncCursor, data } = result;
-      await db.$transaction(async (tx) => {
-        var _a2, _b2, _c;
-        if ((_a2 = data.novels) == null ? void 0 : _a2.length) {
-          for (const novel of data.novels) {
-            await tx.novel.upsert({
-              where: { id: novel.id },
-              create: { ...novel, updatedAt: new Date(novel.updatedAt), createdAt: new Date(novel.createdAt) },
-              update: { ...novel, updatedAt: new Date(novel.updatedAt), createdAt: new Date(novel.createdAt) }
+      if (!a.ok)
+        throw new Error(`Pull failed: ${a.statusText}`);
+      const o = await a.json(), { newSyncCursor: c, data: i } = o;
+      return await h.$transaction(async (l) => {
+        var I, w, E;
+        if ((I = i.novels) != null && I.length)
+          for (const C of i.novels)
+            await l.novel.upsert({
+              where: { id: C.id },
+              create: { ...C, updatedAt: new Date(C.updatedAt), createdAt: new Date(C.createdAt) },
+              update: { ...C, updatedAt: new Date(C.updatedAt), createdAt: new Date(C.createdAt) }
             });
-          }
-        }
-        if ((_b2 = data.volumes) == null ? void 0 : _b2.length) {
-          for (const vol of data.volumes) {
-            await tx.volume.upsert({
-              where: { id: vol.id },
-              create: { ...vol, updatedAt: new Date(vol.updatedAt), createdAt: new Date(vol.createdAt) },
-              update: { ...vol, updatedAt: new Date(vol.updatedAt), createdAt: new Date(vol.createdAt) }
+        if ((w = i.volumes) != null && w.length)
+          for (const C of i.volumes)
+            await l.volume.upsert({
+              where: { id: C.id },
+              create: { ...C, updatedAt: new Date(C.updatedAt), createdAt: new Date(C.createdAt) },
+              update: { ...C, updatedAt: new Date(C.updatedAt), createdAt: new Date(C.createdAt) }
             });
-          }
-        }
-        if ((_c = data.chapters) == null ? void 0 : _c.length) {
-          for (const ch of data.chapters) {
-            await tx.chapter.upsert({
-              where: { id: ch.id },
-              create: { ...ch, updatedAt: new Date(ch.updatedAt), createdAt: new Date(ch.createdAt) },
-              update: { ...ch, updatedAt: new Date(ch.updatedAt), createdAt: new Date(ch.createdAt) }
+        if ((E = i.chapters) != null && E.length)
+          for (const C of i.chapters)
+            await l.chapter.upsert({
+              where: { id: C.id },
+              create: { ...C, updatedAt: new Date(C.updatedAt), createdAt: new Date(C.createdAt) },
+              update: { ...C, updatedAt: new Date(C.updatedAt), createdAt: new Date(C.createdAt) }
             });
-          }
-        }
-      });
-      await this.setCursor(newSyncCursor);
-      console.log("[Sync] Pull complete. New cursor:", newSyncCursor);
-      return { success: true, count: (((_a = data.novels) == null ? void 0 : _a.length) || 0) + (((_b = data.chapters) == null ? void 0 : _b.length) || 0) };
-    } catch (e) {
-      console.error("[Sync] Pull error:", e);
-      throw e;
+      }), await this.setCursor(c), console.log("[Sync] Pull complete. New cursor:", c), { success: !0, count: (((e = i.novels) == null ? void 0 : e.length) || 0) + (((n = i.chapters) == null ? void 0 : n.length) || 0) };
+    } catch (a) {
+      throw console.error("[Sync] Pull error:", a), a;
     }
   }
   async push() {
-    const cursor = await this.getCursor();
-    const changes = {
-      novels: await db.novel.findMany({ where: { updatedAt: { gt: new Date(cursor) } } }),
-      volumes: await db.volume.findMany({ where: { updatedAt: { gt: new Date(cursor) } } }),
-      chapters: await db.chapter.findMany({ where: { updatedAt: { gt: new Date(cursor) } } })
+    const t = await this.getCursor(), e = {
+      novels: await h.novel.findMany({ where: { updatedAt: { gt: new Date(t) } } }),
+      volumes: await h.volume.findMany({ where: { updatedAt: { gt: new Date(t) } } }),
+      chapters: await h.chapter.findMany({ where: { updatedAt: { gt: new Date(t) } } })
     };
-    if (changes.novels.length === 0 && changes.volumes.length === 0 && changes.chapters.length === 0) {
-      return { success: true, count: 0 };
-    }
+    if (e.novels.length === 0 && e.volumes.length === 0 && e.chapters.length === 0)
+      return { success: !0, count: 0 };
     console.log("[Sync] Pushing changes...");
-    const payload = JSON.stringify({
-      lastSyncCursor: cursor,
-      changes
-    }, (_, v) => typeof v === "bigint" ? v.toString() : v);
-    const response = await fetch(`${API_BASE}/push`, {
+    const n = JSON.stringify({
+      lastSyncCursor: t,
+      changes: e
+    }, (o, c) => typeof c == "bigint" ? c.toString() : c), a = await fetch(`${ct}/push`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: payload
+      body: n
     });
-    if (!response.ok)
-      throw new Error(`Push failed: ${response.statusText}`);
-    console.log("[Sync] Push success");
-    return await response.json();
+    if (!a.ok)
+      throw new Error(`Push failed: ${a.statusText}`);
+    return console.log("[Sync] Push success"), await a.json();
   }
 }
-function getDefaultExportFromCjs(x) {
-  return x && x.__esModule && Object.prototype.hasOwnProperty.call(x, "default") ? x["default"] : x;
+function Pr(r) {
+  return r && r.__esModule && Object.prototype.hasOwnProperty.call(r, "default") ? r.default : r;
 }
-var util = { exports: {} };
-var constants = {
+var ye = { exports: {} }, Nt = {
   /* The local file header */
   LOCHDR: 30,
   // LOC header size
@@ -3858,10 +3518,9 @@ var constants = {
   EF_ZIP64_SCOMP: 8,
   EF_ZIP64_RHO: 16,
   EF_ZIP64_DSN: 24
-};
-var errors = {};
-(function(exports$1) {
-  const errors2 = {
+}, Ne = {};
+(function(r) {
+  const t = {
     /* Header error messages */
     INVALID_LOC: "Invalid LOC header (bad signature)",
     INVALID_CEN: "Invalid CEN header (bad signature)",
@@ -3904,324 +3563,237 @@ var errors = {};
     // Comment can be max 65535 bytes long (NOTE: some non-US characters may take more space)
     EXTRA_FIELD_PARSE_ERROR: "Extra field parsing error"
   };
-  function E(message) {
-    return function(...args) {
-      if (args.length) {
-        message = message.replace(/\{(\d)\}/g, (_, n) => args[n] || "");
-      }
-      return new Error("ADM-ZIP: " + message);
+  function e(n) {
+    return function(...a) {
+      return a.length && (n = n.replace(/\{(\d)\}/g, (o, c) => a[c] || "")), new Error("ADM-ZIP: " + n);
     };
   }
-  for (const msg of Object.keys(errors2)) {
-    exports$1[msg] = E(errors2[msg]);
-  }
-})(errors);
-const fsystem = fs$1;
-const pth$2 = path$1;
-const Constants$3 = constants;
-const Errors$1 = errors;
-const isWin = typeof process === "object" && "win32" === process.platform;
-const is_Obj = (obj) => typeof obj === "object" && obj !== null;
-const crcTable = new Uint32Array(256).map((t, c) => {
-  for (let k = 0; k < 8; k++) {
-    if ((c & 1) !== 0) {
-      c = 3988292384 ^ c >>> 1;
-    } else {
-      c >>>= 1;
-    }
-  }
-  return c >>> 0;
+  for (const n of Object.keys(t))
+    r[n] = e(t[n]);
+})(Ne);
+const Tr = x, J = ne, lt = Nt, Mr = Ne, br = typeof process == "object" && process.platform === "win32", dt = (r) => typeof r == "object" && r !== null, Lt = new Uint32Array(256).map((r, t) => {
+  for (let e = 0; e < 8; e++)
+    t & 1 ? t = 3988292384 ^ t >>> 1 : t >>>= 1;
+  return t >>> 0;
 });
-function Utils$5(opts) {
-  this.sep = pth$2.sep;
-  this.fs = fsystem;
-  if (is_Obj(opts)) {
-    if (is_Obj(opts.fs) && typeof opts.fs.statSync === "function") {
-      this.fs = opts.fs;
-    }
-  }
+function G(r) {
+  this.sep = J.sep, this.fs = Tr, dt(r) && dt(r.fs) && typeof r.fs.statSync == "function" && (this.fs = r.fs);
 }
-var utils = Utils$5;
-Utils$5.prototype.makeDir = function(folder) {
-  const self = this;
-  function mkdirSync(fpath) {
-    let resolvedPath = fpath.split(self.sep)[0];
-    fpath.split(self.sep).forEach(function(name) {
-      if (!name || name.substr(-1, 1) === ":")
-        return;
-      resolvedPath += self.sep + name;
-      var stat;
-      try {
-        stat = self.fs.statSync(resolvedPath);
-      } catch (e) {
-        self.fs.mkdirSync(resolvedPath);
+var xr = G;
+G.prototype.makeDir = function(r) {
+  const t = this;
+  function e(n) {
+    let a = n.split(t.sep)[0];
+    n.split(t.sep).forEach(function(o) {
+      if (!(!o || o.substr(-1, 1) === ":")) {
+        a += t.sep + o;
+        var c;
+        try {
+          c = t.fs.statSync(a);
+        } catch {
+          t.fs.mkdirSync(a);
+        }
+        if (c && c.isFile())
+          throw Mr.FILE_IN_THE_WAY(`"${a}"`);
       }
-      if (stat && stat.isFile())
-        throw Errors$1.FILE_IN_THE_WAY(`"${resolvedPath}"`);
     });
   }
-  mkdirSync(folder);
+  e(r);
 };
-Utils$5.prototype.writeFileTo = function(path2, content, overwrite, attr) {
-  const self = this;
-  if (self.fs.existsSync(path2)) {
-    if (!overwrite)
-      return false;
-    var stat = self.fs.statSync(path2);
-    if (stat.isDirectory()) {
-      return false;
-    }
+G.prototype.writeFileTo = function(r, t, e, n) {
+  const a = this;
+  if (a.fs.existsSync(r)) {
+    if (!e)
+      return !1;
+    var o = a.fs.statSync(r);
+    if (o.isDirectory())
+      return !1;
   }
-  var folder = pth$2.dirname(path2);
-  if (!self.fs.existsSync(folder)) {
-    self.makeDir(folder);
-  }
-  var fd;
+  var c = J.dirname(r);
+  a.fs.existsSync(c) || a.makeDir(c);
+  var i;
   try {
-    fd = self.fs.openSync(path2, "w", 438);
-  } catch (e) {
-    self.fs.chmodSync(path2, 438);
-    fd = self.fs.openSync(path2, "w", 438);
+    i = a.fs.openSync(r, "w", 438);
+  } catch {
+    a.fs.chmodSync(r, 438), i = a.fs.openSync(r, "w", 438);
   }
-  if (fd) {
+  if (i)
     try {
-      self.fs.writeSync(fd, content, 0, content.length, 0);
+      a.fs.writeSync(i, t, 0, t.length, 0);
     } finally {
-      self.fs.closeSync(fd);
+      a.fs.closeSync(i);
     }
-  }
-  self.fs.chmodSync(path2, attr || 438);
-  return true;
+  return a.fs.chmodSync(r, n || 438), !0;
 };
-Utils$5.prototype.writeFileToAsync = function(path2, content, overwrite, attr, callback) {
-  if (typeof attr === "function") {
-    callback = attr;
-    attr = void 0;
-  }
-  const self = this;
-  self.fs.exists(path2, function(exist) {
-    if (exist && !overwrite)
-      return callback(false);
-    self.fs.stat(path2, function(err, stat) {
-      if (exist && stat.isDirectory()) {
-        return callback(false);
-      }
-      var folder = pth$2.dirname(path2);
-      self.fs.exists(folder, function(exists) {
-        if (!exists)
-          self.makeDir(folder);
-        self.fs.open(path2, "w", 438, function(err2, fd) {
-          if (err2) {
-            self.fs.chmod(path2, 438, function() {
-              self.fs.open(path2, "w", 438, function(err3, fd2) {
-                self.fs.write(fd2, content, 0, content.length, 0, function() {
-                  self.fs.close(fd2, function() {
-                    self.fs.chmod(path2, attr || 438, function() {
-                      callback(true);
-                    });
+G.prototype.writeFileToAsync = function(r, t, e, n, a) {
+  typeof n == "function" && (a = n, n = void 0);
+  const o = this;
+  o.fs.exists(r, function(c) {
+    if (c && !e)
+      return a(!1);
+    o.fs.stat(r, function(i, l) {
+      if (c && l.isDirectory())
+        return a(!1);
+      var I = J.dirname(r);
+      o.fs.exists(I, function(w) {
+        w || o.makeDir(I), o.fs.open(r, "w", 438, function(E, C) {
+          E ? o.fs.chmod(r, 438, function() {
+            o.fs.open(r, "w", 438, function(p, g) {
+              o.fs.write(g, t, 0, t.length, 0, function() {
+                o.fs.close(g, function() {
+                  o.fs.chmod(r, n || 438, function() {
+                    a(!0);
                   });
                 });
               });
             });
-          } else if (fd) {
-            self.fs.write(fd, content, 0, content.length, 0, function() {
-              self.fs.close(fd, function() {
-                self.fs.chmod(path2, attr || 438, function() {
-                  callback(true);
-                });
+          }) : C ? o.fs.write(C, t, 0, t.length, 0, function() {
+            o.fs.close(C, function() {
+              o.fs.chmod(r, n || 438, function() {
+                a(!0);
               });
             });
-          } else {
-            self.fs.chmod(path2, attr || 438, function() {
-              callback(true);
-            });
-          }
+          }) : o.fs.chmod(r, n || 438, function() {
+            a(!0);
+          });
         });
       });
     });
   });
 };
-Utils$5.prototype.findFiles = function(path2) {
-  const self = this;
-  function findSync(dir, pattern, recursive) {
-    let files = [];
-    self.fs.readdirSync(dir).forEach(function(file) {
-      const path3 = pth$2.join(dir, file);
-      const stat = self.fs.statSync(path3);
-      {
-        files.push(pth$2.normalize(path3) + (stat.isDirectory() ? self.sep : ""));
-      }
-      if (stat.isDirectory() && recursive)
-        files = files.concat(findSync(path3, pattern, recursive));
-    });
-    return files;
+G.prototype.findFiles = function(r) {
+  const t = this;
+  function e(n, a, o) {
+    let c = [];
+    return t.fs.readdirSync(n).forEach(function(i) {
+      const l = J.join(n, i), I = t.fs.statSync(l);
+      c.push(J.normalize(l) + (I.isDirectory() ? t.sep : "")), I.isDirectory() && o && (c = c.concat(e(l, a, o)));
+    }), c;
   }
-  return findSync(path2, void 0, true);
+  return e(r, void 0, !0);
 };
-Utils$5.prototype.findFilesAsync = function(dir, cb) {
-  const self = this;
-  let results = [];
-  self.fs.readdir(dir, function(err, list) {
-    if (err)
-      return cb(err);
-    let list_length = list.length;
-    if (!list_length)
-      return cb(null, results);
-    list.forEach(function(file) {
-      file = pth$2.join(dir, file);
-      self.fs.stat(file, function(err2, stat) {
-        if (err2)
-          return cb(err2);
-        if (stat) {
-          results.push(pth$2.normalize(file) + (stat.isDirectory() ? self.sep : ""));
-          if (stat.isDirectory()) {
-            self.findFilesAsync(file, function(err3, res) {
-              if (err3)
-                return cb(err3);
-              results = results.concat(res);
-              if (!--list_length)
-                cb(null, results);
-            });
-          } else {
-            if (!--list_length)
-              cb(null, results);
-          }
-        }
+G.prototype.findFilesAsync = function(r, t) {
+  const e = this;
+  let n = [];
+  e.fs.readdir(r, function(a, o) {
+    if (a)
+      return t(a);
+    let c = o.length;
+    if (!c)
+      return t(null, n);
+    o.forEach(function(i) {
+      i = J.join(r, i), e.fs.stat(i, function(l, I) {
+        if (l)
+          return t(l);
+        I && (n.push(J.normalize(i) + (I.isDirectory() ? e.sep : "")), I.isDirectory() ? e.findFilesAsync(i, function(w, E) {
+          if (w)
+            return t(w);
+          n = n.concat(E), --c || t(null, n);
+        }) : --c || t(null, n));
       });
     });
   });
 };
-Utils$5.prototype.getAttributes = function() {
+G.prototype.getAttributes = function() {
 };
-Utils$5.prototype.setAttributes = function() {
+G.prototype.setAttributes = function() {
 };
-Utils$5.crc32update = function(crc, byte) {
-  return crcTable[(crc ^ byte) & 255] ^ crc >>> 8;
+G.crc32update = function(r, t) {
+  return Lt[(r ^ t) & 255] ^ r >>> 8;
 };
-Utils$5.crc32 = function(buf) {
-  if (typeof buf === "string") {
-    buf = Buffer.from(buf, "utf8");
-  }
-  let len = buf.length;
-  let crc = -1;
-  for (let off = 0; off < len; )
-    crc = Utils$5.crc32update(crc, buf[off++]);
-  return ~crc >>> 0;
+G.crc32 = function(r) {
+  typeof r == "string" && (r = Buffer.from(r, "utf8"));
+  let t = r.length, e = -1;
+  for (let n = 0; n < t; )
+    e = G.crc32update(e, r[n++]);
+  return ~e >>> 0;
 };
-Utils$5.methodToString = function(method) {
-  switch (method) {
-    case Constants$3.STORED:
-      return "STORED (" + method + ")";
-    case Constants$3.DEFLATED:
-      return "DEFLATED (" + method + ")";
+G.methodToString = function(r) {
+  switch (r) {
+    case lt.STORED:
+      return "STORED (" + r + ")";
+    case lt.DEFLATED:
+      return "DEFLATED (" + r + ")";
     default:
-      return "UNSUPPORTED (" + method + ")";
+      return "UNSUPPORTED (" + r + ")";
   }
 };
-Utils$5.canonical = function(path2) {
-  if (!path2)
+G.canonical = function(r) {
+  if (!r)
     return "";
-  const safeSuffix = pth$2.posix.normalize("/" + path2.split("\\").join("/"));
-  return pth$2.join(".", safeSuffix);
+  const t = J.posix.normalize("/" + r.split("\\").join("/"));
+  return J.join(".", t);
 };
-Utils$5.zipnamefix = function(path2) {
-  if (!path2)
+G.zipnamefix = function(r) {
+  if (!r)
     return "";
-  const safeSuffix = pth$2.posix.normalize("/" + path2.split("\\").join("/"));
-  return pth$2.posix.join(".", safeSuffix);
+  const t = J.posix.normalize("/" + r.split("\\").join("/"));
+  return J.posix.join(".", t);
 };
-Utils$5.findLast = function(arr, callback) {
-  if (!Array.isArray(arr))
+G.findLast = function(r, t) {
+  if (!Array.isArray(r))
     throw new TypeError("arr is not array");
-  const len = arr.length >>> 0;
-  for (let i = len - 1; i >= 0; i--) {
-    if (callback(arr[i], i, arr)) {
-      return arr[i];
-    }
+  const e = r.length >>> 0;
+  for (let n = e - 1; n >= 0; n--)
+    if (t(r[n], n, r))
+      return r[n];
+};
+G.sanitize = function(r, t) {
+  r = J.resolve(J.normalize(r));
+  for (var e = t.split("/"), n = 0, a = e.length; n < a; n++) {
+    var o = J.normalize(J.join(r, e.slice(n, a).join(J.sep)));
+    if (o.indexOf(r) === 0)
+      return o;
   }
-  return void 0;
+  return J.normalize(J.join(r, J.basename(t)));
 };
-Utils$5.sanitize = function(prefix, name) {
-  prefix = pth$2.resolve(pth$2.normalize(prefix));
-  var parts = name.split("/");
-  for (var i = 0, l = parts.length; i < l; i++) {
-    var path2 = pth$2.normalize(pth$2.join(prefix, parts.slice(i, l).join(pth$2.sep)));
-    if (path2.indexOf(prefix) === 0) {
-      return path2;
-    }
-  }
-  return pth$2.normalize(pth$2.join(prefix, pth$2.basename(name)));
+G.toBuffer = function(t, e) {
+  return Buffer.isBuffer(t) ? t : t instanceof Uint8Array ? Buffer.from(t) : typeof t == "string" ? e(t) : Buffer.alloc(0);
 };
-Utils$5.toBuffer = function toBuffer(input, encoder) {
-  if (Buffer.isBuffer(input)) {
-    return input;
-  } else if (input instanceof Uint8Array) {
-    return Buffer.from(input);
-  } else {
-    return typeof input === "string" ? encoder(input) : Buffer.alloc(0);
-  }
+G.readBigUInt64LE = function(r, t) {
+  var e = Buffer.from(r.slice(t, t + 8));
+  return e.swap64(), parseInt(`0x${e.toString("hex")}`);
 };
-Utils$5.readBigUInt64LE = function(buffer, index) {
-  var slice = Buffer.from(buffer.slice(index, index + 8));
-  slice.swap64();
-  return parseInt(`0x${slice.toString("hex")}`);
+G.fromDOS2Date = function(r) {
+  return new Date((r >> 25 & 127) + 1980, Math.max((r >> 21 & 15) - 1, 0), Math.max(r >> 16 & 31, 1), r >> 11 & 31, r >> 5 & 63, (r & 31) << 1);
 };
-Utils$5.fromDOS2Date = function(val) {
-  return new Date((val >> 25 & 127) + 1980, Math.max((val >> 21 & 15) - 1, 0), Math.max(val >> 16 & 31, 1), val >> 11 & 31, val >> 5 & 63, (val & 31) << 1);
+G.fromDate2DOS = function(r) {
+  let t = 0, e = 0;
+  return r.getFullYear() > 1979 && (t = (r.getFullYear() - 1980 & 127) << 9 | r.getMonth() + 1 << 5 | r.getDate(), e = r.getHours() << 11 | r.getMinutes() << 5 | r.getSeconds() >> 1), t << 16 | e;
 };
-Utils$5.fromDate2DOS = function(val) {
-  let date = 0;
-  let time = 0;
-  if (val.getFullYear() > 1979) {
-    date = (val.getFullYear() - 1980 & 127) << 9 | val.getMonth() + 1 << 5 | val.getDate();
-    time = val.getHours() << 11 | val.getMinutes() << 5 | val.getSeconds() >> 1;
-  }
-  return date << 16 | time;
-};
-Utils$5.isWin = isWin;
-Utils$5.crcTable = crcTable;
-const pth$1 = path$1;
-var fattr = function(path2, { fs: fs2 }) {
-  var _path = path2 || "", _obj = newAttr(), _stat = null;
-  function newAttr() {
+G.isWin = br;
+G.crcTable = Lt;
+const kr = ne;
+var Or = function(r, { fs: t }) {
+  var e = r || "", n = o(), a = null;
+  function o() {
     return {
-      directory: false,
-      readonly: false,
-      hidden: false,
-      executable: false,
+      directory: !1,
+      readonly: !1,
+      hidden: !1,
+      executable: !1,
       mtime: 0,
       atime: 0
     };
   }
-  if (_path && fs2.existsSync(_path)) {
-    _stat = fs2.statSync(_path);
-    _obj.directory = _stat.isDirectory();
-    _obj.mtime = _stat.mtime;
-    _obj.atime = _stat.atime;
-    _obj.executable = (73 & _stat.mode) !== 0;
-    _obj.readonly = (128 & _stat.mode) === 0;
-    _obj.hidden = pth$1.basename(_path)[0] === ".";
-  } else {
-    console.warn("Invalid path: " + _path);
-  }
-  return {
+  return e && t.existsSync(e) ? (a = t.statSync(e), n.directory = a.isDirectory(), n.mtime = a.mtime, n.atime = a.atime, n.executable = (73 & a.mode) !== 0, n.readonly = (128 & a.mode) === 0, n.hidden = kr.basename(e)[0] === ".") : console.warn("Invalid path: " + e), {
     get directory() {
-      return _obj.directory;
+      return n.directory;
     },
     get readOnly() {
-      return _obj.readonly;
+      return n.readonly;
     },
     get hidden() {
-      return _obj.hidden;
+      return n.hidden;
     },
     get mtime() {
-      return _obj.mtime;
+      return n.mtime;
     },
     get atime() {
-      return _obj.atime;
+      return n.atime;
     },
     get executable() {
-      return _obj.executable;
+      return n.executable;
     },
     decodeAttributes: function() {
     },
@@ -4229,372 +3801,282 @@ var fattr = function(path2, { fs: fs2 }) {
     },
     toJSON: function() {
       return {
-        path: _path,
-        isDirectory: _obj.directory,
-        isReadOnly: _obj.readonly,
-        isHidden: _obj.hidden,
-        isExecutable: _obj.executable,
-        mTime: _obj.mtime,
-        aTime: _obj.atime
+        path: e,
+        isDirectory: n.directory,
+        isReadOnly: n.readonly,
+        isHidden: n.hidden,
+        isExecutable: n.executable,
+        mTime: n.mtime,
+        aTime: n.atime
       };
     },
     toString: function() {
       return JSON.stringify(this.toJSON(), null, "	");
     }
   };
+}, $r = {
+  efs: !0,
+  encode: (r) => Buffer.from(r, "utf8"),
+  decode: (r) => r.toString("utf8")
 };
-var decoder = {
-  efs: true,
-  encode: (data) => Buffer.from(data, "utf8"),
-  decode: (data) => data.toString("utf8")
-};
-util.exports = utils;
-util.exports.Constants = constants;
-util.exports.Errors = errors;
-util.exports.FileAttr = fattr;
-util.exports.decoder = decoder;
-var utilExports = util.exports;
-var headers = {};
-var Utils$4 = utilExports, Constants$2 = Utils$4.Constants;
-var entryHeader = function() {
-  var _verMade = 20, _version = 10, _flags = 0, _method = 0, _time = 0, _crc = 0, _compressedSize = 0, _size = 0, _fnameLen = 0, _extraLen = 0, _comLen = 0, _diskStart = 0, _inattr = 0, _attr = 0, _offset = 0;
-  _verMade |= Utils$4.isWin ? 2560 : 768;
-  _flags |= Constants$2.FLG_EFS;
-  const _localHeader = {
+ye.exports = xr;
+ye.exports.Constants = Nt;
+ye.exports.Errors = Ne;
+ye.exports.FileAttr = Or;
+ye.exports.decoder = $r;
+var Se = ye.exports, Le = {}, le = Se, A = le.Constants, Rr = function() {
+  var r = 20, t = 10, e = 0, n = 0, a = 0, o = 0, c = 0, i = 0, l = 0, I = 0, w = 0, E = 0, C = 0, p = 0, g = 0;
+  r |= le.isWin ? 2560 : 768, e |= A.FLG_EFS;
+  const f = {
     extraLen: 0
-  };
-  const uint32 = (val) => Math.max(0, val) >>> 0;
-  const uint8 = (val) => Math.max(0, val) & 255;
-  _time = Utils$4.fromDate2DOS(/* @__PURE__ */ new Date());
-  return {
+  }, m = (s) => Math.max(0, s) >>> 0, u = (s) => Math.max(0, s) & 255;
+  return a = le.fromDate2DOS(/* @__PURE__ */ new Date()), {
     get made() {
-      return _verMade;
+      return r;
     },
-    set made(val) {
-      _verMade = val;
+    set made(s) {
+      r = s;
     },
     get version() {
-      return _version;
+      return t;
     },
-    set version(val) {
-      _version = val;
+    set version(s) {
+      t = s;
     },
     get flags() {
-      return _flags;
+      return e;
     },
-    set flags(val) {
-      _flags = val;
+    set flags(s) {
+      e = s;
     },
     get flags_efs() {
-      return (_flags & Constants$2.FLG_EFS) > 0;
+      return (e & A.FLG_EFS) > 0;
     },
-    set flags_efs(val) {
-      if (val) {
-        _flags |= Constants$2.FLG_EFS;
-      } else {
-        _flags &= ~Constants$2.FLG_EFS;
-      }
+    set flags_efs(s) {
+      s ? e |= A.FLG_EFS : e &= ~A.FLG_EFS;
     },
     get flags_desc() {
-      return (_flags & Constants$2.FLG_DESC) > 0;
+      return (e & A.FLG_DESC) > 0;
     },
-    set flags_desc(val) {
-      if (val) {
-        _flags |= Constants$2.FLG_DESC;
-      } else {
-        _flags &= ~Constants$2.FLG_DESC;
-      }
+    set flags_desc(s) {
+      s ? e |= A.FLG_DESC : e &= ~A.FLG_DESC;
     },
     get method() {
-      return _method;
+      return n;
     },
-    set method(val) {
-      switch (val) {
-        case Constants$2.STORED:
+    set method(s) {
+      switch (s) {
+        case A.STORED:
           this.version = 10;
-        case Constants$2.DEFLATED:
+        case A.DEFLATED:
         default:
           this.version = 20;
       }
-      _method = val;
+      n = s;
     },
     get time() {
-      return Utils$4.fromDOS2Date(this.timeval);
+      return le.fromDOS2Date(this.timeval);
     },
-    set time(val) {
-      this.timeval = Utils$4.fromDate2DOS(val);
+    set time(s) {
+      this.timeval = le.fromDate2DOS(s);
     },
     get timeval() {
-      return _time;
+      return a;
     },
-    set timeval(val) {
-      _time = uint32(val);
+    set timeval(s) {
+      a = m(s);
     },
     get timeHighByte() {
-      return uint8(_time >>> 8);
+      return u(a >>> 8);
     },
     get crc() {
-      return _crc;
+      return o;
     },
-    set crc(val) {
-      _crc = uint32(val);
+    set crc(s) {
+      o = m(s);
     },
     get compressedSize() {
-      return _compressedSize;
+      return c;
     },
-    set compressedSize(val) {
-      _compressedSize = uint32(val);
+    set compressedSize(s) {
+      c = m(s);
     },
     get size() {
-      return _size;
+      return i;
     },
-    set size(val) {
-      _size = uint32(val);
+    set size(s) {
+      i = m(s);
     },
     get fileNameLength() {
-      return _fnameLen;
+      return l;
     },
-    set fileNameLength(val) {
-      _fnameLen = val;
+    set fileNameLength(s) {
+      l = s;
     },
     get extraLength() {
-      return _extraLen;
+      return I;
     },
-    set extraLength(val) {
-      _extraLen = val;
+    set extraLength(s) {
+      I = s;
     },
     get extraLocalLength() {
-      return _localHeader.extraLen;
+      return f.extraLen;
     },
-    set extraLocalLength(val) {
-      _localHeader.extraLen = val;
+    set extraLocalLength(s) {
+      f.extraLen = s;
     },
     get commentLength() {
-      return _comLen;
+      return w;
     },
-    set commentLength(val) {
-      _comLen = val;
+    set commentLength(s) {
+      w = s;
     },
     get diskNumStart() {
-      return _diskStart;
+      return E;
     },
-    set diskNumStart(val) {
-      _diskStart = uint32(val);
+    set diskNumStart(s) {
+      E = m(s);
     },
     get inAttr() {
-      return _inattr;
+      return C;
     },
-    set inAttr(val) {
-      _inattr = uint32(val);
+    set inAttr(s) {
+      C = m(s);
     },
     get attr() {
-      return _attr;
+      return p;
     },
-    set attr(val) {
-      _attr = uint32(val);
+    set attr(s) {
+      p = m(s);
     },
     // get Unix file permissions
     get fileAttr() {
-      return (_attr || 0) >> 16 & 4095;
+      return (p || 0) >> 16 & 4095;
     },
     get offset() {
-      return _offset;
+      return g;
     },
-    set offset(val) {
-      _offset = uint32(val);
+    set offset(s) {
+      g = m(s);
     },
     get encrypted() {
-      return (_flags & Constants$2.FLG_ENC) === Constants$2.FLG_ENC;
+      return (e & A.FLG_ENC) === A.FLG_ENC;
     },
     get centralHeaderSize() {
-      return Constants$2.CENHDR + _fnameLen + _extraLen + _comLen;
+      return A.CENHDR + l + I + w;
     },
     get realDataOffset() {
-      return _offset + Constants$2.LOCHDR + _localHeader.fnameLen + _localHeader.extraLen;
+      return g + A.LOCHDR + f.fnameLen + f.extraLen;
     },
     get localHeader() {
-      return _localHeader;
+      return f;
     },
-    loadLocalHeaderFromBinary: function(input) {
-      var data = input.slice(_offset, _offset + Constants$2.LOCHDR);
-      if (data.readUInt32LE(0) !== Constants$2.LOCSIG) {
-        throw Utils$4.Errors.INVALID_LOC();
-      }
-      _localHeader.version = data.readUInt16LE(Constants$2.LOCVER);
-      _localHeader.flags = data.readUInt16LE(Constants$2.LOCFLG);
-      _localHeader.method = data.readUInt16LE(Constants$2.LOCHOW);
-      _localHeader.time = data.readUInt32LE(Constants$2.LOCTIM);
-      _localHeader.crc = data.readUInt32LE(Constants$2.LOCCRC);
-      _localHeader.compressedSize = data.readUInt32LE(Constants$2.LOCSIZ);
-      _localHeader.size = data.readUInt32LE(Constants$2.LOCLEN);
-      _localHeader.fnameLen = data.readUInt16LE(Constants$2.LOCNAM);
-      _localHeader.extraLen = data.readUInt16LE(Constants$2.LOCEXT);
-      const extraStart = _offset + Constants$2.LOCHDR + _localHeader.fnameLen;
-      const extraEnd = extraStart + _localHeader.extraLen;
-      return input.slice(extraStart, extraEnd);
+    loadLocalHeaderFromBinary: function(s) {
+      var d = s.slice(g, g + A.LOCHDR);
+      if (d.readUInt32LE(0) !== A.LOCSIG)
+        throw le.Errors.INVALID_LOC();
+      f.version = d.readUInt16LE(A.LOCVER), f.flags = d.readUInt16LE(A.LOCFLG), f.method = d.readUInt16LE(A.LOCHOW), f.time = d.readUInt32LE(A.LOCTIM), f.crc = d.readUInt32LE(A.LOCCRC), f.compressedSize = d.readUInt32LE(A.LOCSIZ), f.size = d.readUInt32LE(A.LOCLEN), f.fnameLen = d.readUInt16LE(A.LOCNAM), f.extraLen = d.readUInt16LE(A.LOCEXT);
+      const y = g + A.LOCHDR + f.fnameLen, v = y + f.extraLen;
+      return s.slice(y, v);
     },
-    loadFromBinary: function(data) {
-      if (data.length !== Constants$2.CENHDR || data.readUInt32LE(0) !== Constants$2.CENSIG) {
-        throw Utils$4.Errors.INVALID_CEN();
-      }
-      _verMade = data.readUInt16LE(Constants$2.CENVEM);
-      _version = data.readUInt16LE(Constants$2.CENVER);
-      _flags = data.readUInt16LE(Constants$2.CENFLG);
-      _method = data.readUInt16LE(Constants$2.CENHOW);
-      _time = data.readUInt32LE(Constants$2.CENTIM);
-      _crc = data.readUInt32LE(Constants$2.CENCRC);
-      _compressedSize = data.readUInt32LE(Constants$2.CENSIZ);
-      _size = data.readUInt32LE(Constants$2.CENLEN);
-      _fnameLen = data.readUInt16LE(Constants$2.CENNAM);
-      _extraLen = data.readUInt16LE(Constants$2.CENEXT);
-      _comLen = data.readUInt16LE(Constants$2.CENCOM);
-      _diskStart = data.readUInt16LE(Constants$2.CENDSK);
-      _inattr = data.readUInt16LE(Constants$2.CENATT);
-      _attr = data.readUInt32LE(Constants$2.CENATX);
-      _offset = data.readUInt32LE(Constants$2.CENOFF);
+    loadFromBinary: function(s) {
+      if (s.length !== A.CENHDR || s.readUInt32LE(0) !== A.CENSIG)
+        throw le.Errors.INVALID_CEN();
+      r = s.readUInt16LE(A.CENVEM), t = s.readUInt16LE(A.CENVER), e = s.readUInt16LE(A.CENFLG), n = s.readUInt16LE(A.CENHOW), a = s.readUInt32LE(A.CENTIM), o = s.readUInt32LE(A.CENCRC), c = s.readUInt32LE(A.CENSIZ), i = s.readUInt32LE(A.CENLEN), l = s.readUInt16LE(A.CENNAM), I = s.readUInt16LE(A.CENEXT), w = s.readUInt16LE(A.CENCOM), E = s.readUInt16LE(A.CENDSK), C = s.readUInt16LE(A.CENATT), p = s.readUInt32LE(A.CENATX), g = s.readUInt32LE(A.CENOFF);
     },
     localHeaderToBinary: function() {
-      var data = Buffer.alloc(Constants$2.LOCHDR);
-      data.writeUInt32LE(Constants$2.LOCSIG, 0);
-      data.writeUInt16LE(_version, Constants$2.LOCVER);
-      data.writeUInt16LE(_flags, Constants$2.LOCFLG);
-      data.writeUInt16LE(_method, Constants$2.LOCHOW);
-      data.writeUInt32LE(_time, Constants$2.LOCTIM);
-      data.writeUInt32LE(_crc, Constants$2.LOCCRC);
-      data.writeUInt32LE(_compressedSize, Constants$2.LOCSIZ);
-      data.writeUInt32LE(_size, Constants$2.LOCLEN);
-      data.writeUInt16LE(_fnameLen, Constants$2.LOCNAM);
-      data.writeUInt16LE(_localHeader.extraLen, Constants$2.LOCEXT);
-      return data;
+      var s = Buffer.alloc(A.LOCHDR);
+      return s.writeUInt32LE(A.LOCSIG, 0), s.writeUInt16LE(t, A.LOCVER), s.writeUInt16LE(e, A.LOCFLG), s.writeUInt16LE(n, A.LOCHOW), s.writeUInt32LE(a, A.LOCTIM), s.writeUInt32LE(o, A.LOCCRC), s.writeUInt32LE(c, A.LOCSIZ), s.writeUInt32LE(i, A.LOCLEN), s.writeUInt16LE(l, A.LOCNAM), s.writeUInt16LE(f.extraLen, A.LOCEXT), s;
     },
     centralHeaderToBinary: function() {
-      var data = Buffer.alloc(Constants$2.CENHDR + _fnameLen + _extraLen + _comLen);
-      data.writeUInt32LE(Constants$2.CENSIG, 0);
-      data.writeUInt16LE(_verMade, Constants$2.CENVEM);
-      data.writeUInt16LE(_version, Constants$2.CENVER);
-      data.writeUInt16LE(_flags, Constants$2.CENFLG);
-      data.writeUInt16LE(_method, Constants$2.CENHOW);
-      data.writeUInt32LE(_time, Constants$2.CENTIM);
-      data.writeUInt32LE(_crc, Constants$2.CENCRC);
-      data.writeUInt32LE(_compressedSize, Constants$2.CENSIZ);
-      data.writeUInt32LE(_size, Constants$2.CENLEN);
-      data.writeUInt16LE(_fnameLen, Constants$2.CENNAM);
-      data.writeUInt16LE(_extraLen, Constants$2.CENEXT);
-      data.writeUInt16LE(_comLen, Constants$2.CENCOM);
-      data.writeUInt16LE(_diskStart, Constants$2.CENDSK);
-      data.writeUInt16LE(_inattr, Constants$2.CENATT);
-      data.writeUInt32LE(_attr, Constants$2.CENATX);
-      data.writeUInt32LE(_offset, Constants$2.CENOFF);
-      return data;
+      var s = Buffer.alloc(A.CENHDR + l + I + w);
+      return s.writeUInt32LE(A.CENSIG, 0), s.writeUInt16LE(r, A.CENVEM), s.writeUInt16LE(t, A.CENVER), s.writeUInt16LE(e, A.CENFLG), s.writeUInt16LE(n, A.CENHOW), s.writeUInt32LE(a, A.CENTIM), s.writeUInt32LE(o, A.CENCRC), s.writeUInt32LE(c, A.CENSIZ), s.writeUInt32LE(i, A.CENLEN), s.writeUInt16LE(l, A.CENNAM), s.writeUInt16LE(I, A.CENEXT), s.writeUInt16LE(w, A.CENCOM), s.writeUInt16LE(E, A.CENDSK), s.writeUInt16LE(C, A.CENATT), s.writeUInt32LE(p, A.CENATX), s.writeUInt32LE(g, A.CENOFF), s;
     },
     toJSON: function() {
-      const bytes = function(nr) {
-        return nr + " bytes";
+      const s = function(d) {
+        return d + " bytes";
       };
       return {
-        made: _verMade,
-        version: _version,
-        flags: _flags,
-        method: Utils$4.methodToString(_method),
+        made: r,
+        version: t,
+        flags: e,
+        method: le.methodToString(n),
         time: this.time,
-        crc: "0x" + _crc.toString(16).toUpperCase(),
-        compressedSize: bytes(_compressedSize),
-        size: bytes(_size),
-        fileNameLength: bytes(_fnameLen),
-        extraLength: bytes(_extraLen),
-        commentLength: bytes(_comLen),
-        diskNumStart: _diskStart,
-        inAttr: _inattr,
-        attr: _attr,
-        offset: _offset,
-        centralHeaderSize: bytes(Constants$2.CENHDR + _fnameLen + _extraLen + _comLen)
+        crc: "0x" + o.toString(16).toUpperCase(),
+        compressedSize: s(c),
+        size: s(i),
+        fileNameLength: s(l),
+        extraLength: s(I),
+        commentLength: s(w),
+        diskNumStart: E,
+        inAttr: C,
+        attr: p,
+        offset: g,
+        centralHeaderSize: s(A.CENHDR + l + I + w)
       };
     },
     toString: function() {
       return JSON.stringify(this.toJSON(), null, "	");
     }
   };
-};
-var Utils$3 = utilExports, Constants$1 = Utils$3.Constants;
-var mainHeader = function() {
-  var _volumeEntries = 0, _totalEntries = 0, _size = 0, _offset = 0, _commentLength = 0;
+}, he = Se, H = he.Constants, Fr = function() {
+  var r = 0, t = 0, e = 0, n = 0, a = 0;
   return {
     get diskEntries() {
-      return _volumeEntries;
+      return r;
     },
-    set diskEntries(val) {
-      _volumeEntries = _totalEntries = val;
+    set diskEntries(o) {
+      r = t = o;
     },
     get totalEntries() {
-      return _totalEntries;
+      return t;
     },
-    set totalEntries(val) {
-      _totalEntries = _volumeEntries = val;
+    set totalEntries(o) {
+      t = r = o;
     },
     get size() {
-      return _size;
+      return e;
     },
-    set size(val) {
-      _size = val;
+    set size(o) {
+      e = o;
     },
     get offset() {
-      return _offset;
+      return n;
     },
-    set offset(val) {
-      _offset = val;
+    set offset(o) {
+      n = o;
     },
     get commentLength() {
-      return _commentLength;
+      return a;
     },
-    set commentLength(val) {
-      _commentLength = val;
+    set commentLength(o) {
+      a = o;
     },
     get mainHeaderSize() {
-      return Constants$1.ENDHDR + _commentLength;
+      return H.ENDHDR + a;
     },
-    loadFromBinary: function(data) {
-      if ((data.length !== Constants$1.ENDHDR || data.readUInt32LE(0) !== Constants$1.ENDSIG) && (data.length < Constants$1.ZIP64HDR || data.readUInt32LE(0) !== Constants$1.ZIP64SIG)) {
-        throw Utils$3.Errors.INVALID_END();
-      }
-      if (data.readUInt32LE(0) === Constants$1.ENDSIG) {
-        _volumeEntries = data.readUInt16LE(Constants$1.ENDSUB);
-        _totalEntries = data.readUInt16LE(Constants$1.ENDTOT);
-        _size = data.readUInt32LE(Constants$1.ENDSIZ);
-        _offset = data.readUInt32LE(Constants$1.ENDOFF);
-        _commentLength = data.readUInt16LE(Constants$1.ENDCOM);
-      } else {
-        _volumeEntries = Utils$3.readBigUInt64LE(data, Constants$1.ZIP64SUB);
-        _totalEntries = Utils$3.readBigUInt64LE(data, Constants$1.ZIP64TOT);
-        _size = Utils$3.readBigUInt64LE(data, Constants$1.ZIP64SIZE);
-        _offset = Utils$3.readBigUInt64LE(data, Constants$1.ZIP64OFF);
-        _commentLength = 0;
-      }
+    loadFromBinary: function(o) {
+      if ((o.length !== H.ENDHDR || o.readUInt32LE(0) !== H.ENDSIG) && (o.length < H.ZIP64HDR || o.readUInt32LE(0) !== H.ZIP64SIG))
+        throw he.Errors.INVALID_END();
+      o.readUInt32LE(0) === H.ENDSIG ? (r = o.readUInt16LE(H.ENDSUB), t = o.readUInt16LE(H.ENDTOT), e = o.readUInt32LE(H.ENDSIZ), n = o.readUInt32LE(H.ENDOFF), a = o.readUInt16LE(H.ENDCOM)) : (r = he.readBigUInt64LE(o, H.ZIP64SUB), t = he.readBigUInt64LE(o, H.ZIP64TOT), e = he.readBigUInt64LE(o, H.ZIP64SIZE), n = he.readBigUInt64LE(o, H.ZIP64OFF), a = 0);
     },
     toBinary: function() {
-      var b = Buffer.alloc(Constants$1.ENDHDR + _commentLength);
-      b.writeUInt32LE(Constants$1.ENDSIG, 0);
-      b.writeUInt32LE(0, 4);
-      b.writeUInt16LE(_volumeEntries, Constants$1.ENDSUB);
-      b.writeUInt16LE(_totalEntries, Constants$1.ENDTOT);
-      b.writeUInt32LE(_size, Constants$1.ENDSIZ);
-      b.writeUInt32LE(_offset, Constants$1.ENDOFF);
-      b.writeUInt16LE(_commentLength, Constants$1.ENDCOM);
-      b.fill(" ", Constants$1.ENDHDR);
-      return b;
+      var o = Buffer.alloc(H.ENDHDR + a);
+      return o.writeUInt32LE(H.ENDSIG, 0), o.writeUInt32LE(0, 4), o.writeUInt16LE(r, H.ENDSUB), o.writeUInt16LE(t, H.ENDTOT), o.writeUInt32LE(e, H.ENDSIZ), o.writeUInt32LE(n, H.ENDOFF), o.writeUInt16LE(a, H.ENDCOM), o.fill(" ", H.ENDHDR), o;
     },
     toJSON: function() {
-      const offset = function(nr, len) {
-        let offs = nr.toString(16).toUpperCase();
-        while (offs.length < len)
-          offs = "0" + offs;
-        return "0x" + offs;
+      const o = function(c, i) {
+        let l = c.toString(16).toUpperCase();
+        for (; l.length < i; )
+          l = "0" + l;
+        return "0x" + l;
       };
       return {
-        diskEntries: _volumeEntries,
-        totalEntries: _totalEntries,
-        size: _size + " bytes",
-        offset: offset(_offset, 4),
-        commentLength: _commentLength
+        diskEntries: r,
+        totalEntries: t,
+        size: e + " bytes",
+        offset: o(n, 4),
+        commentLength: a
       };
     },
     toString: function() {
@@ -4602,503 +4084,313 @@ var mainHeader = function() {
     }
   };
 };
-headers.EntryHeader = entryHeader;
-headers.MainHeader = mainHeader;
-var methods = {};
-var deflater = function(inbuf) {
-  var zlib = require$$0;
-  var opts = { chunkSize: (parseInt(inbuf.length / 1024) + 1) * 1024 };
+Le.EntryHeader = Rr;
+Le.MainHeader = Fr;
+var Pe = {}, Ur = function(r) {
+  var t = It, e = { chunkSize: (parseInt(r.length / 1024) + 1) * 1024 };
   return {
     deflate: function() {
-      return zlib.deflateRawSync(inbuf, opts);
+      return t.deflateRawSync(r, e);
     },
-    deflateAsync: function(callback) {
-      var tmp = zlib.createDeflateRaw(opts), parts = [], total = 0;
-      tmp.on("data", function(data) {
-        parts.push(data);
-        total += data.length;
-      });
-      tmp.on("end", function() {
-        var buf = Buffer.alloc(total), written = 0;
-        buf.fill(0);
-        for (var i = 0; i < parts.length; i++) {
-          var part = parts[i];
-          part.copy(buf, written);
-          written += part.length;
+    deflateAsync: function(n) {
+      var a = t.createDeflateRaw(e), o = [], c = 0;
+      a.on("data", function(i) {
+        o.push(i), c += i.length;
+      }), a.on("end", function() {
+        var i = Buffer.alloc(c), l = 0;
+        i.fill(0);
+        for (var I = 0; I < o.length; I++) {
+          var w = o[I];
+          w.copy(i, l), l += w.length;
         }
-        callback && callback(buf);
-      });
-      tmp.end(inbuf);
+        n && n(i);
+      }), a.end(r);
     }
   };
 };
-const version = +(process.versions ? process.versions.node : "").split(".")[0] || 0;
-var inflater = function(inbuf, expectedLength) {
-  var zlib = require$$0;
-  const option = version >= 15 && expectedLength > 0 ? { maxOutputLength: expectedLength } : {};
+const Br = +(process.versions ? process.versions.node : "").split(".")[0] || 0;
+var zr = function(r, t) {
+  var e = It;
+  const n = Br >= 15 && t > 0 ? { maxOutputLength: t } : {};
   return {
     inflate: function() {
-      return zlib.inflateRawSync(inbuf, option);
+      return e.inflateRawSync(r, n);
     },
-    inflateAsync: function(callback) {
-      var tmp = zlib.createInflateRaw(option), parts = [], total = 0;
-      tmp.on("data", function(data) {
-        parts.push(data);
-        total += data.length;
-      });
-      tmp.on("end", function() {
-        var buf = Buffer.alloc(total), written = 0;
-        buf.fill(0);
-        for (var i = 0; i < parts.length; i++) {
-          var part = parts[i];
-          part.copy(buf, written);
-          written += part.length;
+    inflateAsync: function(a) {
+      var o = e.createInflateRaw(n), c = [], i = 0;
+      o.on("data", function(l) {
+        c.push(l), i += l.length;
+      }), o.on("end", function() {
+        var l = Buffer.alloc(i), I = 0;
+        l.fill(0);
+        for (var w = 0; w < c.length; w++) {
+          var E = c[w];
+          E.copy(l, I), I += E.length;
         }
-        callback && callback(buf);
-      });
-      tmp.end(inbuf);
+        a && a(l);
+      }), o.end(r);
     }
   };
 };
-const { randomFillSync } = crypto;
-const Errors = errors;
-const crctable = new Uint32Array(256).map((t, crc) => {
-  for (let j = 0; j < 8; j++) {
-    if (0 !== (crc & 1)) {
-      crc = crc >>> 1 ^ 3988292384;
-    } else {
-      crc >>>= 1;
-    }
-  }
-  return crc >>> 0;
-});
-const uMul = (a, b) => Math.imul(a, b) >>> 0;
-const crc32update = (pCrc32, bval) => {
-  return crctable[(pCrc32 ^ bval) & 255] ^ pCrc32 >>> 8;
+const { randomFillSync: ut } = fe, jr = Ne, Hr = new Uint32Array(256).map((r, t) => {
+  for (let e = 0; e < 8; e++)
+    t & 1 ? t = t >>> 1 ^ 3988292384 : t >>>= 1;
+  return t >>> 0;
+}), Pt = (r, t) => Math.imul(r, t) >>> 0, mt = (r, t) => Hr[(r ^ t) & 255] ^ r >>> 8, Ie = () => typeof ut == "function" ? ut(Buffer.alloc(12)) : Ie.node();
+Ie.node = () => {
+  const r = Buffer.alloc(12), t = r.length;
+  for (let e = 0; e < t; e++)
+    r[e] = Math.random() * 256 & 255;
+  return r;
 };
-const genSalt = () => {
-  if ("function" === typeof randomFillSync) {
-    return randomFillSync(Buffer.alloc(12));
-  } else {
-    return genSalt.node();
-  }
+const De = {
+  genSalt: Ie
 };
-genSalt.node = () => {
-  const salt = Buffer.alloc(12);
-  const len = salt.length;
-  for (let i = 0; i < len; i++)
-    salt[i] = Math.random() * 256 & 255;
-  return salt;
-};
-const config = {
-  genSalt
-};
-function Initkeys(pw) {
-  const pass = Buffer.isBuffer(pw) ? pw : Buffer.from(pw);
+function Te(r) {
+  const t = Buffer.isBuffer(r) ? r : Buffer.from(r);
   this.keys = new Uint32Array([305419896, 591751049, 878082192]);
-  for (let i = 0; i < pass.length; i++) {
-    this.updateKeys(pass[i]);
-  }
+  for (let e = 0; e < t.length; e++)
+    this.updateKeys(t[e]);
 }
-Initkeys.prototype.updateKeys = function(byteValue) {
-  const keys = this.keys;
-  keys[0] = crc32update(keys[0], byteValue);
-  keys[1] += keys[0] & 255;
-  keys[1] = uMul(keys[1], 134775813) + 1;
-  keys[2] = crc32update(keys[2], keys[1] >>> 24);
-  return byteValue;
+Te.prototype.updateKeys = function(r) {
+  const t = this.keys;
+  return t[0] = mt(t[0], r), t[1] += t[0] & 255, t[1] = Pt(t[1], 134775813) + 1, t[2] = mt(t[2], t[1] >>> 24), r;
 };
-Initkeys.prototype.next = function() {
-  const k = (this.keys[2] | 2) >>> 0;
-  return uMul(k, k ^ 1) >> 8 & 255;
+Te.prototype.next = function() {
+  const r = (this.keys[2] | 2) >>> 0;
+  return Pt(r, r ^ 1) >> 8 & 255;
 };
-function make_decrypter(pwd) {
-  const keys = new Initkeys(pwd);
-  return function(data) {
-    const result = Buffer.alloc(data.length);
-    let pos = 0;
-    for (let c of data) {
-      result[pos++] = keys.updateKeys(c ^ keys.next());
-    }
-    return result;
+function qr(r) {
+  const t = new Te(r);
+  return function(e) {
+    const n = Buffer.alloc(e.length);
+    let a = 0;
+    for (let o of e)
+      n[a++] = t.updateKeys(o ^ t.next());
+    return n;
   };
 }
-function make_encrypter(pwd) {
-  const keys = new Initkeys(pwd);
-  return function(data, result, pos = 0) {
-    if (!result)
-      result = Buffer.alloc(data.length);
-    for (let c of data) {
-      const k = keys.next();
-      result[pos++] = c ^ k;
-      keys.updateKeys(c);
+function Vr(r) {
+  const t = new Te(r);
+  return function(e, n, a = 0) {
+    n || (n = Buffer.alloc(e.length));
+    for (let o of e) {
+      const c = t.next();
+      n[a++] = o ^ c, t.updateKeys(o);
     }
-    return result;
+    return n;
   };
 }
-function decrypt(data, header, pwd) {
-  if (!data || !Buffer.isBuffer(data) || data.length < 12) {
+function Wr(r, t, e) {
+  if (!r || !Buffer.isBuffer(r) || r.length < 12)
     return Buffer.alloc(0);
-  }
-  const decrypter = make_decrypter(pwd);
-  const salt = decrypter(data.slice(0, 12));
-  const verifyByte = (header.flags & 8) === 8 ? header.timeHighByte : header.crc >>> 24;
-  if (salt[11] !== verifyByte) {
-    throw Errors.WRONG_PASSWORD();
-  }
-  return decrypter(data.slice(12));
+  const n = qr(e), a = n(r.slice(0, 12)), o = (t.flags & 8) === 8 ? t.timeHighByte : t.crc >>> 24;
+  if (a[11] !== o)
+    throw jr.WRONG_PASSWORD();
+  return n(r.slice(12));
 }
-function _salter(data) {
-  if (Buffer.isBuffer(data) && data.length >= 12) {
-    config.genSalt = function() {
-      return data.slice(0, 12);
-    };
-  } else if (data === "node") {
-    config.genSalt = genSalt.node;
-  } else {
-    config.genSalt = genSalt;
-  }
+function Gr(r) {
+  Buffer.isBuffer(r) && r.length >= 12 ? De.genSalt = function() {
+    return r.slice(0, 12);
+  } : r === "node" ? De.genSalt = Ie.node : De.genSalt = Ie;
 }
-function encrypt(data, header, pwd, oldlike = false) {
-  if (data == null)
-    data = Buffer.alloc(0);
-  if (!Buffer.isBuffer(data))
-    data = Buffer.from(data.toString());
-  const encrypter = make_encrypter(pwd);
-  const salt = config.genSalt();
-  salt[11] = header.crc >>> 24 & 255;
-  if (oldlike)
-    salt[10] = header.crc >>> 16 & 255;
-  const result = Buffer.alloc(data.length + 12);
-  encrypter(salt, result);
-  return encrypter(data, result, 12);
+function Zr(r, t, e, n = !1) {
+  r == null && (r = Buffer.alloc(0)), Buffer.isBuffer(r) || (r = Buffer.from(r.toString()));
+  const a = Vr(e), o = De.genSalt();
+  o[11] = t.crc >>> 24 & 255, n && (o[10] = t.crc >>> 16 & 255);
+  const c = Buffer.alloc(r.length + 12);
+  return a(o, c), a(r, c, 12);
 }
-var zipcrypto = { decrypt, encrypt, _salter };
-methods.Deflater = deflater;
-methods.Inflater = inflater;
-methods.ZipCrypto = zipcrypto;
-var Utils$2 = utilExports, Headers$1 = headers, Constants = Utils$2.Constants, Methods = methods;
-var zipEntry = function(options, input) {
-  var _centralHeader = new Headers$1.EntryHeader(), _entryName = Buffer.alloc(0), _comment = Buffer.alloc(0), _isDirectory = false, uncompressedData = null, _extra = Buffer.alloc(0), _extralocal = Buffer.alloc(0), _efs = true;
-  const opts = options;
-  const decoder2 = typeof opts.decoder === "object" ? opts.decoder : Utils$2.decoder;
-  _efs = decoder2.hasOwnProperty("efs") ? decoder2.efs : false;
-  function getCompressedDataFromZip() {
-    if (!input || !(input instanceof Uint8Array)) {
-      return Buffer.alloc(0);
-    }
-    _extralocal = _centralHeader.loadLocalHeaderFromBinary(input);
-    return input.slice(_centralHeader.realDataOffset, _centralHeader.realDataOffset + _centralHeader.compressedSize);
+var Jr = { decrypt: Wr, encrypt: Zr, _salter: Gr };
+Pe.Deflater = Ur;
+Pe.Inflater = zr;
+Pe.ZipCrypto = Jr;
+var U = Se, Kr = Le, V = U.Constants, ze = Pe, Tt = function(r, t) {
+  var e = new Kr.EntryHeader(), n = Buffer.alloc(0), a = Buffer.alloc(0), o = !1, c = null, i = Buffer.alloc(0), l = Buffer.alloc(0), I = !0;
+  const w = r, E = typeof w.decoder == "object" ? w.decoder : U.decoder;
+  I = E.hasOwnProperty("efs") ? E.efs : !1;
+  function C() {
+    return !t || !(t instanceof Uint8Array) ? Buffer.alloc(0) : (l = e.loadLocalHeaderFromBinary(t), t.slice(e.realDataOffset, e.realDataOffset + e.compressedSize));
   }
-  function crc32OK(data) {
-    if (!_centralHeader.flags_desc) {
-      if (Utils$2.crc32(data) !== _centralHeader.localHeader.crc) {
-        return false;
-      }
-    } else {
-      const descriptor = {};
-      const dataEndOffset = _centralHeader.realDataOffset + _centralHeader.compressedSize;
-      if (input.readUInt32LE(dataEndOffset) == Constants.LOCSIG || input.readUInt32LE(dataEndOffset) == Constants.CENSIG) {
-        throw Utils$2.Errors.DESCRIPTOR_NOT_EXIST();
-      }
-      if (input.readUInt32LE(dataEndOffset) == Constants.EXTSIG) {
-        descriptor.crc = input.readUInt32LE(dataEndOffset + Constants.EXTCRC);
-        descriptor.compressedSize = input.readUInt32LE(dataEndOffset + Constants.EXTSIZ);
-        descriptor.size = input.readUInt32LE(dataEndOffset + Constants.EXTLEN);
-      } else if (input.readUInt16LE(dataEndOffset + 12) === 19280) {
-        descriptor.crc = input.readUInt32LE(dataEndOffset + Constants.EXTCRC - 4);
-        descriptor.compressedSize = input.readUInt32LE(dataEndOffset + Constants.EXTSIZ - 4);
-        descriptor.size = input.readUInt32LE(dataEndOffset + Constants.EXTLEN - 4);
-      } else {
-        throw Utils$2.Errors.DESCRIPTOR_UNKNOWN();
-      }
-      if (descriptor.compressedSize !== _centralHeader.compressedSize || descriptor.size !== _centralHeader.size || descriptor.crc !== _centralHeader.crc) {
-        throw Utils$2.Errors.DESCRIPTOR_FAULTY();
-      }
-      if (Utils$2.crc32(data) !== descriptor.crc) {
-        return false;
-      }
-    }
-    return true;
+  function p(d) {
+    if (e.flags_desc) {
+      const y = {}, v = e.realDataOffset + e.compressedSize;
+      if (t.readUInt32LE(v) == V.LOCSIG || t.readUInt32LE(v) == V.CENSIG)
+        throw U.Errors.DESCRIPTOR_NOT_EXIST();
+      if (t.readUInt32LE(v) == V.EXTSIG)
+        y.crc = t.readUInt32LE(v + V.EXTCRC), y.compressedSize = t.readUInt32LE(v + V.EXTSIZ), y.size = t.readUInt32LE(v + V.EXTLEN);
+      else if (t.readUInt16LE(v + 12) === 19280)
+        y.crc = t.readUInt32LE(v + V.EXTCRC - 4), y.compressedSize = t.readUInt32LE(v + V.EXTSIZ - 4), y.size = t.readUInt32LE(v + V.EXTLEN - 4);
+      else
+        throw U.Errors.DESCRIPTOR_UNKNOWN();
+      if (y.compressedSize !== e.compressedSize || y.size !== e.size || y.crc !== e.crc)
+        throw U.Errors.DESCRIPTOR_FAULTY();
+      if (U.crc32(d) !== y.crc)
+        return !1;
+    } else if (U.crc32(d) !== e.localHeader.crc)
+      return !1;
+    return !0;
   }
-  function decompress(async, callback, pass) {
-    if (typeof callback === "undefined" && typeof async === "string") {
-      pass = async;
-      async = void 0;
+  function g(d, y, v) {
+    if (typeof y > "u" && typeof d == "string" && (v = d, d = void 0), o)
+      return d && y && y(Buffer.alloc(0), U.Errors.DIRECTORY_CONTENT_ERROR()), Buffer.alloc(0);
+    var _ = C();
+    if (_.length === 0)
+      return d && y && y(_), _;
+    if (e.encrypted) {
+      if (typeof v != "string" && !Buffer.isBuffer(v))
+        throw U.Errors.INVALID_PASS_PARAM();
+      _ = ze.ZipCrypto.decrypt(_, e, v);
     }
-    if (_isDirectory) {
-      if (async && callback) {
-        callback(Buffer.alloc(0), Utils$2.Errors.DIRECTORY_CONTENT_ERROR());
-      }
-      return Buffer.alloc(0);
-    }
-    var compressedData = getCompressedDataFromZip();
-    if (compressedData.length === 0) {
-      if (async && callback)
-        callback(compressedData);
-      return compressedData;
-    }
-    if (_centralHeader.encrypted) {
-      if ("string" !== typeof pass && !Buffer.isBuffer(pass)) {
-        throw Utils$2.Errors.INVALID_PASS_PARAM();
-      }
-      compressedData = Methods.ZipCrypto.decrypt(compressedData, _centralHeader, pass);
-    }
-    var data = Buffer.alloc(_centralHeader.size);
-    switch (_centralHeader.method) {
-      case Utils$2.Constants.STORED:
-        compressedData.copy(data);
-        if (!crc32OK(data)) {
-          if (async && callback)
-            callback(data, Utils$2.Errors.BAD_CRC());
-          throw Utils$2.Errors.BAD_CRC();
-        } else {
-          if (async && callback)
-            callback(data);
-          return data;
-        }
-      case Utils$2.Constants.DEFLATED:
-        var inflater2 = new Methods.Inflater(compressedData, _centralHeader.size);
-        if (!async) {
-          const result = inflater2.inflate(data);
-          result.copy(data, 0);
-          if (!crc32OK(data)) {
-            throw Utils$2.Errors.BAD_CRC(`"${decoder2.decode(_entryName)}"`);
-          }
-          return data;
-        } else {
-          inflater2.inflateAsync(function(result) {
-            result.copy(result, 0);
-            if (callback) {
-              if (!crc32OK(result)) {
-                callback(result, Utils$2.Errors.BAD_CRC());
-              } else {
-                callback(result);
-              }
-            }
+    var D = Buffer.alloc(e.size);
+    switch (e.method) {
+      case U.Constants.STORED:
+        if (_.copy(D), p(D))
+          return d && y && y(D), D;
+        throw d && y && y(D, U.Errors.BAD_CRC()), U.Errors.BAD_CRC();
+      case U.Constants.DEFLATED:
+        var k = new ze.Inflater(_, e.size);
+        if (d)
+          k.inflateAsync(function(P) {
+            P.copy(P, 0), y && (p(P) ? y(P) : y(P, U.Errors.BAD_CRC()));
           });
+        else {
+          if (k.inflate(D).copy(D, 0), !p(D))
+            throw U.Errors.BAD_CRC(`"${E.decode(n)}"`);
+          return D;
         }
         break;
       default:
-        if (async && callback)
-          callback(Buffer.alloc(0), Utils$2.Errors.UNKNOWN_METHOD());
-        throw Utils$2.Errors.UNKNOWN_METHOD();
+        throw d && y && y(Buffer.alloc(0), U.Errors.UNKNOWN_METHOD()), U.Errors.UNKNOWN_METHOD();
     }
   }
-  function compress(async, callback) {
-    if ((!uncompressedData || !uncompressedData.length) && Buffer.isBuffer(input)) {
-      if (async && callback)
-        callback(getCompressedDataFromZip());
-      return getCompressedDataFromZip();
-    }
-    if (uncompressedData.length && !_isDirectory) {
-      var compressedData;
-      switch (_centralHeader.method) {
-        case Utils$2.Constants.STORED:
-          _centralHeader.compressedSize = _centralHeader.size;
-          compressedData = Buffer.alloc(uncompressedData.length);
-          uncompressedData.copy(compressedData);
-          if (async && callback)
-            callback(compressedData);
-          return compressedData;
+  function f(d, y) {
+    if ((!c || !c.length) && Buffer.isBuffer(t))
+      return d && y && y(C()), C();
+    if (c.length && !o) {
+      var v;
+      switch (e.method) {
+        case U.Constants.STORED:
+          return e.compressedSize = e.size, v = Buffer.alloc(c.length), c.copy(v), d && y && y(v), v;
         default:
-        case Utils$2.Constants.DEFLATED:
-          var deflater2 = new Methods.Deflater(uncompressedData);
-          if (!async) {
-            var deflated = deflater2.deflate();
-            _centralHeader.compressedSize = deflated.length;
-            return deflated;
-          } else {
-            deflater2.deflateAsync(function(data) {
-              compressedData = Buffer.alloc(data.length);
-              _centralHeader.compressedSize = data.length;
-              data.copy(compressedData);
-              callback && callback(compressedData);
+        case U.Constants.DEFLATED:
+          var _ = new ze.Deflater(c);
+          if (d)
+            _.deflateAsync(function(k) {
+              v = Buffer.alloc(k.length), e.compressedSize = k.length, k.copy(v), y && y(v);
             });
+          else {
+            var D = _.deflate();
+            return e.compressedSize = D.length, D;
           }
-          deflater2 = null;
+          _ = null;
           break;
       }
-    } else if (async && callback) {
-      callback(Buffer.alloc(0));
-    } else {
+    } else if (d && y)
+      y(Buffer.alloc(0));
+    else
       return Buffer.alloc(0);
-    }
   }
-  function readUInt64LE(buffer, offset) {
-    return (buffer.readUInt32LE(offset + 4) << 4) + buffer.readUInt32LE(offset);
+  function m(d, y) {
+    return (d.readUInt32LE(y + 4) << 4) + d.readUInt32LE(y);
   }
-  function parseExtra(data) {
+  function u(d) {
     try {
-      var offset = 0;
-      var signature, size, part;
-      while (offset + 4 < data.length) {
-        signature = data.readUInt16LE(offset);
-        offset += 2;
-        size = data.readUInt16LE(offset);
-        offset += 2;
-        part = data.slice(offset, offset + size);
-        offset += size;
-        if (Constants.ID_ZIP64 === signature) {
-          parseZip64ExtendedInformation(part);
-        }
-      }
-    } catch (error) {
-      throw Utils$2.Errors.EXTRA_FIELD_PARSE_ERROR();
+      for (var y = 0, v, _, D; y + 4 < d.length; )
+        v = d.readUInt16LE(y), y += 2, _ = d.readUInt16LE(y), y += 2, D = d.slice(y, y + _), y += _, V.ID_ZIP64 === v && s(D);
+    } catch {
+      throw U.Errors.EXTRA_FIELD_PARSE_ERROR();
     }
   }
-  function parseZip64ExtendedInformation(data) {
-    var size, compressedSize, offset, diskNumStart;
-    if (data.length >= Constants.EF_ZIP64_SCOMP) {
-      size = readUInt64LE(data, Constants.EF_ZIP64_SUNCOMP);
-      if (_centralHeader.size === Constants.EF_ZIP64_OR_32) {
-        _centralHeader.size = size;
-      }
-    }
-    if (data.length >= Constants.EF_ZIP64_RHO) {
-      compressedSize = readUInt64LE(data, Constants.EF_ZIP64_SCOMP);
-      if (_centralHeader.compressedSize === Constants.EF_ZIP64_OR_32) {
-        _centralHeader.compressedSize = compressedSize;
-      }
-    }
-    if (data.length >= Constants.EF_ZIP64_DSN) {
-      offset = readUInt64LE(data, Constants.EF_ZIP64_RHO);
-      if (_centralHeader.offset === Constants.EF_ZIP64_OR_32) {
-        _centralHeader.offset = offset;
-      }
-    }
-    if (data.length >= Constants.EF_ZIP64_DSN + 4) {
-      diskNumStart = data.readUInt32LE(Constants.EF_ZIP64_DSN);
-      if (_centralHeader.diskNumStart === Constants.EF_ZIP64_OR_16) {
-        _centralHeader.diskNumStart = diskNumStart;
-      }
-    }
+  function s(d) {
+    var y, v, _, D;
+    d.length >= V.EF_ZIP64_SCOMP && (y = m(d, V.EF_ZIP64_SUNCOMP), e.size === V.EF_ZIP64_OR_32 && (e.size = y)), d.length >= V.EF_ZIP64_RHO && (v = m(d, V.EF_ZIP64_SCOMP), e.compressedSize === V.EF_ZIP64_OR_32 && (e.compressedSize = v)), d.length >= V.EF_ZIP64_DSN && (_ = m(d, V.EF_ZIP64_RHO), e.offset === V.EF_ZIP64_OR_32 && (e.offset = _)), d.length >= V.EF_ZIP64_DSN + 4 && (D = d.readUInt32LE(V.EF_ZIP64_DSN), e.diskNumStart === V.EF_ZIP64_OR_16 && (e.diskNumStart = D));
   }
   return {
     get entryName() {
-      return decoder2.decode(_entryName);
+      return E.decode(n);
     },
     get rawEntryName() {
-      return _entryName;
+      return n;
     },
-    set entryName(val) {
-      _entryName = Utils$2.toBuffer(val, decoder2.encode);
-      var lastChar = _entryName[_entryName.length - 1];
-      _isDirectory = lastChar === 47 || lastChar === 92;
-      _centralHeader.fileNameLength = _entryName.length;
+    set entryName(d) {
+      n = U.toBuffer(d, E.encode);
+      var y = n[n.length - 1];
+      o = y === 47 || y === 92, e.fileNameLength = n.length;
     },
     get efs() {
-      if (typeof _efs === "function") {
-        return _efs(this.entryName);
-      } else {
-        return _efs;
-      }
+      return typeof I == "function" ? I(this.entryName) : I;
     },
     get extra() {
-      return _extra;
+      return i;
     },
-    set extra(val) {
-      _extra = val;
-      _centralHeader.extraLength = val.length;
-      parseExtra(val);
+    set extra(d) {
+      i = d, e.extraLength = d.length, u(d);
     },
     get comment() {
-      return decoder2.decode(_comment);
+      return E.decode(a);
     },
-    set comment(val) {
-      _comment = Utils$2.toBuffer(val, decoder2.encode);
-      _centralHeader.commentLength = _comment.length;
-      if (_comment.length > 65535)
-        throw Utils$2.Errors.COMMENT_TOO_LONG();
+    set comment(d) {
+      if (a = U.toBuffer(d, E.encode), e.commentLength = a.length, a.length > 65535)
+        throw U.Errors.COMMENT_TOO_LONG();
     },
     get name() {
-      var n = decoder2.decode(_entryName);
-      return _isDirectory ? n.substr(n.length - 1).split("/").pop() : n.split("/").pop();
+      var d = E.decode(n);
+      return o ? d.substr(d.length - 1).split("/").pop() : d.split("/").pop();
     },
     get isDirectory() {
-      return _isDirectory;
+      return o;
     },
     getCompressedData: function() {
-      return compress(false, null);
+      return f(!1, null);
     },
-    getCompressedDataAsync: function(callback) {
-      compress(true, callback);
+    getCompressedDataAsync: function(d) {
+      f(!0, d);
     },
-    setData: function(value) {
-      uncompressedData = Utils$2.toBuffer(value, Utils$2.decoder.encode);
-      if (!_isDirectory && uncompressedData.length) {
-        _centralHeader.size = uncompressedData.length;
-        _centralHeader.method = Utils$2.Constants.DEFLATED;
-        _centralHeader.crc = Utils$2.crc32(value);
-        _centralHeader.changed = true;
-      } else {
-        _centralHeader.method = Utils$2.Constants.STORED;
-      }
+    setData: function(d) {
+      c = U.toBuffer(d, U.decoder.encode), !o && c.length ? (e.size = c.length, e.method = U.Constants.DEFLATED, e.crc = U.crc32(d), e.changed = !0) : e.method = U.Constants.STORED;
     },
-    getData: function(pass) {
-      if (_centralHeader.changed) {
-        return uncompressedData;
-      } else {
-        return decompress(false, null, pass);
-      }
+    getData: function(d) {
+      return e.changed ? c : g(!1, null, d);
     },
-    getDataAsync: function(callback, pass) {
-      if (_centralHeader.changed) {
-        callback(uncompressedData);
-      } else {
-        decompress(true, callback, pass);
-      }
+    getDataAsync: function(d, y) {
+      e.changed ? d(c) : g(!0, d, y);
     },
-    set attr(attr) {
-      _centralHeader.attr = attr;
+    set attr(d) {
+      e.attr = d;
     },
     get attr() {
-      return _centralHeader.attr;
+      return e.attr;
     },
-    set header(data) {
-      _centralHeader.loadFromBinary(data);
+    set header(d) {
+      e.loadFromBinary(d);
     },
     get header() {
-      return _centralHeader;
+      return e;
     },
     packCentralHeader: function() {
-      _centralHeader.flags_efs = this.efs;
-      _centralHeader.extraLength = _extra.length;
-      var header = _centralHeader.centralHeaderToBinary();
-      var addpos = Utils$2.Constants.CENHDR;
-      _entryName.copy(header, addpos);
-      addpos += _entryName.length;
-      _extra.copy(header, addpos);
-      addpos += _centralHeader.extraLength;
-      _comment.copy(header, addpos);
-      return header;
+      e.flags_efs = this.efs, e.extraLength = i.length;
+      var d = e.centralHeaderToBinary(), y = U.Constants.CENHDR;
+      return n.copy(d, y), y += n.length, i.copy(d, y), y += e.extraLength, a.copy(d, y), d;
     },
     packLocalHeader: function() {
-      let addpos = 0;
-      _centralHeader.flags_efs = this.efs;
-      _centralHeader.extraLocalLength = _extralocal.length;
-      const localHeaderBuf = _centralHeader.localHeaderToBinary();
-      const localHeader = Buffer.alloc(localHeaderBuf.length + _entryName.length + _centralHeader.extraLocalLength);
-      localHeaderBuf.copy(localHeader, addpos);
-      addpos += localHeaderBuf.length;
-      _entryName.copy(localHeader, addpos);
-      addpos += _entryName.length;
-      _extralocal.copy(localHeader, addpos);
-      addpos += _extralocal.length;
-      return localHeader;
+      let d = 0;
+      e.flags_efs = this.efs, e.extraLocalLength = l.length;
+      const y = e.localHeaderToBinary(), v = Buffer.alloc(y.length + n.length + e.extraLocalLength);
+      return y.copy(v, d), d += y.length, n.copy(v, d), d += n.length, l.copy(v, d), d += l.length, v;
     },
     toJSON: function() {
-      const bytes = function(nr) {
-        return "<" + (nr && nr.length + " bytes buffer" || "null") + ">";
+      const d = function(y) {
+        return "<" + (y && y.length + " bytes buffer" || "null") + ">";
       };
       return {
         entryName: this.entryName,
         name: this.name,
         comment: this.comment,
         isDirectory: this.isDirectory,
-        header: _centralHeader.toJSON(),
-        compressedData: bytes(input),
-        data: bytes(uncompressedData)
+        header: e.toJSON(),
+        compressedData: d(t),
+        data: d(c)
       };
     },
     toString: function() {
@@ -5106,105 +4398,60 @@ var zipEntry = function(options, input) {
     }
   };
 };
-const ZipEntry$1 = zipEntry;
-const Headers = headers;
-const Utils$1 = utilExports;
-var zipFile = function(inBuffer, options) {
-  var entryList = [], entryTable = {}, _comment = Buffer.alloc(0), mainHeader2 = new Headers.MainHeader(), loadedEntries = false;
-  const temporary = /* @__PURE__ */ new Set();
-  const opts = options;
-  const { noSort, decoder: decoder2 } = opts;
-  if (inBuffer) {
-    readMainHeader(opts.readEntries);
-  } else {
-    loadedEntries = true;
+const pt = Tt, Xr = Le, Y = Se;
+var Yr = function(r, t) {
+  var e = [], n = {}, a = Buffer.alloc(0), o = new Xr.MainHeader(), c = !1;
+  const i = /* @__PURE__ */ new Set(), l = t, { noSort: I, decoder: w } = l;
+  r ? p(l.readEntries) : c = !0;
+  function E() {
+    const f = /* @__PURE__ */ new Set();
+    for (const m of Object.keys(n)) {
+      const u = m.split("/");
+      if (u.pop(), !!u.length)
+        for (let s = 0; s < u.length; s++) {
+          const d = u.slice(0, s + 1).join("/") + "/";
+          f.add(d);
+        }
+    }
+    for (const m of f)
+      if (!(m in n)) {
+        const u = new pt(l);
+        u.entryName = m, u.attr = 16, u.temporary = !0, e.push(u), n[u.entryName] = u, i.add(u);
+      }
   }
-  function makeTemporaryFolders() {
-    const foldersList = /* @__PURE__ */ new Set();
-    for (const elem of Object.keys(entryTable)) {
-      const elements = elem.split("/");
-      elements.pop();
-      if (!elements.length)
-        continue;
-      for (let i = 0; i < elements.length; i++) {
-        const sub = elements.slice(0, i + 1).join("/") + "/";
-        foldersList.add(sub);
-      }
+  function C() {
+    if (c = !0, n = {}, o.diskEntries > (r.length - o.offset) / Y.Constants.CENHDR)
+      throw Y.Errors.DISK_ENTRY_TOO_LARGE();
+    e = new Array(o.diskEntries);
+    for (var f = o.offset, m = 0; m < e.length; m++) {
+      var u = f, s = new pt(l, r);
+      s.header = r.slice(u, u += Y.Constants.CENHDR), s.entryName = r.slice(u, u += s.header.fileNameLength), s.header.extraLength && (s.extra = r.slice(u, u += s.header.extraLength)), s.header.commentLength && (s.comment = r.slice(u, u + s.header.commentLength)), f += s.header.centralHeaderSize, e[m] = s, n[s.entryName] = s;
     }
-    for (const elem of foldersList) {
-      if (!(elem in entryTable)) {
-        const tempfolder = new ZipEntry$1(opts);
-        tempfolder.entryName = elem;
-        tempfolder.attr = 16;
-        tempfolder.temporary = true;
-        entryList.push(tempfolder);
-        entryTable[tempfolder.entryName] = tempfolder;
-        temporary.add(tempfolder);
-      }
-    }
+    i.clear(), E();
   }
-  function readEntries() {
-    loadedEntries = true;
-    entryTable = {};
-    if (mainHeader2.diskEntries > (inBuffer.length - mainHeader2.offset) / Utils$1.Constants.CENHDR) {
-      throw Utils$1.Errors.DISK_ENTRY_TOO_LARGE();
-    }
-    entryList = new Array(mainHeader2.diskEntries);
-    var index = mainHeader2.offset;
-    for (var i = 0; i < entryList.length; i++) {
-      var tmp = index, entry = new ZipEntry$1(opts, inBuffer);
-      entry.header = inBuffer.slice(tmp, tmp += Utils$1.Constants.CENHDR);
-      entry.entryName = inBuffer.slice(tmp, tmp += entry.header.fileNameLength);
-      if (entry.header.extraLength) {
-        entry.extra = inBuffer.slice(tmp, tmp += entry.header.extraLength);
+  function p(f) {
+    var m = r.length - Y.Constants.ENDHDR, u = Math.max(0, m - 65535), s = u, d = r.length, y = -1, v = 0;
+    for ((typeof l.trailingSpace == "boolean" ? l.trailingSpace : !1) && (u = 0), m; m >= s; m--)
+      if (r[m] === 80) {
+        if (r.readUInt32LE(m) === Y.Constants.ENDSIG) {
+          y = m, v = m, d = m + Y.Constants.ENDHDR, s = m - Y.Constants.END64HDR;
+          continue;
+        }
+        if (r.readUInt32LE(m) === Y.Constants.END64SIG) {
+          s = u;
+          continue;
+        }
+        if (r.readUInt32LE(m) === Y.Constants.ZIP64SIG) {
+          y = m, d = m + Y.readBigUInt64LE(r, m + Y.Constants.ZIP64SIZE) + Y.Constants.ZIP64LEAD;
+          break;
+        }
       }
-      if (entry.header.commentLength)
-        entry.comment = inBuffer.slice(tmp, tmp + entry.header.commentLength);
-      index += entry.header.centralHeaderSize;
-      entryList[i] = entry;
-      entryTable[entry.entryName] = entry;
-    }
-    temporary.clear();
-    makeTemporaryFolders();
+    if (y == -1)
+      throw Y.Errors.INVALID_FORMAT();
+    o.loadFromBinary(r.slice(y, d)), o.commentLength && (a = r.slice(v + Y.Constants.ENDHDR)), f && C();
   }
-  function readMainHeader(readNow) {
-    var i = inBuffer.length - Utils$1.Constants.ENDHDR, max = Math.max(0, i - 65535), n = max, endStart = inBuffer.length, endOffset = -1, commentEnd = 0;
-    const trailingSpace = typeof opts.trailingSpace === "boolean" ? opts.trailingSpace : false;
-    if (trailingSpace)
-      max = 0;
-    for (i; i >= n; i--) {
-      if (inBuffer[i] !== 80)
-        continue;
-      if (inBuffer.readUInt32LE(i) === Utils$1.Constants.ENDSIG) {
-        endOffset = i;
-        commentEnd = i;
-        endStart = i + Utils$1.Constants.ENDHDR;
-        n = i - Utils$1.Constants.END64HDR;
-        continue;
-      }
-      if (inBuffer.readUInt32LE(i) === Utils$1.Constants.END64SIG) {
-        n = max;
-        continue;
-      }
-      if (inBuffer.readUInt32LE(i) === Utils$1.Constants.ZIP64SIG) {
-        endOffset = i;
-        endStart = i + Utils$1.readBigUInt64LE(inBuffer, i + Utils$1.Constants.ZIP64SIZE) + Utils$1.Constants.ZIP64LEAD;
-        break;
-      }
-    }
-    if (endOffset == -1)
-      throw Utils$1.Errors.INVALID_FORMAT();
-    mainHeader2.loadFromBinary(inBuffer.slice(endOffset, endStart));
-    if (mainHeader2.commentLength) {
-      _comment = inBuffer.slice(commentEnd + Utils$1.Constants.ENDHDR);
-    }
-    if (readNow)
-      readEntries();
-  }
-  function sortEntries() {
-    if (entryList.length > 1 && !noSort) {
-      entryList.sort((a, b) => a.entryName.toLowerCase().localeCompare(b.entryName.toLowerCase()));
-    }
+  function g() {
+    e.length > 1 && !I && e.sort((f, m) => f.entryName.toLowerCase().localeCompare(m.entryName.toLowerCase()));
   }
   return {
     /**
@@ -5212,30 +4459,23 @@ var zipFile = function(inBuffer, options) {
      * @return Array
      */
     get entries() {
-      if (!loadedEntries) {
-        readEntries();
-      }
-      return entryList.filter((e) => !temporary.has(e));
+      return c || C(), e.filter((f) => !i.has(f));
     },
     /**
      * Archive comment
      * @return {String}
      */
     get comment() {
-      return decoder2.decode(_comment);
+      return w.decode(a);
     },
-    set comment(val) {
-      _comment = Utils$1.toBuffer(val, decoder2.encode);
-      mainHeader2.commentLength = _comment.length;
+    set comment(f) {
+      a = Y.toBuffer(f, w.encode), o.commentLength = a.length;
     },
     getEntryCount: function() {
-      if (!loadedEntries) {
-        return mainHeader2.diskEntries;
-      }
-      return entryList.length;
+      return c ? e.length : o.diskEntries;
     },
-    forEach: function(callback) {
-      this.entries.forEach(callback);
+    forEach: function(f) {
+      this.entries.forEach(f);
     },
     /**
      * Returns a reference to the entry with the given name or null if entry is inexistent
@@ -5243,24 +4483,16 @@ var zipFile = function(inBuffer, options) {
      * @param entryName
      * @return ZipEntry
      */
-    getEntry: function(entryName) {
-      if (!loadedEntries) {
-        readEntries();
-      }
-      return entryTable[entryName] || null;
+    getEntry: function(f) {
+      return c || C(), n[f] || null;
     },
     /**
      * Adds the given entry to the entry list
      *
      * @param entry
      */
-    setEntry: function(entry) {
-      if (!loadedEntries) {
-        readEntries();
-      }
-      entryList.push(entry);
-      entryTable[entry.entryName] = entry;
-      mainHeader2.totalEntries = entryList.length;
+    setEntry: function(f) {
+      c || C(), e.push(f), n[f.entryName] = f, o.totalEntries = e.length;
     },
     /**
      * Removes the file with the given name from the entry list.
@@ -5269,13 +4501,10 @@ var zipFile = function(inBuffer, options) {
      * @param entryName
      * @returns {void}
      */
-    deleteFile: function(entryName, withsubfolders = true) {
-      if (!loadedEntries) {
-        readEntries();
-      }
-      const entry = entryTable[entryName];
-      const list = this.getEntryChildren(entry, withsubfolders).map((child) => child.entryName);
-      list.forEach(this.deleteEntry);
+    deleteFile: function(f, m = !0) {
+      c || C();
+      const u = n[f];
+      this.getEntryChildren(u, m).map((d) => d.entryName).forEach(this.deleteEntry);
     },
     /**
      * Removes the entry with the given name from the entry list.
@@ -5283,17 +4512,10 @@ var zipFile = function(inBuffer, options) {
      * @param {string} entryName
      * @returns {void}
      */
-    deleteEntry: function(entryName) {
-      if (!loadedEntries) {
-        readEntries();
-      }
-      const entry = entryTable[entryName];
-      const index = entryList.indexOf(entry);
-      if (index >= 0) {
-        entryList.splice(index, 1);
-        delete entryTable[entryName];
-        mainHeader2.totalEntries = entryList.length;
-      }
+    deleteEntry: function(f) {
+      c || C();
+      const m = n[f], u = e.indexOf(m);
+      u >= 0 && (e.splice(u, 1), delete n[f], o.totalEntries = e.length);
     },
     /**
      *  Iterates and returns all nested files and directories of the given entry
@@ -5301,24 +4523,15 @@ var zipFile = function(inBuffer, options) {
      * @param entry
      * @return Array
      */
-    getEntryChildren: function(entry, subfolders = true) {
-      if (!loadedEntries) {
-        readEntries();
-      }
-      if (typeof entry === "object") {
-        if (entry.isDirectory && subfolders) {
-          const list = [];
-          const name = entry.entryName;
-          for (const zipEntry2 of entryList) {
-            if (zipEntry2.entryName.startsWith(name)) {
-              list.push(zipEntry2);
-            }
-          }
-          return list;
-        } else {
-          return [entry];
-        }
-      }
+    getEntryChildren: function(f, m = !0) {
+      if (c || C(), typeof f == "object")
+        if (f.isDirectory && m) {
+          const u = [], s = f.entryName;
+          for (const d of e)
+            d.entryName.startsWith(s) && u.push(d);
+          return u;
+        } else
+          return [f];
       return [];
     },
     /**
@@ -5327,10 +4540,10 @@ var zipFile = function(inBuffer, options) {
      * @param {ZipEntry} entry
      * @return {integer}
      */
-    getChildCount: function(entry) {
-      if (entry && entry.isDirectory) {
-        const list = this.getEntryChildren(entry);
-        return list.includes(entry) ? list.length - 1 : list.length;
+    getChildCount: function(f) {
+      if (f && f.isDirectory) {
+        const m = this.getEntryChildren(f);
+        return m.includes(f) ? m.length - 1 : m.length;
       }
       return 0;
     },
@@ -5340,201 +4553,106 @@ var zipFile = function(inBuffer, options) {
      * @return Buffer
      */
     compressToBuffer: function() {
-      if (!loadedEntries) {
-        readEntries();
+      c || C(), g();
+      const f = [], m = [];
+      let u = 0, s = 0;
+      o.size = 0, o.offset = 0;
+      let d = 0;
+      for (const _ of this.entries) {
+        const D = _.getCompressedData();
+        _.header.offset = s;
+        const k = _.packLocalHeader(), P = k.length + D.length;
+        s += P, f.push(k), f.push(D);
+        const $ = _.packCentralHeader();
+        m.push($), o.size += $.length, u += P + $.length, d++;
       }
-      sortEntries();
-      const dataBlock = [];
-      const headerBlocks = [];
-      let totalSize = 0;
-      let dindex = 0;
-      mainHeader2.size = 0;
-      mainHeader2.offset = 0;
-      let totalEntries = 0;
-      for (const entry of this.entries) {
-        const compressedData = entry.getCompressedData();
-        entry.header.offset = dindex;
-        const localHeader = entry.packLocalHeader();
-        const dataLength = localHeader.length + compressedData.length;
-        dindex += dataLength;
-        dataBlock.push(localHeader);
-        dataBlock.push(compressedData);
-        const centralHeader = entry.packCentralHeader();
-        headerBlocks.push(centralHeader);
-        mainHeader2.size += centralHeader.length;
-        totalSize += dataLength + centralHeader.length;
-        totalEntries++;
-      }
-      totalSize += mainHeader2.mainHeaderSize;
-      mainHeader2.offset = dindex;
-      mainHeader2.totalEntries = totalEntries;
-      dindex = 0;
-      const outBuffer = Buffer.alloc(totalSize);
-      for (const content of dataBlock) {
-        content.copy(outBuffer, dindex);
-        dindex += content.length;
-      }
-      for (const content of headerBlocks) {
-        content.copy(outBuffer, dindex);
-        dindex += content.length;
-      }
-      const mh = mainHeader2.toBinary();
-      if (_comment) {
-        _comment.copy(mh, Utils$1.Constants.ENDHDR);
-      }
-      mh.copy(outBuffer, dindex);
-      inBuffer = outBuffer;
-      loadedEntries = false;
-      return outBuffer;
+      u += o.mainHeaderSize, o.offset = s, o.totalEntries = d, s = 0;
+      const y = Buffer.alloc(u);
+      for (const _ of f)
+        _.copy(y, s), s += _.length;
+      for (const _ of m)
+        _.copy(y, s), s += _.length;
+      const v = o.toBinary();
+      return a && a.copy(v, Y.Constants.ENDHDR), v.copy(y, s), r = y, c = !1, y;
     },
-    toAsyncBuffer: function(onSuccess, onFail, onItemStart, onItemEnd) {
+    toAsyncBuffer: function(f, m, u, s) {
       try {
-        if (!loadedEntries) {
-          readEntries();
-        }
-        sortEntries();
-        const dataBlock = [];
-        const centralHeaders = [];
-        let totalSize = 0;
-        let dindex = 0;
-        let totalEntries = 0;
-        mainHeader2.size = 0;
-        mainHeader2.offset = 0;
-        const compress2Buffer = function(entryLists) {
-          if (entryLists.length > 0) {
-            const entry = entryLists.shift();
-            const name = entry.entryName + entry.extra.toString();
-            if (onItemStart)
-              onItemStart(name);
-            entry.getCompressedDataAsync(function(compressedData) {
-              if (onItemEnd)
-                onItemEnd(name);
-              entry.header.offset = dindex;
-              const localHeader = entry.packLocalHeader();
-              const dataLength = localHeader.length + compressedData.length;
-              dindex += dataLength;
-              dataBlock.push(localHeader);
-              dataBlock.push(compressedData);
-              const centalHeader = entry.packCentralHeader();
-              centralHeaders.push(centalHeader);
-              mainHeader2.size += centalHeader.length;
-              totalSize += dataLength + centalHeader.length;
-              totalEntries++;
-              compress2Buffer(entryLists);
+        c || C(), g();
+        const d = [], y = [];
+        let v = 0, _ = 0, D = 0;
+        o.size = 0, o.offset = 0;
+        const k = function(P) {
+          if (P.length > 0) {
+            const $ = P.shift(), K = $.entryName + $.extra.toString();
+            u && u(K), $.getCompressedDataAsync(function(Q) {
+              s && s(K), $.header.offset = _;
+              const N = $.packLocalHeader(), Z = N.length + Q.length;
+              _ += Z, d.push(N), d.push(Q);
+              const X = $.packCentralHeader();
+              y.push(X), o.size += X.length, v += Z + X.length, D++, k(P);
             });
           } else {
-            totalSize += mainHeader2.mainHeaderSize;
-            mainHeader2.offset = dindex;
-            mainHeader2.totalEntries = totalEntries;
-            dindex = 0;
-            const outBuffer = Buffer.alloc(totalSize);
-            dataBlock.forEach(function(content) {
-              content.copy(outBuffer, dindex);
-              dindex += content.length;
+            v += o.mainHeaderSize, o.offset = _, o.totalEntries = D, _ = 0;
+            const $ = Buffer.alloc(v);
+            d.forEach(function(Q) {
+              Q.copy($, _), _ += Q.length;
+            }), y.forEach(function(Q) {
+              Q.copy($, _), _ += Q.length;
             });
-            centralHeaders.forEach(function(content) {
-              content.copy(outBuffer, dindex);
-              dindex += content.length;
-            });
-            const mh = mainHeader2.toBinary();
-            if (_comment) {
-              _comment.copy(mh, Utils$1.Constants.ENDHDR);
-            }
-            mh.copy(outBuffer, dindex);
-            inBuffer = outBuffer;
-            loadedEntries = false;
-            onSuccess(outBuffer);
+            const K = o.toBinary();
+            a && a.copy(K, Y.Constants.ENDHDR), K.copy($, _), r = $, c = !1, f($);
           }
         };
-        compress2Buffer(Array.from(this.entries));
-      } catch (e) {
-        onFail(e);
+        k(Array.from(this.entries));
+      } catch (d) {
+        m(d);
       }
     }
   };
 };
-const Utils = utilExports;
-const pth = path$1;
-const ZipEntry = zipEntry;
-const ZipFile = zipFile;
-const get_Bool = (...val) => Utils.findLast(val, (c) => typeof c === "boolean");
-const get_Str = (...val) => Utils.findLast(val, (c) => typeof c === "string");
-const get_Fun = (...val) => Utils.findLast(val, (c) => typeof c === "function");
-const defaultOptions = {
+const q = Se, W = ne, Qr = Tt, en = Yr, me = (...r) => q.findLast(r, (t) => typeof t == "boolean"), ft = (...r) => q.findLast(r, (t) => typeof t == "string"), tn = (...r) => q.findLast(r, (t) => typeof t == "function"), rn = {
   // option "noSort" : if true it disables files sorting
-  noSort: false,
+  noSort: !1,
   // read entries during load (initial loading may be slower)
-  readEntries: false,
+  readEntries: !1,
   // default method is none
-  method: Utils.Constants.NONE,
+  method: q.Constants.NONE,
   // file system
   fs: null
 };
-var admZip = function(input, options) {
-  let inBuffer = null;
-  const opts = Object.assign(/* @__PURE__ */ Object.create(null), defaultOptions);
-  if (input && "object" === typeof input) {
-    if (!(input instanceof Uint8Array)) {
-      Object.assign(opts, input);
-      input = opts.input ? opts.input : void 0;
-      if (opts.input)
-        delete opts.input;
-    }
-    if (Buffer.isBuffer(input)) {
-      inBuffer = input;
-      opts.method = Utils.Constants.BUFFER;
-      input = void 0;
-    }
-  }
-  Object.assign(opts, options);
-  const filetools = new Utils(opts);
-  if (typeof opts.decoder !== "object" || typeof opts.decoder.encode !== "function" || typeof opts.decoder.decode !== "function") {
-    opts.decoder = Utils.decoder;
-  }
-  if (input && "string" === typeof input) {
-    if (filetools.fs.existsSync(input)) {
-      opts.method = Utils.Constants.FILE;
-      opts.filename = input;
-      inBuffer = filetools.fs.readFileSync(input);
-    } else {
-      throw Utils.Errors.INVALID_FILENAME();
-    }
-  }
-  const _zip = new ZipFile(inBuffer, opts);
-  const { canonical, sanitize, zipnamefix } = Utils;
-  function getEntry(entry) {
-    if (entry && _zip) {
-      var item;
-      if (typeof entry === "string")
-        item = _zip.getEntry(pth.posix.normalize(entry));
-      if (typeof entry === "object" && typeof entry.entryName !== "undefined" && typeof entry.header !== "undefined")
-        item = _zip.getEntry(entry.entryName);
-      if (item) {
-        return item;
-      }
+var nn = function(r, t) {
+  let e = null;
+  const n = Object.assign(/* @__PURE__ */ Object.create(null), rn);
+  r && typeof r == "object" && (r instanceof Uint8Array || (Object.assign(n, r), r = n.input ? n.input : void 0, n.input && delete n.input), Buffer.isBuffer(r) && (e = r, n.method = q.Constants.BUFFER, r = void 0)), Object.assign(n, t);
+  const a = new q(n);
+  if ((typeof n.decoder != "object" || typeof n.decoder.encode != "function" || typeof n.decoder.decode != "function") && (n.decoder = q.decoder), r && typeof r == "string")
+    if (a.fs.existsSync(r))
+      n.method = q.Constants.FILE, n.filename = r, e = a.fs.readFileSync(r);
+    else
+      throw q.Errors.INVALID_FILENAME();
+  const o = new en(e, n), { canonical: c, sanitize: i, zipnamefix: l } = q;
+  function I(p) {
+    if (p && o) {
+      var g;
+      if (typeof p == "string" && (g = o.getEntry(W.posix.normalize(p))), typeof p == "object" && typeof p.entryName < "u" && typeof p.header < "u" && (g = o.getEntry(p.entryName)), g)
+        return g;
     }
     return null;
   }
-  function fixPath(zipPath) {
-    const { join, normalize, sep } = pth.posix;
-    return join(".", normalize(sep + zipPath.split("\\").join(sep) + sep));
+  function w(p) {
+    const { join: g, normalize: f, sep: m } = W.posix;
+    return g(".", f(m + p.split("\\").join(m) + m));
   }
-  function filenameFilter(filterfn) {
-    if (filterfn instanceof RegExp) {
-      return /* @__PURE__ */ function(rx) {
-        return function(filename) {
-          return rx.test(filename);
-        };
-      }(filterfn);
-    } else if ("function" !== typeof filterfn) {
-      return () => true;
-    }
-    return filterfn;
+  function E(p) {
+    return p instanceof RegExp ? /* @__PURE__ */ function(g) {
+      return function(f) {
+        return g.test(f);
+      };
+    }(p) : typeof p != "function" ? () => !0 : p;
   }
-  const relativePath = (local, entry) => {
-    let lastChar = entry.slice(-1);
-    lastChar = lastChar === filetools.sep ? filetools.sep : "";
-    return pth.relative(local, entry) + lastChar;
+  const C = (p, g) => {
+    let f = g.slice(-1);
+    return f = f === a.sep ? a.sep : "", W.relative(p, g) + f;
   };
   return {
     /**
@@ -5543,20 +4661,19 @@ var admZip = function(input, options) {
      * @param {Buffer|string} [pass] - password
      * @return Buffer or Null in case of error
      */
-    readFile: function(entry, pass) {
-      var item = getEntry(entry);
-      return item && item.getData(pass) || null;
+    readFile: function(p, g) {
+      var f = I(p);
+      return f && f.getData(g) || null;
     },
     /**
      * Returns how many child elements has on entry (directories) on files it is always 0
      * @param {ZipEntry|string} entry ZipEntry object or String with the full path of the entry
      * @returns {integer}
      */
-    childCount: function(entry) {
-      const item = getEntry(entry);
-      if (item) {
-        return _zip.getChildCount(item);
-      }
+    childCount: function(p) {
+      const g = I(p);
+      if (g)
+        return o.getChildCount(g);
     },
     /**
      * Asynchronous readFile
@@ -5565,13 +4682,9 @@ var admZip = function(input, options) {
      *
      * @return Buffer or Null in case of error
      */
-    readFileAsync: function(entry, callback) {
-      var item = getEntry(entry);
-      if (item) {
-        item.getDataAsync(callback);
-      } else {
-        callback(null, "getEntry failed for:" + entry);
-      }
+    readFileAsync: function(p, g) {
+      var f = I(p);
+      f ? f.getDataAsync(g) : g(null, "getEntry failed for:" + p);
     },
     /**
      * Extracts the given entry from the archive and returns the content as plain text in the given encoding
@@ -5580,13 +4693,12 @@ var admZip = function(input, options) {
      *
      * @return String
      */
-    readAsText: function(entry, encoding) {
-      var item = getEntry(entry);
-      if (item) {
-        var data = item.getData();
-        if (data && data.length) {
-          return data.toString(encoding || "utf8");
-        }
+    readAsText: function(p, g) {
+      var f = I(p);
+      if (f) {
+        var m = f.getData();
+        if (m && m.length)
+          return m.toString(g || "utf8");
       }
       return "";
     },
@@ -5598,23 +4710,15 @@ var admZip = function(input, options) {
      *
      * @return String
      */
-    readAsTextAsync: function(entry, callback, encoding) {
-      var item = getEntry(entry);
-      if (item) {
-        item.getDataAsync(function(data, err) {
-          if (err) {
-            callback(data, err);
-            return;
-          }
-          if (data && data.length) {
-            callback(data.toString(encoding || "utf8"));
-          } else {
-            callback("");
-          }
-        });
-      } else {
-        callback("");
-      }
+    readAsTextAsync: function(p, g, f) {
+      var m = I(p);
+      m ? m.getDataAsync(function(u, s) {
+        if (s) {
+          g(u, s);
+          return;
+        }
+        u && u.length ? g(u.toString(f || "utf8")) : g("");
+      }) : g("");
     },
     /**
      * Remove the entry from the file or the entry and all it's nested directories and files if the given entry is a directory
@@ -5622,11 +4726,9 @@ var admZip = function(input, options) {
      * @param {ZipEntry|string} entry
      * @returns {void}
      */
-    deleteFile: function(entry, withsubfolders = true) {
-      var item = getEntry(entry);
-      if (item) {
-        _zip.deleteFile(item.entryName, withsubfolders);
-      }
+    deleteFile: function(p, g = !0) {
+      var f = I(p);
+      f && o.deleteFile(f.entryName, g);
     },
     /**
      * Remove the entry from the file or directory without affecting any nested entries
@@ -5634,19 +4736,17 @@ var admZip = function(input, options) {
      * @param {ZipEntry|string} entry
      * @returns {void}
      */
-    deleteEntry: function(entry) {
-      var item = getEntry(entry);
-      if (item) {
-        _zip.deleteEntry(item.entryName);
-      }
+    deleteEntry: function(p) {
+      var g = I(p);
+      g && o.deleteEntry(g.entryName);
     },
     /**
      * Adds a comment to the zip. The zip must be rewritten after adding the comment.
      *
      * @param {string} comment
      */
-    addZipComment: function(comment) {
-      _zip.comment = comment;
+    addZipComment: function(p) {
+      o.comment = p;
     },
     /**
      * Returns the zip comment
@@ -5654,7 +4754,7 @@ var admZip = function(input, options) {
      * @return String
      */
     getZipComment: function() {
-      return _zip.comment || "";
+      return o.comment || "";
     },
     /**
      * Adds a comment to a specified zipEntry. The zip must be rewritten after adding the comment
@@ -5663,11 +4763,9 @@ var admZip = function(input, options) {
      * @param {ZipEntry} entry
      * @param {string} comment
      */
-    addZipEntryComment: function(entry, comment) {
-      var item = getEntry(entry);
-      if (item) {
-        item.comment = comment;
-      }
+    addZipEntryComment: function(p, g) {
+      var f = I(p);
+      f && (f.comment = g);
     },
     /**
      * Returns the comment of the specified entry
@@ -5675,12 +4773,9 @@ var admZip = function(input, options) {
      * @param {ZipEntry} entry
      * @return String
      */
-    getZipEntryComment: function(entry) {
-      var item = getEntry(entry);
-      if (item) {
-        return item.comment || "";
-      }
-      return "";
+    getZipEntryComment: function(p) {
+      var g = I(p);
+      return g && g.comment || "";
     },
     /**
      * Updates the content of an existing entry inside the archive. The zip must be rewritten after updating the content
@@ -5688,11 +4783,9 @@ var admZip = function(input, options) {
      * @param {ZipEntry} entry
      * @param {Buffer} content
      */
-    updateFile: function(entry, content) {
-      var item = getEntry(entry);
-      if (item) {
-        item.setData(content);
-      }
+    updateFile: function(p, g) {
+      var f = I(p);
+      f && f.setData(g);
     },
     /**
      * Adds a file from the disk to the archive
@@ -5702,19 +4795,15 @@ var admZip = function(input, options) {
      * @param {string} [zipName] Optional name for the file
      * @param {string} [comment] Optional file comment
      */
-    addLocalFile: function(localPath2, zipPath, zipName, comment) {
-      if (filetools.fs.existsSync(localPath2)) {
-        zipPath = zipPath ? fixPath(zipPath) : "";
-        const p = pth.win32.basename(pth.win32.normalize(localPath2));
-        zipPath += zipName ? zipName : p;
-        const _attr = filetools.fs.statSync(localPath2);
-        const data = _attr.isFile() ? filetools.fs.readFileSync(localPath2) : Buffer.alloc(0);
-        if (_attr.isDirectory())
-          zipPath += filetools.sep;
-        this.addFile(zipPath, data, comment, _attr);
-      } else {
-        throw Utils.Errors.FILE_NOT_FOUND(localPath2);
-      }
+    addLocalFile: function(p, g, f, m) {
+      if (a.fs.existsSync(p)) {
+        g = g ? w(g) : "";
+        const u = W.win32.basename(W.win32.normalize(p));
+        g += f || u;
+        const s = a.fs.statSync(p), d = s.isFile() ? a.fs.readFileSync(p) : Buffer.alloc(0);
+        s.isDirectory() && (g += a.sep), this.addFile(g, d, m, s);
+      } else
+        throw q.Errors.FILE_NOT_FOUND(p);
     },
     /**
      * Callback for showing if everything was done.
@@ -5733,30 +4822,22 @@ var admZip = function(input, options) {
      * @param {string} [options.zipName] - Optional name for the file
      * @param {doneCallback} callback - The callback that handles the response.
      */
-    addLocalFileAsync: function(options2, callback) {
-      options2 = typeof options2 === "object" ? options2 : { localPath: options2 };
-      const localPath2 = pth.resolve(options2.localPath);
-      const { comment } = options2;
-      let { zipPath, zipName } = options2;
-      const self = this;
-      filetools.fs.stat(localPath2, function(err, stats) {
-        if (err)
-          return callback(err, false);
-        zipPath = zipPath ? fixPath(zipPath) : "";
-        const p = pth.win32.basename(pth.win32.normalize(localPath2));
-        zipPath += zipName ? zipName : p;
-        if (stats.isFile()) {
-          filetools.fs.readFile(localPath2, function(err2, data) {
-            if (err2)
-              return callback(err2, false);
-            self.addFile(zipPath, data, comment, stats);
-            return setImmediate(callback, void 0, true);
+    addLocalFileAsync: function(p, g) {
+      p = typeof p == "object" ? p : { localPath: p };
+      const f = W.resolve(p.localPath), { comment: m } = p;
+      let { zipPath: u, zipName: s } = p;
+      const d = this;
+      a.fs.stat(f, function(y, v) {
+        if (y)
+          return g(y, !1);
+        u = u ? w(u) : "";
+        const _ = W.win32.basename(W.win32.normalize(f));
+        if (u += s || _, v.isFile())
+          a.fs.readFile(f, function(D, k) {
+            return D ? g(D, !1) : (d.addFile(u, k, m, v), setImmediate(g, void 0, !0));
           });
-        } else if (stats.isDirectory()) {
-          zipPath += filetools.sep;
-          self.addFile(zipPath, Buffer.alloc(0), comment, stats);
-          return setImmediate(callback, void 0, true);
-        }
+        else if (v.isDirectory())
+          return u += a.sep, d.addFile(u, Buffer.alloc(0), m, v), setImmediate(g, void 0, !0);
       });
     },
     /**
@@ -5766,24 +4847,16 @@ var admZip = function(input, options) {
      * @param {string} [zipPath] - optional path inside zip
      * @param {(RegExp|function)} [filter] - optional RegExp or Function if files match will be included.
      */
-    addLocalFolder: function(localPath2, zipPath, filter) {
-      filter = filenameFilter(filter);
-      zipPath = zipPath ? fixPath(zipPath) : "";
-      localPath2 = pth.normalize(localPath2);
-      if (filetools.fs.existsSync(localPath2)) {
-        const items = filetools.findFiles(localPath2);
-        const self = this;
-        if (items.length) {
-          for (const filepath of items) {
-            const p = pth.join(zipPath, relativePath(localPath2, filepath));
-            if (filter(p)) {
-              self.addLocalFile(filepath, pth.dirname(p));
-            }
+    addLocalFolder: function(p, g, f) {
+      if (f = E(f), g = g ? w(g) : "", p = W.normalize(p), a.fs.existsSync(p)) {
+        const m = a.findFiles(p), u = this;
+        if (m.length)
+          for (const s of m) {
+            const d = W.join(g, C(p, s));
+            f(d) && u.addLocalFile(s, W.dirname(d));
           }
-        }
-      } else {
-        throw Utils.Errors.FILE_NOT_FOUND(localPath2);
-      }
+      } else
+        throw q.Errors.FILE_NOT_FOUND(p);
     },
     /**
      * Asynchronous addLocalFolder
@@ -5793,53 +4866,29 @@ var admZip = function(input, options) {
      * @param {RegExp|function} [filter] optional RegExp or Function if files match will
      *               be included.
      */
-    addLocalFolderAsync: function(localPath2, callback, zipPath, filter) {
-      filter = filenameFilter(filter);
-      zipPath = zipPath ? fixPath(zipPath) : "";
-      localPath2 = pth.normalize(localPath2);
-      var self = this;
-      filetools.fs.open(localPath2, "r", function(err) {
-        if (err && err.code === "ENOENT") {
-          callback(void 0, Utils.Errors.FILE_NOT_FOUND(localPath2));
-        } else if (err) {
-          callback(void 0, err);
-        } else {
-          var items = filetools.findFiles(localPath2);
-          var i = -1;
-          var next = function() {
-            i += 1;
-            if (i < items.length) {
-              var filepath = items[i];
-              var p = relativePath(localPath2, filepath).split("\\").join("/");
-              p = p.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^\x20-\x7E]/g, "");
-              if (filter(p)) {
-                filetools.fs.stat(filepath, function(er0, stats) {
-                  if (er0)
-                    callback(void 0, er0);
-                  if (stats.isFile()) {
-                    filetools.fs.readFile(filepath, function(er1, data) {
-                      if (er1) {
-                        callback(void 0, er1);
-                      } else {
-                        self.addFile(zipPath + p, data, "", stats);
-                        next();
-                      }
-                    });
-                  } else {
-                    self.addFile(zipPath + p + "/", Buffer.alloc(0), "", stats);
-                    next();
-                  }
-                });
-              } else {
-                process.nextTick(() => {
-                  next();
-                });
-              }
-            } else {
-              callback(true, void 0);
-            }
+    addLocalFolderAsync: function(p, g, f, m) {
+      m = E(m), f = f ? w(f) : "", p = W.normalize(p);
+      var u = this;
+      a.fs.open(p, "r", function(s) {
+        if (s && s.code === "ENOENT")
+          g(void 0, q.Errors.FILE_NOT_FOUND(p));
+        else if (s)
+          g(void 0, s);
+        else {
+          var d = a.findFiles(p), y = -1, v = function() {
+            if (y += 1, y < d.length) {
+              var _ = d[y], D = C(p, _).split("\\").join("/");
+              D = D.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^\x20-\x7E]/g, ""), m(D) ? a.fs.stat(_, function(k, P) {
+                k && g(void 0, k), P.isFile() ? a.fs.readFile(_, function($, K) {
+                  $ ? g(void 0, $) : (u.addFile(f + D, K, "", P), v());
+                }) : (u.addFile(f + D + "/", Buffer.alloc(0), "", P), v());
+              }) : process.nextTick(() => {
+                v();
+              });
+            } else
+              g(!0, void 0);
           };
-          next();
+          v();
         }
       });
     },
@@ -5854,60 +4903,39 @@ var admZip = function(input, options) {
      * @param {doneCallback} callback - The callback that handles the response.
      *
      */
-    addLocalFolderAsync2: function(options2, callback) {
-      const self = this;
-      options2 = typeof options2 === "object" ? options2 : { localPath: options2 };
-      localPath = pth.resolve(fixPath(options2.localPath));
-      let { zipPath, filter, namefix } = options2;
-      if (filter instanceof RegExp) {
-        filter = /* @__PURE__ */ function(rx) {
-          return function(filename) {
-            return rx.test(filename);
-          };
-        }(filter);
-      } else if ("function" !== typeof filter) {
-        filter = function() {
-          return true;
+    addLocalFolderAsync2: function(p, g) {
+      const f = this;
+      p = typeof p == "object" ? p : { localPath: p }, localPath = W.resolve(w(p.localPath));
+      let { zipPath: m, filter: u, namefix: s } = p;
+      u instanceof RegExp ? u = /* @__PURE__ */ function(v) {
+        return function(_) {
+          return v.test(_);
         };
-      }
-      zipPath = zipPath ? fixPath(zipPath) : "";
-      if (namefix == "latin1") {
-        namefix = (str) => str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^\x20-\x7E]/g, "");
-      }
-      if (typeof namefix !== "function")
-        namefix = (str) => str;
-      const relPathFix = (entry) => pth.join(zipPath, namefix(relativePath(localPath, entry)));
-      const fileNameFix = (entry) => pth.win32.basename(pth.win32.normalize(namefix(entry)));
-      filetools.fs.open(localPath, "r", function(err) {
-        if (err && err.code === "ENOENT") {
-          callback(void 0, Utils.Errors.FILE_NOT_FOUND(localPath));
-        } else if (err) {
-          callback(void 0, err);
-        } else {
-          filetools.findFilesAsync(localPath, function(err2, fileEntries) {
-            if (err2)
-              return callback(err2);
-            fileEntries = fileEntries.filter((dir) => filter(relPathFix(dir)));
-            if (!fileEntries.length)
-              callback(void 0, false);
-            setImmediate(
-              fileEntries.reverse().reduce(function(next, entry) {
-                return function(err3, done) {
-                  if (err3 || done === false)
-                    return setImmediate(next, err3, false);
-                  self.addLocalFileAsync(
-                    {
-                      localPath: entry,
-                      zipPath: pth.dirname(relPathFix(entry)),
-                      zipName: fileNameFix(entry)
-                    },
-                    next
-                  );
-                };
-              }, callback)
-            );
-          });
-        }
+      }(u) : typeof u != "function" && (u = function() {
+        return !0;
+      }), m = m ? w(m) : "", s == "latin1" && (s = (v) => v.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^\x20-\x7E]/g, "")), typeof s != "function" && (s = (v) => v);
+      const d = (v) => W.join(m, s(C(localPath, v))), y = (v) => W.win32.basename(W.win32.normalize(s(v)));
+      a.fs.open(localPath, "r", function(v) {
+        v && v.code === "ENOENT" ? g(void 0, q.Errors.FILE_NOT_FOUND(localPath)) : v ? g(void 0, v) : a.findFilesAsync(localPath, function(_, D) {
+          if (_)
+            return g(_);
+          D = D.filter((k) => u(d(k))), D.length || g(void 0, !1), setImmediate(
+            D.reverse().reduce(function(k, P) {
+              return function($, K) {
+                if ($ || K === !1)
+                  return setImmediate(k, $, !1);
+                f.addLocalFileAsync(
+                  {
+                    localPath: P,
+                    zipPath: W.dirname(d(P)),
+                    zipName: y(P)
+                  },
+                  k
+                );
+              };
+            }, g)
+          );
+        });
       });
     },
     /**
@@ -5919,13 +4947,10 @@ var admZip = function(input, options) {
      * @param {RegExp|function} [props.filter] - optional RegExp or Function if files match will be included.
      * @param {function|string} [props.namefix] - optional function to help fix filename
      */
-    addLocalFolderPromise: function(localPath2, props) {
-      return new Promise((resolve, reject) => {
-        this.addLocalFolderAsync2(Object.assign({ localPath: localPath2 }, props), (err, done) => {
-          if (err)
-            reject(err);
-          if (done)
-            resolve(this);
+    addLocalFolderPromise: function(p, g) {
+      return new Promise((f, m) => {
+        this.addLocalFolderAsync2(Object.assign({ localPath: p }, g), (u, s) => {
+          u && m(u), s && f(this);
         });
       });
     },
@@ -5939,34 +4964,16 @@ var admZip = function(input, options) {
      * @param {string} [comment] - file comment
      * @param {number | object} [attr] - number as unix file permissions, object as filesystem Stats object
      */
-    addFile: function(entryName, content, comment, attr) {
-      entryName = zipnamefix(entryName);
-      let entry = getEntry(entryName);
-      const update = entry != null;
-      if (!update) {
-        entry = new ZipEntry(opts);
-        entry.entryName = entryName;
-      }
-      entry.comment = comment || "";
-      const isStat = "object" === typeof attr && attr instanceof filetools.fs.Stats;
-      if (isStat) {
-        entry.header.time = attr.mtime;
-      }
-      var fileattr = entry.isDirectory ? 16 : 0;
-      let unix = entry.isDirectory ? 16384 : 32768;
-      if (isStat) {
-        unix |= 4095 & attr.mode;
-      } else if ("number" === typeof attr) {
-        unix |= 4095 & attr;
-      } else {
-        unix |= entry.isDirectory ? 493 : 420;
-      }
-      fileattr = (fileattr | unix << 16) >>> 0;
-      entry.attr = fileattr;
-      entry.setData(content);
-      if (!update)
-        _zip.setEntry(entry);
-      return entry;
+    addFile: function(p, g, f, m) {
+      p = l(p);
+      let u = I(p);
+      const s = u != null;
+      s || (u = new Qr(n), u.entryName = p), u.comment = f || "";
+      const d = typeof m == "object" && m instanceof a.fs.Stats;
+      d && (u.header.time = m.mtime);
+      var y = u.isDirectory ? 16 : 0;
+      let v = u.isDirectory ? 16384 : 32768;
+      return d ? v |= 4095 & m.mode : typeof m == "number" ? v |= 4095 & m : v |= u.isDirectory ? 493 : 420, y = (y | v << 16) >>> 0, u.attr = y, u.setData(g), s || o.setEntry(u), u;
     },
     /**
      * Returns an array of ZipEntry objects representing the files and folders inside the archive
@@ -5974,9 +4981,8 @@ var admZip = function(input, options) {
      * @param {string} [password]
      * @returns Array
      */
-    getEntries: function(password) {
-      _zip.password = password;
-      return _zip ? _zip.entries : [];
+    getEntries: function(p) {
+      return o.password = p, o ? o.entries : [];
     },
     /**
      * Returns a ZipEntry object representing the file or folder specified by ``name``.
@@ -5984,14 +4990,14 @@ var admZip = function(input, options) {
      * @param {string} name
      * @return ZipEntry
      */
-    getEntry: function(name) {
-      return getEntry(name);
+    getEntry: function(p) {
+      return I(p);
     },
     getEntryCount: function() {
-      return _zip.getEntryCount();
+      return o.getEntryCount();
     },
-    forEach: function(callback) {
-      return _zip.forEach(callback);
+    forEach: function(p) {
+      return o.forEach(p);
     },
     /**
      * Extracts the given entry to the given targetPath
@@ -6006,65 +5012,51 @@ var admZip = function(input, options) {
      *
      * @return Boolean
      */
-    extractEntryTo: function(entry, targetPath, maintainEntryPath, overwrite, keepOriginalPermission, outFileName) {
-      overwrite = get_Bool(false, overwrite);
-      keepOriginalPermission = get_Bool(false, keepOriginalPermission);
-      maintainEntryPath = get_Bool(true, maintainEntryPath);
-      outFileName = get_Str(keepOriginalPermission, outFileName);
-      var item = getEntry(entry);
-      if (!item) {
-        throw Utils.Errors.NO_ENTRY();
-      }
-      var entryName = canonical(item.entryName);
-      var target = sanitize(targetPath, outFileName && !item.isDirectory ? outFileName : maintainEntryPath ? entryName : pth.basename(entryName));
-      if (item.isDirectory) {
-        var children = _zip.getEntryChildren(item);
-        children.forEach(function(child) {
-          if (child.isDirectory)
+    extractEntryTo: function(p, g, f, m, u, s) {
+      m = me(!1, m), u = me(!1, u), f = me(!0, f), s = ft(u, s);
+      var d = I(p);
+      if (!d)
+        throw q.Errors.NO_ENTRY();
+      var y = c(d.entryName), v = i(g, s && !d.isDirectory ? s : f ? y : W.basename(y));
+      if (d.isDirectory) {
+        var _ = o.getEntryChildren(d);
+        return _.forEach(function(P) {
+          if (P.isDirectory)
             return;
-          var content2 = child.getData();
-          if (!content2) {
-            throw Utils.Errors.CANT_EXTRACT_FILE();
-          }
-          var name = canonical(child.entryName);
-          var childName = sanitize(targetPath, maintainEntryPath ? name : pth.basename(name));
-          const fileAttr2 = keepOriginalPermission ? child.header.fileAttr : void 0;
-          filetools.writeFileTo(childName, content2, overwrite, fileAttr2);
-        });
-        return true;
+          var $ = P.getData();
+          if (!$)
+            throw q.Errors.CANT_EXTRACT_FILE();
+          var K = c(P.entryName), Q = i(g, f ? K : W.basename(K));
+          const N = u ? P.header.fileAttr : void 0;
+          a.writeFileTo(Q, $, m, N);
+        }), !0;
       }
-      var content = item.getData(_zip.password);
-      if (!content)
-        throw Utils.Errors.CANT_EXTRACT_FILE();
-      if (filetools.fs.existsSync(target) && !overwrite) {
-        throw Utils.Errors.CANT_OVERRIDE();
-      }
-      const fileAttr = keepOriginalPermission ? entry.header.fileAttr : void 0;
-      filetools.writeFileTo(target, content, overwrite, fileAttr);
-      return true;
+      var D = d.getData(o.password);
+      if (!D)
+        throw q.Errors.CANT_EXTRACT_FILE();
+      if (a.fs.existsSync(v) && !m)
+        throw q.Errors.CANT_OVERRIDE();
+      const k = u ? p.header.fileAttr : void 0;
+      return a.writeFileTo(v, D, m, k), !0;
     },
     /**
      * Test the archive
      * @param {string} [pass]
      */
-    test: function(pass) {
-      if (!_zip) {
-        return false;
-      }
-      for (var entry in _zip.entries) {
+    test: function(p) {
+      if (!o)
+        return !1;
+      for (var g in o.entries)
         try {
-          if (entry.isDirectory) {
+          if (g.isDirectory)
             continue;
-          }
-          var content = _zip.entries[entry].getData(pass);
-          if (!content) {
-            return false;
-          }
-        } catch (err) {
-          return false;
+          var f = o.entries[g].getData(p);
+          if (!f)
+            return !1;
+        } catch {
+          return !1;
         }
-      }
-      return true;
+      return !0;
     },
     /**
      * Extracts the entire archive to the given location
@@ -6076,28 +5068,24 @@ var admZip = function(input, options) {
      *                  Default is FALSE
      * @param {string|Buffer} [pass] password
      */
-    extractAllTo: function(targetPath, overwrite, keepOriginalPermission, pass) {
-      keepOriginalPermission = get_Bool(false, keepOriginalPermission);
-      pass = get_Str(keepOriginalPermission, pass);
-      overwrite = get_Bool(false, overwrite);
-      if (!_zip)
-        throw Utils.Errors.NO_ZIP();
-      _zip.entries.forEach(function(entry) {
-        var entryName = sanitize(targetPath, canonical(entry.entryName));
-        if (entry.isDirectory) {
-          filetools.makeDir(entryName);
+    extractAllTo: function(p, g, f, m) {
+      if (f = me(!1, f), m = ft(f, m), g = me(!1, g), !o)
+        throw q.Errors.NO_ZIP();
+      o.entries.forEach(function(u) {
+        var s = i(p, c(u.entryName));
+        if (u.isDirectory) {
+          a.makeDir(s);
           return;
         }
-        var content = entry.getData(pass);
-        if (!content) {
-          throw Utils.Errors.CANT_EXTRACT_FILE();
-        }
-        const fileAttr = keepOriginalPermission ? entry.header.fileAttr : void 0;
-        filetools.writeFileTo(entryName, content, overwrite, fileAttr);
+        var d = u.getData(m);
+        if (!d)
+          throw q.Errors.CANT_EXTRACT_FILE();
+        const y = f ? u.header.fileAttr : void 0;
+        a.writeFileTo(s, d, g, y);
         try {
-          filetools.fs.utimesSync(entryName, entry.header.time, entry.header.time);
-        } catch (err) {
-          throw Utils.Errors.CANT_EXTRACT_FILE();
+          a.fs.utimesSync(s, u.header.time, u.header.time);
+        } catch {
+          throw q.Errors.CANT_EXTRACT_FILE();
         }
       });
     },
@@ -6111,80 +5099,53 @@ var admZip = function(input, options) {
      *                  Default is FALSE
      * @param {function} callback The callback will be executed when all entries are extracted successfully or any error is thrown.
      */
-    extractAllToAsync: function(targetPath, overwrite, keepOriginalPermission, callback) {
-      callback = get_Fun(overwrite, keepOriginalPermission, callback);
-      keepOriginalPermission = get_Bool(false, keepOriginalPermission);
-      overwrite = get_Bool(false, overwrite);
-      if (!callback) {
-        return new Promise((resolve, reject) => {
-          this.extractAllToAsync(targetPath, overwrite, keepOriginalPermission, function(err) {
-            if (err) {
-              reject(err);
-            } else {
-              resolve(this);
-            }
+    extractAllToAsync: function(p, g, f, m) {
+      if (m = tn(g, f, m), f = me(!1, f), g = me(!1, g), !m)
+        return new Promise((v, _) => {
+          this.extractAllToAsync(p, g, f, function(D) {
+            D ? _(D) : v(this);
           });
         });
-      }
-      if (!_zip) {
-        callback(Utils.Errors.NO_ZIP());
+      if (!o) {
+        m(q.Errors.NO_ZIP());
         return;
       }
-      targetPath = pth.resolve(targetPath);
-      const getPath = (entry) => sanitize(targetPath, pth.normalize(canonical(entry.entryName)));
-      const getError = (msg, file) => new Error(msg + ': "' + file + '"');
-      const dirEntries = [];
-      const fileEntries = [];
-      _zip.entries.forEach((e) => {
-        if (e.isDirectory) {
-          dirEntries.push(e);
-        } else {
-          fileEntries.push(e);
-        }
+      p = W.resolve(p);
+      const u = (v) => i(p, W.normalize(c(v.entryName))), s = (v, _) => new Error(v + ': "' + _ + '"'), d = [], y = [];
+      o.entries.forEach((v) => {
+        v.isDirectory ? d.push(v) : y.push(v);
       });
-      for (const entry of dirEntries) {
-        const dirPath = getPath(entry);
-        const dirAttr = keepOriginalPermission ? entry.header.fileAttr : void 0;
+      for (const v of d) {
+        const _ = u(v), D = f ? v.header.fileAttr : void 0;
         try {
-          filetools.makeDir(dirPath);
-          if (dirAttr)
-            filetools.fs.chmodSync(dirPath, dirAttr);
-          filetools.fs.utimesSync(dirPath, entry.header.time, entry.header.time);
-        } catch (er) {
-          callback(getError("Unable to create folder", dirPath));
+          a.makeDir(_), D && a.fs.chmodSync(_, D), a.fs.utimesSync(_, v.header.time, v.header.time);
+        } catch {
+          m(s("Unable to create folder", _));
         }
       }
-      fileEntries.reverse().reduce(function(next, entry) {
-        return function(err) {
-          if (err) {
-            next(err);
-          } else {
-            const entryName = pth.normalize(canonical(entry.entryName));
-            const filePath = sanitize(targetPath, entryName);
-            entry.getDataAsync(function(content, err_1) {
-              if (err_1) {
-                next(err_1);
-              } else if (!content) {
-                next(Utils.Errors.CANT_EXTRACT_FILE());
-              } else {
-                const fileAttr = keepOriginalPermission ? entry.header.fileAttr : void 0;
-                filetools.writeFileToAsync(filePath, content, overwrite, fileAttr, function(succ) {
-                  if (!succ) {
-                    next(getError("Unable to write file", filePath));
-                  }
-                  filetools.fs.utimes(filePath, entry.header.time, entry.header.time, function(err_2) {
-                    if (err_2) {
-                      next(getError("Unable to set times", filePath));
-                    } else {
-                      next();
-                    }
+      y.reverse().reduce(function(v, _) {
+        return function(D) {
+          if (D)
+            v(D);
+          else {
+            const k = W.normalize(c(_.entryName)), P = i(p, k);
+            _.getDataAsync(function($, K) {
+              if (K)
+                v(K);
+              else if (!$)
+                v(q.Errors.CANT_EXTRACT_FILE());
+              else {
+                const Q = f ? _.header.fileAttr : void 0;
+                a.writeFileToAsync(P, $, g, Q, function(N) {
+                  N || v(s("Unable to write file", P)), a.fs.utimes(P, _.header.time, _.header.time, function(Z) {
+                    Z ? v(s("Unable to set times", P)) : v();
                   });
                 });
               }
             });
           }
         };
-      }, callback)();
+      }, m)();
     },
     /**
      * Writes the newly created zip file to disk at the specified location or if a zip was opened and no ``targetFileName`` is provided, it will overwrite the opened zip
@@ -6192,23 +5153,13 @@ var admZip = function(input, options) {
      * @param {string} targetFileName
      * @param {function} callback
      */
-    writeZip: function(targetFileName, callback) {
-      if (arguments.length === 1) {
-        if (typeof targetFileName === "function") {
-          callback = targetFileName;
-          targetFileName = "";
+    writeZip: function(p, g) {
+      if (arguments.length === 1 && typeof p == "function" && (g = p, p = ""), !p && n.filename && (p = n.filename), !!p) {
+        var f = o.compressToBuffer();
+        if (f) {
+          var m = a.writeFileTo(p, f, !0);
+          typeof g == "function" && g(m ? null : new Error("failed"), "");
         }
-      }
-      if (!targetFileName && opts.filename) {
-        targetFileName = opts.filename;
-      }
-      if (!targetFileName)
-        return;
-      var zipData = _zip.compressToBuffer();
-      if (zipData) {
-        var ok = filetools.writeFileTo(targetFileName, zipData, true);
-        if (typeof callback === "function")
-          callback(!ok ? new Error("failed") : null, "");
       }
     },
     /**
@@ -6220,25 +5171,21 @@ var admZip = function(input, options) {
     
              * @returns {Promise<void>}
              */
-    writeZipPromise: function(targetFileName, props) {
-      const { overwrite, perm } = Object.assign({ overwrite: true }, props);
-      return new Promise((resolve, reject) => {
-        if (!targetFileName && opts.filename)
-          targetFileName = opts.filename;
-        if (!targetFileName)
-          reject("ADM-ZIP: ZIP File Name Missing");
-        this.toBufferPromise().then((zipData) => {
-          const ret = (done) => done ? resolve(done) : reject("ADM-ZIP: Wasn't able to write zip file");
-          filetools.writeFileToAsync(targetFileName, zipData, overwrite, perm, ret);
-        }, reject);
+    writeZipPromise: function(p, g) {
+      const { overwrite: f, perm: m } = Object.assign({ overwrite: !0 }, g);
+      return new Promise((u, s) => {
+        !p && n.filename && (p = n.filename), p || s("ADM-ZIP: ZIP File Name Missing"), this.toBufferPromise().then((d) => {
+          const y = (v) => v ? u(v) : s("ADM-ZIP: Wasn't able to write zip file");
+          a.writeFileToAsync(p, d, f, m, y);
+        }, s);
       });
     },
     /**
      * @returns {Promise<Buffer>} A promise to the Buffer.
      */
     toBufferPromise: function() {
-      return new Promise((resolve, reject) => {
-        _zip.toAsyncBuffer(resolve, reject);
+      return new Promise((p, g) => {
+        o.toAsyncBuffer(p, g);
       });
     },
     /**
@@ -6250,151 +5197,117 @@ var admZip = function(input, options) {
      * @prop {function} [onItemEnd]
      * @returns {Buffer}
      */
-    toBuffer: function(onSuccess, onFail, onItemStart, onItemEnd) {
-      if (typeof onSuccess === "function") {
-        _zip.toAsyncBuffer(onSuccess, onFail, onItemStart, onItemEnd);
-        return null;
-      }
-      return _zip.compressToBuffer();
+    toBuffer: function(p, g, f, m) {
+      return typeof p == "function" ? (o.toAsyncBuffer(p, g, f, m), null) : o.compressToBuffer();
     }
   };
 };
-const AdmZip = /* @__PURE__ */ getDefaultExportFromCjs(admZip);
-const BACKUP_DIR = path$1.join(app.getPath("userData"), "backups");
-const AUTO_BACKUP_DIR = path$1.join(BACKUP_DIR, "auto");
-if (!fs$1.existsSync(BACKUP_DIR))
-  fs$1.mkdirSync(BACKUP_DIR, { recursive: true });
-if (!fs$1.existsSync(AUTO_BACKUP_DIR))
-  fs$1.mkdirSync(AUTO_BACKUP_DIR, { recursive: true });
-class BackupService {
+const ht = /* @__PURE__ */ Pr(nn), He = ne.join(b.getPath("userData"), "backups"), se = ne.join(He, "auto");
+x.existsSync(He) || x.mkdirSync(He, { recursive: !0 });
+x.existsSync(se) || x.mkdirSync(se, { recursive: !0 });
+class an {
   // --- Encryption Helpers ---
-  deriveKey(password, salt) {
-    return crypto.pbkdf2Sync(password, salt, 1e5, 32, "sha256");
+  deriveKey(t, e) {
+    return fe.pbkdf2Sync(t, e, 1e5, 32, "sha256");
   }
-  encryptData(data, password) {
-    const salt = crypto.randomBytes(16);
-    const iv = crypto.randomBytes(12);
-    const key = this.deriveKey(password, salt);
-    const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
-    const encrypted = Buffer.concat([cipher.update(data), cipher.final()]);
-    const authTag = cipher.getAuthTag();
+  encryptData(t, e) {
+    const n = fe.randomBytes(16), a = fe.randomBytes(12), o = this.deriveKey(e, n), c = fe.createCipheriv("aes-256-gcm", o, a), i = Buffer.concat([c.update(t), c.final()]), l = c.getAuthTag();
     return {
-      encryptedData: encrypted,
-      salt: salt.toString("hex"),
-      iv: iv.toString("hex"),
-      authTag: authTag.toString("hex")
+      encryptedData: i,
+      salt: n.toString("hex"),
+      iv: a.toString("hex"),
+      authTag: l.toString("hex")
     };
   }
-  decryptData(encryptedData, password, encryption) {
-    const salt = Buffer.from(encryption.salt, "hex");
-    const iv = Buffer.from(encryption.iv, "hex");
-    const authTag = Buffer.from(encryption.authTag, "hex");
-    const key = this.deriveKey(password, salt);
-    const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);
-    decipher.setAuthTag(authTag);
-    return Buffer.concat([decipher.update(encryptedData), decipher.final()]);
+  decryptData(t, e, n) {
+    const a = Buffer.from(n.salt, "hex"), o = Buffer.from(n.iv, "hex"), c = Buffer.from(n.authTag, "hex"), i = this.deriveKey(e, a), l = fe.createDecipheriv("aes-256-gcm", i, o);
+    return l.setAuthTag(c), Buffer.concat([l.update(t), l.final()]);
   }
   // --- Core Logic ---
   // 1. Export Data
-  async exportData(targetPath, password) {
-    const [novels, volumes, chapters, characters, ideas, tags] = await Promise.all([
-      db.novel.findMany(),
-      db.volume.findMany(),
-      db.chapter.findMany(),
-      db.character.findMany(),
-      db.idea.findMany(),
-      db.tag.findMany()
-    ]);
-    const fullData = { novels, volumes, chapters, characters, ideas, tags };
-    const dataBuffer = Buffer.from(JSON.stringify(fullData));
-    const zip = new AdmZip();
-    const manifest = {
+  async exportData(t, e) {
+    const [n, a, o, c, i, l] = await Promise.all([
+      h.novel.findMany(),
+      h.volume.findMany(),
+      h.chapter.findMany(),
+      h.character.findMany(),
+      h.idea.findMany(),
+      h.tag.findMany()
+    ]), I = { novels: n, volumes: a, chapters: o, characters: c, ideas: i, tags: l }, w = Buffer.from(JSON.stringify(I)), E = new ht(), C = {
       version: 1,
-      appVersion: app.getVersion(),
+      appVersion: b.getVersion(),
       createdAt: (/* @__PURE__ */ new Date()).toISOString(),
       platform: process.platform,
-      encrypted: !!password
+      encrypted: !!e
     };
-    if (password) {
-      const { encryptedData, salt, iv, authTag } = this.encryptData(dataBuffer, password);
-      manifest.encryption = { algo: "aes-256-gcm", salt, iv, authTag };
-      zip.addFile("data.bin", encryptedData);
-    } else {
-      zip.addFile("data.json", dataBuffer);
-    }
-    zip.addFile("manifest.json", Buffer.from(JSON.stringify(manifest, null, 2)));
-    if (!targetPath) {
-      const { filePath } = await dialog.showSaveDialog({
+    if (e) {
+      const { encryptedData: p, salt: g, iv: f, authTag: m } = this.encryptData(w, e);
+      C.encryption = { algo: "aes-256-gcm", salt: g, iv: f, authTag: m }, E.addFile("data.bin", p);
+    } else
+      E.addFile("data.json", w);
+    if (E.addFile("manifest.json", Buffer.from(JSON.stringify(C, null, 2))), !t) {
+      const { filePath: p } = await Ce.showSaveDialog({
         title: "Export Backup",
         defaultPath: `NovelData_${(/* @__PURE__ */ new Date()).toISOString().slice(0, 19).replace(/[-:]/g, "").replace("T", "_")}.nebak`,
         filters: [{ name: "Novel Editor Backup", extensions: ["nebak"] }]
       });
-      if (!filePath)
+      if (!p)
         throw new Error("Export cancelled");
-      targetPath = filePath;
+      t = p;
     }
-    zip.writeZip(targetPath);
-    return targetPath;
+    return E.writeZip(t), t;
   }
   // 2. Import Data (Restore)
-  async importData(filePath, password) {
-    const zip = new AdmZip(filePath);
-    const manifestEntry = zip.getEntry("manifest.json");
-    if (!manifestEntry)
+  async importData(t, e) {
+    const n = new ht(t), a = n.getEntry("manifest.json");
+    if (!a)
       throw new Error("Invalid backup file: manifest.json missing");
-    const manifest = JSON.parse(manifestEntry.getData().toString("utf8"));
-    let dataJson;
-    if (manifest.encrypted) {
-      if (!password)
+    const o = JSON.parse(a.getData().toString("utf8"));
+    let c;
+    if (o.encrypted) {
+      if (!e)
         throw new Error("PASSWORD_REQUIRED");
-      const dataEntry = zip.getEntry("data.bin");
-      if (!dataEntry)
+      const i = n.getEntry("data.bin");
+      if (!i)
         throw new Error("Invalid backup file: data.bin missing");
-      if (!manifest.encryption)
+      if (!o.encryption)
         throw new Error("Invalid backup file: encryption metadata missing");
       try {
-        const decrypted = this.decryptData(dataEntry.getData(), password, manifest.encryption);
-        dataJson = JSON.parse(decrypted.toString("utf8"));
-      } catch (e) {
+        const l = this.decryptData(i.getData(), e, o.encryption);
+        c = JSON.parse(l.toString("utf8"));
+      } catch {
         throw new Error("PASSWORD_INVALID");
       }
     } else {
-      const dataEntry = zip.getEntry("data.json");
-      if (!dataEntry)
+      const i = n.getEntry("data.json");
+      if (!i)
         throw new Error("Invalid backup file: data.json missing");
-      dataJson = JSON.parse(dataEntry.getData().toString("utf8"));
+      c = JSON.parse(i.getData().toString("utf8"));
     }
-    await this.performRestore(dataJson);
+    await this.performRestore(c);
   }
   // Helper: Perform Restore (Transactional)
-  async performRestore(data) {
-    await this.createAutoBackup();
-    await db.$transaction(async (tx) => {
-      var _a, _b, _c, _d, _e, _f;
-      await tx.tag.deleteMany();
-      await tx.idea.deleteMany();
-      await tx.character.deleteMany();
-      await tx.chapter.deleteMany();
-      await tx.volume.deleteMany();
-      await tx.novel.deleteMany();
-      if ((_a = data.novels) == null ? void 0 : _a.length)
-        for (const item of data.novels)
-          await tx.novel.create({ data: item });
-      if ((_b = data.volumes) == null ? void 0 : _b.length)
-        for (const item of data.volumes)
-          await tx.volume.create({ data: item });
-      if ((_c = data.chapters) == null ? void 0 : _c.length)
-        for (const item of data.chapters)
-          await tx.chapter.create({ data: item });
-      if ((_d = data.characters) == null ? void 0 : _d.length)
-        for (const item of data.characters)
-          await tx.character.create({ data: item });
-      if ((_e = data.ideas) == null ? void 0 : _e.length)
-        for (const item of data.ideas)
-          await tx.idea.create({ data: item });
-      if ((_f = data.tags) == null ? void 0 : _f.length)
-        for (const item of data.tags)
-          await tx.tag.create({ data: item });
+  async performRestore(t) {
+    await this.createAutoBackup(), await h.$transaction(async (e) => {
+      var n, a, o, c, i, l;
+      if (await e.tag.deleteMany(), await e.idea.deleteMany(), await e.character.deleteMany(), await e.chapter.deleteMany(), await e.volume.deleteMany(), await e.novel.deleteMany(), (n = t.novels) != null && n.length)
+        for (const I of t.novels)
+          await e.novel.create({ data: I });
+      if ((a = t.volumes) != null && a.length)
+        for (const I of t.volumes)
+          await e.volume.create({ data: I });
+      if ((o = t.chapters) != null && o.length)
+        for (const I of t.chapters)
+          await e.chapter.create({ data: I });
+      if ((c = t.characters) != null && c.length)
+        for (const I of t.characters)
+          await e.character.create({ data: I });
+      if ((i = t.ideas) != null && i.length)
+        for (const I of t.ideas)
+          await e.idea.create({ data: I });
+      if ((l = t.tags) != null && l.length)
+        for (const I of t.tags)
+          await e.tag.create({ data: I });
     }, {
       maxWait: 1e4,
       timeout: 2e4
@@ -6403,451 +5316,359 @@ class BackupService {
   // 3. Auto Backup Logic
   async createAutoBackup() {
     try {
-      const timestamp = Date.now();
-      const filename = `auto_backup_${timestamp}.nebak`;
-      const filePath = path$1.join(AUTO_BACKUP_DIR, filename);
-      await this.exportData(filePath);
-      console.log("[BackupService] Auto-backup created:", filename);
-      await this.rotateAutoBackups();
-    } catch (e) {
-      console.error("[BackupService] Failed to create auto-backup:", e);
+      const e = `auto_backup_${Date.now()}.nebak`, n = ne.join(se, e);
+      await this.exportData(n), console.log("[BackupService] Auto-backup created:", e), await this.rotateAutoBackups();
+    } catch (t) {
+      console.error("[BackupService] Failed to create auto-backup:", t);
     }
   }
   async rotateAutoBackups() {
-    const files = fs$1.readdirSync(AUTO_BACKUP_DIR).filter((f) => f.endsWith(".nebak")).map((f) => ({
-      name: f,
-      time: fs$1.statSync(path$1.join(AUTO_BACKUP_DIR, f)).mtime.getTime()
-    })).sort((a, b) => b.time - a.time);
-    const toDelete = files.slice(3);
-    for (const file of toDelete) {
-      fs$1.unlinkSync(path$1.join(AUTO_BACKUP_DIR, file.name));
-      console.log("[BackupService] Rotated auto-backup:", file.name);
-    }
+    const e = x.readdirSync(se).filter((n) => n.endsWith(".nebak")).map((n) => ({
+      name: n,
+      time: x.statSync(ne.join(se, n)).mtime.getTime()
+    })).sort((n, a) => a.time - n.time).slice(3);
+    for (const n of e)
+      x.unlinkSync(ne.join(se, n.name)), console.log("[BackupService] Rotated auto-backup:", n.name);
   }
   // 4. List Auto Backups
   async getAutoBackups() {
-    return fs$1.readdirSync(AUTO_BACKUP_DIR).filter((f) => f.endsWith(".nebak")).map((f) => {
-      const stats = fs$1.statSync(path$1.join(AUTO_BACKUP_DIR, f));
+    return x.readdirSync(se).filter((t) => t.endsWith(".nebak")).map((t) => {
+      const e = x.statSync(ne.join(se, t));
       return {
-        filename: f,
-        createdAt: stats.mtime.getTime(),
-        size: stats.size
+        filename: t,
+        createdAt: e.mtime.getTime(),
+        size: e.size
       };
-    }).sort((a, b) => b.createdAt - a.createdAt);
+    }).sort((t, e) => e.createdAt - t.createdAt);
   }
   // 5. Restore from Auto Backup
-  async restoreAutoBackup(filename) {
-    const filePath = path$1.join(AUTO_BACKUP_DIR, filename);
-    if (!fs$1.existsSync(filePath))
+  async restoreAutoBackup(t) {
+    const e = ne.join(se, t);
+    if (!x.existsSync(e))
       throw new Error("Backup file not found");
-    await this.importData(filePath);
+    await this.importData(e);
   }
 }
-const backupService = new BackupService();
-const __dirname$1 = path.dirname(fileURLToPath(import.meta.url));
-process.env.APP_ROOT = path.join(__dirname$1, "..");
-const VITE_DEV_SERVER_URL = process.env["VITE_DEV_SERVER_URL"];
-const MAIN_DIST = path.join(process.env.APP_ROOT, "dist-electron");
-const RENDERER_DIST = path.join(process.env.APP_ROOT, "dist");
-process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL ? path.join(process.env.APP_ROOT, "public") : RENDERER_DIST;
-process.on("uncaughtException", (error) => {
-  console.error("[Main] Uncaught Exception:", error);
-  app.quit();
-  process.exit(1);
+const Me = new an(), ve = L.dirname(jt(import.meta.url));
+process.env.APP_ROOT = L.join(ve, "..");
+const qe = process.env.VITE_DEV_SERVER_URL, An = L.join(process.env.APP_ROOT, "dist-electron"), Mt = L.join(process.env.APP_ROOT, "dist");
+process.env.VITE_PUBLIC = qe ? L.join(process.env.APP_ROOT, "public") : Mt;
+process.on("uncaughtException", (r) => {
+  ie("Main.uncaughtException", r), console.error("[Main] Uncaught Exception:", r), b.quit(), process.exit(1);
 });
-process.on("unhandledRejection", (reason, promise) => {
-  console.error("[Main] Unhandled Rejection at:", promise, "reason:", reason);
-  app.quit();
-  process.exit(1);
+process.on("unhandledRejection", (r, t) => {
+  ie("Main.unhandledRejection", r, { promise: String(t) }), console.error("[Main] Unhandled Rejection at:", t, "reason:", r), b.quit(), process.exit(1);
 });
-let win;
-function parseAiDiagCommand(argv) {
-  const markerIndex = argv.indexOf("--ai-diag");
-  if (markerIndex < 0)
+let T, gt = !1;
+const bt = "云梦小说编辑器", on = "Novel Editor Dev";
+function sn() {
+  const r = b.getPath("appData");
+  return b.isPackaged ? L.join(r, bt) : L.join(r, "@novel-editor", "desktop-dev");
+}
+function cn(r) {
+  const t = r.indexOf("--ai-diag");
+  if (t < 0)
     return {};
-  const tokens = argv.slice(markerIndex + 1);
-  if (tokens.length === 0) {
+  const e = r.slice(t + 1);
+  if (e.length === 0)
     return { error: "Missing diagnostic action. Use: --ai-diag smoke <mcp|skill> [--json] [--db <path>] [--user-data <path>] or --ai-diag coverage [--json] [--db <path>] [--user-data <path>]" };
-  }
-  const positionals = [];
-  let json = false;
-  let dbPath;
-  let userDataPath;
-  for (let index = 0; index < tokens.length; index += 1) {
-    const token = tokens[index];
-    if (token === "--json") {
-      json = true;
+  const n = [];
+  let a = !1, o, c;
+  for (let I = 0; I < e.length; I += 1) {
+    const w = e[I];
+    if (w === "--json") {
+      a = !0;
       continue;
     }
-    if (token === "--db") {
-      const value = tokens[index + 1];
-      if (!value)
+    if (w === "--db") {
+      const E = e[I + 1];
+      if (!E)
         return { error: "Missing value for --db" };
-      dbPath = value;
-      index += 1;
+      o = E, I += 1;
       continue;
     }
-    if (token === "--user-data") {
-      const value = tokens[index + 1];
-      if (!value)
+    if (w === "--user-data") {
+      const E = e[I + 1];
+      if (!E)
         return { error: "Missing value for --user-data" };
-      userDataPath = value;
-      index += 1;
+      c = E, I += 1;
       continue;
     }
-    if (token.startsWith("--")) {
-      return { error: `Unknown option: ${token}` };
-    }
-    positionals.push(token);
+    if (w.startsWith("--"))
+      return { error: `Unknown option: ${w}` };
+    n.push(w);
   }
-  const [action, kind] = positionals;
-  if (action === "coverage") {
-    return { command: { action: "coverage", json, dbPath, userDataPath } };
-  }
-  if (action === "smoke") {
-    if (kind !== "mcp" && kind !== "skill") {
-      return { error: "Smoke mode requires kind: mcp | skill" };
-    }
-    return { command: { action: "smoke", kind, json, dbPath, userDataPath } };
-  }
-  return { error: `Unknown diagnostic action: ${action}` };
+  const [i, l] = n;
+  return i === "coverage" ? { command: { action: "coverage", json: a, dbPath: o, userDataPath: c } } : i === "smoke" ? l !== "mcp" && l !== "skill" ? { error: "Smoke mode requires kind: mcp | skill" } : { command: { action: "smoke", kind: l, json: a, dbPath: o, userDataPath: c } } : { error: `Unknown diagnostic action: ${i}` };
 }
-function formatAiDiagReadable(result, command) {
-  if (command.action === "coverage") {
-    const output2 = result;
-    const lines2 = [
-      `[AI-Diag] Coverage ${output2.overallCoverage}% (${output2.totalSupported}/${output2.totalRequired})`,
-      ...output2.modules.map((module) => {
-        const missing = module.missingActions.length ? ` missing=[${module.missingActions.join(", ")}]` : "";
-        return `- ${module.title}: ${module.coverage}% (${module.supportedActions.length}/${module.requiredActions.length})${missing}`;
+function ln(r, t) {
+  if (t.action === "coverage") {
+    const a = r;
+    return [
+      `[AI-Diag] Coverage ${a.overallCoverage}% (${a.totalSupported}/${a.totalRequired})`,
+      ...a.modules.map((c) => {
+        const i = c.missingActions.length ? ` missing=[${c.missingActions.join(", ")}]` : "";
+        return `- ${c.title}: ${c.coverage}% (${c.supportedActions.length}/${c.requiredActions.length})${i}`;
       })
-    ];
-    return lines2.join("\n");
+    ].join(`
+`);
   }
-  const output = result;
-  const lines = [
-    `[AI-Diag] Smoke ${output.kind.toUpperCase()} ${output.ok ? "PASSED" : "FAILED"}`,
-    `detail: ${output.detail}`,
-    output.missingActions.length ? `missingActions: ${output.missingActions.join(", ")}` : "missingActions: none",
-    ...output.checks.map((check) => {
-      const tag = check.skipped ? "SKIPPED" : check.ok ? "OK" : "FAILED";
-      return `- [${tag}] ${check.actionId}: ${check.detail}`;
-    })
-  ];
-  return lines.join("\n");
+  const e = r;
+  return [
+    `[AI-Diag] Smoke ${e.kind.toUpperCase()} ${e.ok ? "PASSED" : "FAILED"}`,
+    `detail: ${e.detail}`,
+    e.missingActions.length ? `missingActions: ${e.missingActions.join(", ")}` : "missingActions: none",
+    ...e.checks.map((a) => `- [${a.skipped ? "SKIPPED" : a.ok ? "OK" : "FAILED"}] ${a.actionId}: ${a.detail}`)
+  ].join(`
+`);
 }
-async function runAiDiagCommand(aiService2, command) {
-  const result = command.action === "coverage" ? aiService2.getCapabilityCoverage() : await aiService2.testOpenClawSmoke({ kind: command.kind });
-  if (command.json) {
-    console.log(JSON.stringify(result, null, 2));
-  } else {
-    console.log(formatAiDiagReadable(result, command));
-  }
-  if (command.action === "smoke" && !result.ok) {
-    return 1;
-  }
-  return 0;
+async function dn(r, t) {
+  const e = t.action === "coverage" ? r.getCapabilityCoverage() : await r.testOpenClawSmoke({ kind: t.kind });
+  return t.json ? console.log(JSON.stringify(e, null, 2)) : console.log(ln(e, t)), t.action === "smoke" && !e.ok ? 1 : 0;
 }
-const aiDiagParse = parseAiDiagCommand(process.argv);
-async function applyProxySettings(settings) {
-  const proxy = settings == null ? void 0 : settings.proxy;
-  if (!proxy || !session.defaultSession)
+function yt() {
+  if (!We() || gt)
     return;
-  const clearEnvProxy = () => {
-    delete process.env.HTTP_PROXY;
-    delete process.env.http_proxy;
-    delete process.env.HTTPS_PROXY;
-    delete process.env.https_proxy;
-    delete process.env.ALL_PROXY;
-    delete process.env.all_proxy;
-    delete process.env.NO_PROXY;
-    delete process.env.no_proxy;
+  gt = !0;
+  const r = console.error.bind(console), t = console.warn.bind(console);
+  console.error = (...e) => {
+    M("ERROR", "console.error", "console.error called", { args: oe(e) }), r(...e);
+  }, console.warn = (...e) => {
+    M("WARN", "console.warn", "console.warn called", { args: oe(e) }), t(...e);
   };
-  const setEnvProxy = () => {
-    if (proxy.httpProxy) {
-      process.env.HTTP_PROXY = proxy.httpProxy;
-      process.env.http_proxy = proxy.httpProxy;
-    }
-    if (proxy.httpsProxy) {
-      process.env.HTTPS_PROXY = proxy.httpsProxy;
-      process.env.https_proxy = proxy.httpsProxy;
-    }
-    if (proxy.allProxy) {
-      process.env.ALL_PROXY = proxy.allProxy;
-      process.env.all_proxy = proxy.allProxy;
-    }
-    if (proxy.noProxy) {
-      process.env.NO_PROXY = proxy.noProxy;
-      process.env.no_proxy = proxy.noProxy;
-    }
-  };
-  if (proxy.mode === "off") {
-    await session.defaultSession.setProxy({ mode: "direct" });
-    clearEnvProxy();
-    return;
-  }
-  if (proxy.mode === "custom") {
-    const rules = [proxy.allProxy, proxy.httpsProxy, proxy.httpProxy].filter((value) => Boolean(value)).join(";");
-    await session.defaultSession.setProxy({
-      mode: rules ? "fixed_servers" : "direct",
-      proxyRules: rules,
-      proxyBypassRules: proxy.noProxy || ""
-    });
-    clearEnvProxy();
-    setEnvProxy();
-    return;
-  }
-  await session.defaultSession.setProxy({ mode: "system" });
-  clearEnvProxy();
 }
-function createWindow() {
-  win = new BrowserWindow({
+function F(r, t, e) {
+  const n = te(e);
+  ie(`Main.${r}`, e, {
+    payload: oe(t),
+    normalizedError: n,
+    displayMessage: ge(n.code, n.message)
+  });
+}
+const re = cn(process.argv);
+async function xt(r) {
+  const t = r == null ? void 0 : r.proxy;
+  if (!t || !_e.defaultSession)
+    return;
+  const e = () => {
+    delete process.env.HTTP_PROXY, delete process.env.http_proxy, delete process.env.HTTPS_PROXY, delete process.env.https_proxy, delete process.env.ALL_PROXY, delete process.env.all_proxy, delete process.env.NO_PROXY, delete process.env.no_proxy;
+  }, n = () => {
+    t.httpProxy && (process.env.HTTP_PROXY = t.httpProxy, process.env.http_proxy = t.httpProxy), t.httpsProxy && (process.env.HTTPS_PROXY = t.httpsProxy, process.env.https_proxy = t.httpsProxy), t.allProxy && (process.env.ALL_PROXY = t.allProxy, process.env.all_proxy = t.allProxy), t.noProxy && (process.env.NO_PROXY = t.noProxy, process.env.no_proxy = t.noProxy);
+  };
+  if (t.mode === "off") {
+    await _e.defaultSession.setProxy({ mode: "direct" }), e();
+    return;
+  }
+  if (t.mode === "custom") {
+    const a = [t.allProxy, t.httpsProxy, t.httpProxy].filter((o) => !!o).join(";");
+    await _e.defaultSession.setProxy({
+      mode: a ? "fixed_servers" : "direct",
+      proxyRules: a,
+      proxyBypassRules: t.noProxy || ""
+    }), e(), n();
+    return;
+  }
+  await _e.defaultSession.setProxy({ mode: "system" }), e();
+}
+function kt() {
+  T = new wt({
     width: 1200,
     height: 800,
-    icon: path.join(process.env.VITE_PUBLIC || "", "electron-vite.svg"),
+    icon: L.join(process.env.VITE_PUBLIC || "", "electron-vite.svg"),
     webPreferences: {
-      preload: path.join(__dirname$1, "preload.mjs")
+      preload: L.join(ve, "preload.mjs")
     },
     // Win11 style & White Screen Fix
-    frame: true,
+    frame: !0,
     titleBarStyle: "default",
     backgroundColor: "#0a0a0f",
     // Match App Theme
-    show: false,
+    show: !1,
     // Wait for ready-to-show
-    autoHideMenuBar: true
+    autoHideMenuBar: !0
     // Hide default menu bar
-  });
-  win.once("ready-to-show", () => {
-    win == null ? void 0 : win.show();
-  });
-  win.webContents.on("did-finish-load", () => {
-    win == null ? void 0 : win.webContents.send("main-process-message", (/* @__PURE__ */ new Date()).toLocaleString());
-  });
-  win.webContents.on("before-input-event", (event, input) => {
-    if (input.key === "F11") {
-      win == null ? void 0 : win.setFullScreen(!win.isFullScreen());
-      event.preventDefault();
-    }
-    if (input.key === "F12" || input.control && input.shift && input.key.toLowerCase() === "i") {
-      if (win == null ? void 0 : win.webContents.isDevToolsOpened()) {
-        win.webContents.closeDevTools();
-      } else {
-        win == null ? void 0 : win.webContents.openDevTools();
-      }
-      event.preventDefault();
-    }
-  });
-  if (VITE_DEV_SERVER_URL) {
-    win.loadURL(VITE_DEV_SERVER_URL);
-  } else {
-    win.loadFile(path.join(RENDERER_DIST, "index.html"));
-  }
-  win.on("enter-full-screen", () => {
-    win == null ? void 0 : win.webContents.send("app:fullscreen-change", true);
-  });
-  win.on("leave-full-screen", () => {
-    win == null ? void 0 : win.webContents.send("app:fullscreen-change", false);
+  }), T.once("ready-to-show", () => {
+    T == null || T.show();
+  }), T.webContents.on("did-finish-load", () => {
+    T == null || T.webContents.send("main-process-message", (/* @__PURE__ */ new Date()).toLocaleString());
+  }), T.webContents.on("before-input-event", (r, t) => {
+    t.key === "F11" && (T == null || T.setFullScreen(!T.isFullScreen()), r.preventDefault()), (t.key === "F12" || t.control && t.shift && t.key.toLowerCase() === "i") && (T != null && T.webContents.isDevToolsOpened() ? T.webContents.closeDevTools() : T == null || T.webContents.openDevTools(), r.preventDefault());
+  }), qe ? T.loadURL(qe) : T.loadFile(L.join(Mt, "index.html")), T.on("enter-full-screen", () => {
+    T == null || T.webContents.send("app:fullscreen-change", !0);
+  }), T.on("leave-full-screen", () => {
+    T == null || T.webContents.send("app:fullscreen-change", !1);
   });
 }
-ipcMain.handle("app:toggle-fullscreen", () => {
-  if (win) {
-    const isFullScreen = win.isFullScreen();
-    win.setFullScreen(!isFullScreen);
-    return !isFullScreen;
+S.handle("app:toggle-fullscreen", () => {
+  if (T) {
+    const r = T.isFullScreen();
+    return T.setFullScreen(!r), !r;
   }
-  return false;
+  return !1;
 });
-ipcMain.handle("app:get-user-data-path", () => {
-  return app.getPath("userData");
-});
-ipcMain.handle("db:get-novels", async () => {
+S.handle("app:get-user-data-path", () => b.getPath("userData"));
+S.handle("db:get-novels", async () => {
   console.log("[Main] Received db:get-novels");
   try {
-    const novels = await db.novel.findMany({
+    return (await h.novel.findMany({
       include: {
         volumes: {
           select: {
-            chapters: { select: { wordCount: true } }
+            chapters: { select: { wordCount: !0 } }
           }
         }
       },
       orderBy: { updatedAt: "desc" }
-    });
-    return novels.map((n) => {
-      const totalWords = n.volumes.reduce(
-        (acc, v) => acc + v.chapters.reduce((cAcc, c) => cAcc + c.wordCount, 0),
+    })).map((t) => {
+      const e = t.volumes.reduce(
+        (o, c) => o + c.chapters.reduce((i, l) => i + l.wordCount, 0),
         0
-      );
-      const { volumes, ...rest } = n;
+      ), { volumes: n, ...a } = t;
       return {
-        ...rest,
-        wordCount: totalWords
+        ...a,
+        wordCount: e
       };
     });
-  } catch (e) {
-    console.error("[Main] db:get-novels failed:", e);
-    throw e;
+  } catch (r) {
+    throw console.error("[Main] db:get-novels failed:", r), r;
   }
 });
-ipcMain.handle("db:update-novel", async (_, { id, data }) => {
-  console.log("[Main] Updating novel:", id, data);
+S.handle("db:update-novel", async (r, { id: t, data: e }) => {
+  console.log("[Main] Updating novel:", t, e);
   try {
-    return await db.novel.update({
-      where: { id },
+    return await h.novel.update({
+      where: { id: t },
       data: {
-        ...data,
+        ...e,
         updatedAt: /* @__PURE__ */ new Date()
       }
     });
-  } catch (e) {
-    console.error("[Main] db:update-novel failed:", e);
-    throw e;
+  } catch (n) {
+    throw console.error("[Main] db:update-novel failed:", n), n;
   }
 });
-ipcMain.handle("db:upload-novel-cover", async (_, novelId) => {
-  var _a;
+S.handle("db:upload-novel-cover", async (r, t) => {
+  var e;
   try {
-    const result = await dialog.showOpenDialog(win, {
+    const n = await Ce.showOpenDialog(T, {
       title: "Select Cover Image",
       filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "webp", "gif", "bmp"] }],
       properties: ["openFile"]
     });
-    if (result.canceled || result.filePaths.length === 0)
+    if (n.canceled || n.filePaths.length === 0)
       return null;
-    const srcPath = result.filePaths[0];
-    const ext = path.extname(srcPath);
-    const coversDir = path.join(app.getPath("userData"), "covers");
-    if (!fs$1.existsSync(coversDir))
-      fs$1.mkdirSync(coversDir, { recursive: true });
-    const novel = await db.novel.findUnique({ where: { id: novelId }, select: { coverUrl: true } });
-    if ((_a = novel == null ? void 0 : novel.coverUrl) == null ? void 0 : _a.startsWith("covers/")) {
-      const oldPath = path.join(app.getPath("userData"), novel.coverUrl);
-      if (fs$1.existsSync(oldPath))
-        fs$1.unlinkSync(oldPath);
+    const a = n.filePaths[0], o = L.extname(a), c = L.join(b.getPath("userData"), "covers");
+    x.existsSync(c) || x.mkdirSync(c, { recursive: !0 });
+    const i = await h.novel.findUnique({ where: { id: t }, select: { coverUrl: !0 } });
+    if ((e = i == null ? void 0 : i.coverUrl) != null && e.startsWith("covers/")) {
+      const E = L.join(b.getPath("userData"), i.coverUrl);
+      x.existsSync(E) && x.unlinkSync(E);
     }
-    const fileName = `${novelId}${ext}`;
-    const destPath = path.join(coversDir, fileName);
-    fs$1.copyFileSync(srcPath, destPath);
-    const relativePath = `covers/${fileName}`;
-    await db.novel.update({
-      where: { id: novelId },
-      data: { coverUrl: relativePath }
-    });
-    return { path: relativePath };
-  } catch (e) {
-    console.error("[Main] db:upload-novel-cover failed:", e);
-    throw e;
+    const l = `${t}${o}`, I = L.join(c, l);
+    x.copyFileSync(a, I);
+    const w = `covers/${l}`;
+    return await h.novel.update({
+      where: { id: t },
+      data: { coverUrl: w }
+    }), { path: w };
+  } catch (n) {
+    throw console.error("[Main] db:upload-novel-cover failed:", n), n;
   }
 });
-ipcMain.handle("db:get-volumes", async (_, novelId) => {
+S.handle("db:get-volumes", async (r, t) => {
   try {
-    return await db.volume.findMany({
-      where: { novelId },
+    return await h.volume.findMany({
+      where: { novelId: t },
       include: {
         chapters: { orderBy: { order: "asc" } }
       },
       orderBy: { order: "asc" }
     });
   } catch (e) {
-    console.error("[Main] db:get-volumes failed:", e);
-    throw e;
+    throw console.error("[Main] db:get-volumes failed:", e), e;
   }
 });
-ipcMain.handle("db:create-volume", async (_, { novelId, title }) => {
+S.handle("db:create-volume", async (r, { novelId: t, title: e }) => {
   try {
-    const lastVol = await db.volume.findFirst({
-      where: { novelId },
+    const n = await h.volume.findFirst({
+      where: { novelId: t },
       orderBy: { order: "desc" }
+    }), a = ((n == null ? void 0 : n.order) || 0) + 1;
+    return await h.volume.create({
+      data: { novelId: t, title: e, order: a }
     });
-    const order = ((lastVol == null ? void 0 : lastVol.order) || 0) + 1;
-    return await db.volume.create({
-      data: { novelId, title, order }
-    });
-  } catch (e) {
-    console.error("[Main] db:create-volume failed:", e);
-    throw e;
+  } catch (n) {
+    throw console.error("[Main] db:create-volume failed:", n), n;
   }
 });
-ipcMain.handle("db:create-chapter", async (_, { volumeId, title, order }) => {
+S.handle("db:create-chapter", async (r, { volumeId: t, title: e, order: n }) => {
   try {
-    const chapter = await db.chapter.create({
+    const a = await h.chapter.create({
       data: {
-        volumeId,
-        title,
-        order,
+        volumeId: t,
+        title: e,
+        order: n,
         content: "",
         wordCount: 0
       },
-      include: { volume: { select: { novelId: true } } }
+      include: { volume: { select: { novelId: !0 } } }
     });
-    await indexChapter({ ...chapter, novelId: chapter.volume.novelId });
-    return chapter;
-  } catch (e) {
-    console.error("[Main] db:create-chapter failed:", e);
-    throw e;
+    return await Ee({ ...a, novelId: a.volume.novelId }), a;
+  } catch (a) {
+    throw console.error("[Main] db:create-chapter failed:", a), a;
   }
 });
-ipcMain.handle("db:get-chapter", async (_, id) => {
+S.handle("db:get-chapter", async (r, t) => {
   try {
-    return await db.chapter.findUnique({
-      where: { id },
-      include: { volume: { select: { novelId: true } } }
+    return await h.chapter.findUnique({
+      where: { id: t },
+      include: { volume: { select: { novelId: !0 } } }
     });
   } catch (e) {
-    console.error("[Main] db:get-chapter failed:", e);
-    throw e;
+    throw console.error("[Main] db:get-chapter failed:", e), e;
   }
 });
-ipcMain.handle("db:rename-volume", async (_, { volumeId, title }) => {
+S.handle("db:rename-volume", async (r, { volumeId: t, title: e }) => {
   try {
-    const updated = await db.volume.update({
-      where: { id: volumeId },
-      data: { title }
+    const n = await h.volume.update({
+      where: { id: t },
+      data: { title: e }
+    }), a = await h.chapter.findMany({
+      where: { volumeId: t },
+      include: { volume: { select: { novelId: !0, title: !0, order: !0 } } }
     });
-    const chapters = await db.chapter.findMany({
-      where: { volumeId },
-      include: { volume: { select: { novelId: true, title: true, order: true } } }
-    });
-    for (const chapter of chapters) {
-      await indexChapter({
-        ...chapter,
-        novelId: chapter.volume.novelId,
-        volumeTitle: chapter.volume.title,
-        volumeOrder: chapter.volume.order
+    for (const o of a)
+      await Ee({
+        ...o,
+        novelId: o.volume.novelId,
+        volumeTitle: o.volume.title,
+        volumeOrder: o.volume.order
       });
-    }
-    return updated;
-  } catch (e) {
-    console.error("[Main] db:rename-volume failed:", e);
-    throw e;
+    return n;
+  } catch (n) {
+    throw console.error("[Main] db:rename-volume failed:", n), n;
   }
 });
-ipcMain.handle("db:rename-chapter", async (_, { chapterId, title }) => {
+S.handle("db:rename-chapter", async (r, { chapterId: t, title: e }) => {
   try {
-    const updated = await db.chapter.update({
-      where: { id: chapterId },
-      data: { title }
+    const n = await h.chapter.update({
+      where: { id: t },
+      data: { title: e }
+    }), a = await h.chapter.findUnique({
+      where: { id: t },
+      select: { id: !0, title: !0, content: !0, volumeId: !0, order: !0, volume: { select: { novelId: !0 } } }
     });
-    const chapterData = await db.chapter.findUnique({
-      where: { id: chapterId },
-      select: { id: true, title: true, content: true, volumeId: true, order: true, volume: { select: { novelId: true } } }
-    });
-    if (chapterData && chapterData.volume) {
-      await indexChapter({ ...chapterData, novelId: chapterData.volume.novelId });
-    }
-    return updated;
-  } catch (e) {
-    console.error("[Main] db:rename-chapter failed:", e);
-    throw e;
+    return a && a.volume && await Ee({ ...a, novelId: a.volume.novelId }), n;
+  } catch (n) {
+    throw console.error("[Main] db:rename-chapter failed:", n), n;
   }
 });
-ipcMain.handle("db:create-novel", async (_, title) => {
-  console.log("[Main] Received db:create-novel:", title);
+S.handle("db:create-novel", async (r, t) => {
+  console.log("[Main] Received db:create-novel:", t);
   try {
-    const novel = await db.novel.create({
+    return await h.novel.create({
       data: {
-        title,
+        title: t,
         wordCount: 0,
         volumes: {
           create: {
@@ -6867,791 +5688,676 @@ ipcMain.handle("db:create-novel", async (_, title) => {
         }
       }
     });
-    return novel;
   } catch (e) {
-    console.error("[Main] db:create-novel failed:", e);
-    throw e;
+    throw console.error("[Main] db:create-novel failed:", e), e;
   }
 });
-ipcMain.handle("db:save-chapter", async (_, { chapterId, content }) => {
+S.handle("db:save-chapter", async (r, { chapterId: t, content: e }) => {
   try {
-    console.log("[Main] Saving chapter:", chapterId);
-    const chapter = await db.chapter.findUnique({
-      where: { id: chapterId },
+    console.log("[Main] Saving chapter:", t);
+    const n = await h.chapter.findUnique({
+      where: { id: t },
       select: {
-        wordCount: true,
-        volume: { select: { novelId: true } }
+        wordCount: !0,
+        volume: { select: { novelId: !0 } }
       }
     });
-    if (!chapter || !chapter.volume)
+    if (!n || !n.volume)
       throw new Error("Chapter or Volume not found");
-    const novelId = chapter.volume.novelId;
-    const newWordCount = content.length;
-    const delta = newWordCount - chapter.wordCount;
-    const [, updatedChapter] = await db.$transaction([
+    const a = n.volume.novelId, o = e.length, c = o - n.wordCount, [, i] = await h.$transaction([
       // 1. Update Novel WordCount
-      db.novel.update({
-        where: { id: novelId },
+      h.novel.update({
+        where: { id: a },
         data: {
-          wordCount: { increment: delta },
+          wordCount: { increment: c },
           updatedAt: /* @__PURE__ */ new Date()
         }
       }),
       // 2. Update Chapter
-      db.chapter.update({
-        where: { id: chapterId },
+      h.chapter.update({
+        where: { id: t },
         data: {
-          content,
-          wordCount: newWordCount,
+          content: e,
+          wordCount: o,
           updatedAt: /* @__PURE__ */ new Date()
         }
       })
-    ]);
-    const chapterData = await db.chapter.findUnique({
-      where: { id: chapterId },
-      select: { id: true, title: true, content: true, volumeId: true, order: true }
+    ]), l = await h.chapter.findUnique({
+      where: { id: t },
+      select: { id: !0, title: !0, content: !0, volumeId: !0, order: !0 }
     });
-    if (chapterData) {
-      await indexChapter({ ...chapterData, novelId });
-    }
-    scheduleChapterSummaryRebuild(chapterId);
-    return updatedChapter;
-  } catch (e) {
-    console.error("[Main] db:save-chapter failed:", e);
-    throw e;
+    return l && await Ee({ ...l, novelId: a }), Ge(t), i;
+  } catch (n) {
+    throw console.error("[Main] db:save-chapter failed:", n), n;
   }
 });
-ipcMain.handle("db:create-idea", async (_, data) => {
+S.handle("db:create-idea", async (r, t) => {
   try {
-    const { timestamp, tags, ...prismaData } = data;
-    const novelId = prismaData.novelId;
-    const result = await db.idea.create({
+    const { timestamp: e, tags: n, ...a } = t, o = a.novelId, c = await h.idea.create({
       data: {
-        ...prismaData,
+        ...a,
         tags: {
-          connectOrCreate: (tags || []).map((tag) => ({
-            where: { name_novelId: { name: tag, novelId } },
-            create: { name: tag, novelId }
+          connectOrCreate: (n || []).map((l) => ({
+            where: { name_novelId: { name: l, novelId: o } },
+            create: { name: l, novelId: o }
           }))
         }
       },
-      include: { tags: true }
-    });
-    const mappedResult = {
-      ...result,
-      tags: result.tags.map((t) => t.name),
-      timestamp: result.createdAt.getTime()
+      include: { tags: !0 }
+    }), i = {
+      ...c,
+      tags: c.tags.map((l) => l.name),
+      timestamp: c.createdAt.getTime()
     };
-    await indexIdea({
-      id: result.id,
-      content: result.content,
-      quote: result.quote,
-      novelId: result.novelId,
-      chapterId: result.chapterId
-    });
-    return mappedResult;
+    return await Ve({
+      id: c.id,
+      content: c.content,
+      quote: c.quote,
+      novelId: c.novelId,
+      chapterId: c.chapterId
+    }), i;
   } catch (e) {
-    console.error("[Main] db:create-idea failed:", e);
-    throw e;
+    throw console.error("[Main] db:create-idea failed:", e), e;
   }
 });
-ipcMain.handle("db:get-ideas", async (_, novelId) => {
+S.handle("db:get-ideas", async (r, t) => {
   try {
-    const ideas = await db.idea.findMany({
-      where: { novelId },
-      include: { tags: true },
+    return (await h.idea.findMany({
+      where: { novelId: t },
+      include: { tags: !0 },
       orderBy: [
         { isStarred: "desc" },
         { updatedAt: "desc" }
       ]
-    });
-    return ideas.map((idea) => ({
-      ...idea,
-      tags: idea.tags.map((t) => t.name),
-      timestamp: idea.createdAt.getTime()
+    })).map((n) => ({
+      ...n,
+      tags: n.tags.map((a) => a.name),
+      timestamp: n.createdAt.getTime()
     }));
   } catch (e) {
-    console.error("[Main] db:get-ideas failed:", e);
-    throw e;
+    throw console.error("[Main] db:get-ideas failed:", e), e;
   }
 });
-ipcMain.handle("db:update-idea", async (_, id, data) => {
+S.handle("db:update-idea", async (r, t, e) => {
   try {
-    const { timestamp, tags, ...updateData } = data;
-    const finalData = { ...updateData };
-    if (tags !== void 0) {
-      const currentIdea = await db.idea.findUnique({ where: { id }, select: { novelId: true } });
-      if (currentIdea) {
-        const novelId = currentIdea.novelId;
-        finalData.tags = {
+    const { timestamp: n, tags: a, ...o } = e, c = { ...o };
+    if (a !== void 0) {
+      const I = await h.idea.findUnique({ where: { id: t }, select: { novelId: !0 } });
+      if (I) {
+        const w = I.novelId;
+        c.tags = {
           set: [],
           // Disconnect all existing
-          connectOrCreate: (tags || []).map((tag) => ({
-            where: { name_novelId: { name: tag, novelId } },
-            create: { name: tag, novelId }
+          connectOrCreate: (a || []).map((E) => ({
+            where: { name_novelId: { name: E, novelId: w } },
+            create: { name: E, novelId: w }
           }))
         };
       }
     }
-    const result = await db.idea.update({
-      where: { id },
+    const i = await h.idea.update({
+      where: { id: t },
       data: {
-        ...finalData,
+        ...c,
         updatedAt: /* @__PURE__ */ new Date()
       },
-      include: { tags: true }
-    });
-    const mappedResult = {
-      ...result,
-      tags: result.tags.map((t) => t.name),
-      timestamp: result.createdAt.getTime()
+      include: { tags: !0 }
+    }), l = {
+      ...i,
+      tags: i.tags.map((I) => I.name),
+      timestamp: i.createdAt.getTime()
     };
-    await indexIdea({
-      id: result.id,
-      content: result.content,
-      quote: result.quote,
-      novelId: result.novelId,
-      chapterId: result.chapterId
-    });
-    return mappedResult;
-  } catch (e) {
-    console.error("[Main] db:update-idea failed:", e);
-    throw e;
+    return await Ve({
+      id: i.id,
+      content: i.content,
+      quote: i.quote,
+      novelId: i.novelId,
+      chapterId: i.chapterId
+    }), l;
+  } catch (n) {
+    throw console.error("[Main] db:update-idea failed:", n), n;
   }
 });
-ipcMain.handle("db:delete-idea", async (_, id) => {
+S.handle("db:delete-idea", async (r, t) => {
   try {
-    const result = await db.idea.delete({ where: { id } });
-    await removeFromIndex("idea", id);
-    return result;
+    const e = await h.idea.delete({ where: { id: t } });
+    return await Zt("idea", t), e;
   } catch (e) {
-    console.error("[Main] db:delete-idea failed:", e);
-    throw e;
+    throw console.error("[Main] db:delete-idea failed:", e), e;
   }
 });
-ipcMain.handle("db:check-index-status", async (_, novelId) => {
+S.handle("db:check-index-status", async (r, t) => {
   try {
-    const stats = await getIndexStats(novelId);
-    const chapterCount = await db.chapter.count({
-      where: { volume: { novelId } }
-    });
-    const ideaCount = await db.idea.count({
-      where: { novelId }
+    const e = await Kt(t), n = await h.chapter.count({
+      where: { volume: { novelId: t } }
+    }), a = await h.idea.count({
+      where: { novelId: t }
     });
     return {
-      indexedChapters: stats.chapters,
-      totalChapters: chapterCount,
-      indexedIdeas: stats.ideas,
-      totalIdeas: ideaCount
+      indexedChapters: e.chapters,
+      totalChapters: n,
+      indexedIdeas: e.ideas,
+      totalIdeas: a
     };
   } catch (e) {
-    console.error("[Main] db:check-index-status failed:", e);
-    throw e;
+    throw console.error("[Main] db:check-index-status failed:", e), e;
   }
 });
-const syncManager = new SyncManager();
-let aiService;
-ipcMain.handle("ai:get-settings", async () => {
+const Ot = new Lr();
+let R;
+S.handle("ai:get-settings", async () => {
   try {
-    return aiService.getSettings();
-  } catch (e) {
-    console.error("[Main] ai:get-settings failed:", e);
-    throw e;
+    return R.getSettings();
+  } catch (r) {
+    throw F("ai:get-settings", void 0, r), console.error("[Main] ai:get-settings failed:", r), r;
   }
 });
-ipcMain.handle("ai:get-map-image-stats", async () => {
+S.handle("ai:get-map-image-stats", async () => {
   try {
-    return aiService.getMapImageStats();
-  } catch (e) {
-    console.error("[Main] ai:get-map-image-stats failed:", e);
-    throw e;
+    return R.getMapImageStats();
+  } catch (r) {
+    throw F("ai:get-map-image-stats", void 0, r), console.error("[Main] ai:get-map-image-stats failed:", r), r;
   }
 });
-ipcMain.handle("ai:list-actions", async () => {
+S.handle("ai:list-actions", async () => {
   try {
-    return aiService.listActions();
-  } catch (e) {
-    console.error("[Main] ai:list-actions failed:", e);
-    throw e;
+    return R.listActions();
+  } catch (r) {
+    throw F("ai:list-actions", void 0, r), console.error("[Main] ai:list-actions failed:", r), r;
   }
 });
-ipcMain.handle("ai:get-capability-coverage", async () => {
+S.handle("ai:get-capability-coverage", async () => {
   try {
-    return aiService.getCapabilityCoverage();
-  } catch (e) {
-    console.error("[Main] ai:get-capability-coverage failed:", e);
-    throw e;
+    return R.getCapabilityCoverage();
+  } catch (r) {
+    throw F("ai:get-capability-coverage", void 0, r), console.error("[Main] ai:get-capability-coverage failed:", r), r;
   }
 });
-ipcMain.handle("ai:get-mcp-manifest", async () => {
+S.handle("ai:get-mcp-manifest", async () => {
   try {
-    return aiService.getMcpToolsManifest();
-  } catch (e) {
-    console.error("[Main] ai:get-mcp-manifest failed:", e);
-    throw e;
+    return R.getMcpToolsManifest();
+  } catch (r) {
+    throw F("ai:get-mcp-manifest", void 0, r), console.error("[Main] ai:get-mcp-manifest failed:", r), r;
   }
 });
-ipcMain.handle("ai:get-openclaw-manifest", async () => {
+S.handle("ai:get-openclaw-manifest", async () => {
   try {
-    return aiService.getOpenClawManifest();
-  } catch (e) {
-    console.error("[Main] ai:get-openclaw-manifest failed:", e);
-    throw e;
+    return R.getOpenClawManifest();
+  } catch (r) {
+    throw F("ai:get-openclaw-manifest", void 0, r), console.error("[Main] ai:get-openclaw-manifest failed:", r), r;
   }
 });
-ipcMain.handle("ai:get-openclaw-skill-manifest", async () => {
+S.handle("ai:get-openclaw-skill-manifest", async () => {
   try {
-    return aiService.getOpenClawSkillManifest();
-  } catch (e) {
-    console.error("[Main] ai:get-openclaw-skill-manifest failed:", e);
-    throw e;
+    return R.getOpenClawSkillManifest();
+  } catch (r) {
+    throw F("ai:get-openclaw-skill-manifest", void 0, r), console.error("[Main] ai:get-openclaw-skill-manifest failed:", r), r;
   }
 });
-ipcMain.handle("ai:update-settings", async (_, partial) => {
+S.handle("ai:update-settings", async (r, t) => {
   try {
-    const updated = aiService.updateSettings(partial || {});
-    await applyProxySettings(updated);
-    return updated;
+    const e = R.updateSettings(t || {});
+    return await xt(e), e;
   } catch (e) {
-    console.error("[Main] ai:update-settings failed:", e);
-    throw e;
+    throw F("ai:update-settings", t, e), console.error("[Main] ai:update-settings failed:", e), e;
   }
 });
-ipcMain.handle("ai:test-connection", async () => {
+S.handle("ai:test-connection", async () => {
   try {
-    return await aiService.testConnection();
-  } catch (e) {
-    console.error("[Main] ai:test-connection failed:", e);
-    throw e;
+    return await R.testConnection();
+  } catch (r) {
+    throw F("ai:test-connection", void 0, r), console.error("[Main] ai:test-connection failed:", r), r;
   }
 });
-ipcMain.handle("ai:test-mcp", async () => {
+S.handle("ai:test-mcp", async () => {
   try {
-    return await aiService.testMcp();
-  } catch (e) {
-    console.error("[Main] ai:test-mcp failed:", e);
-    throw e;
+    return await R.testMcp();
+  } catch (r) {
+    throw F("ai:test-mcp", void 0, r), console.error("[Main] ai:test-mcp failed:", r), r;
   }
 });
-ipcMain.handle("ai:test-openclaw-mcp", async () => {
+S.handle("ai:test-openclaw-mcp", async () => {
   try {
-    return await aiService.testOpenClawMcp();
-  } catch (e) {
-    console.error("[Main] ai:test-openclaw-mcp failed:", e);
-    throw e;
+    return await R.testOpenClawMcp();
+  } catch (r) {
+    throw F("ai:test-openclaw-mcp", void 0, r), console.error("[Main] ai:test-openclaw-mcp failed:", r), r;
   }
 });
-ipcMain.handle("ai:test-openclaw-skill", async () => {
+S.handle("ai:test-openclaw-skill", async () => {
   try {
-    return await aiService.testOpenClawSkill();
-  } catch (e) {
-    console.error("[Main] ai:test-openclaw-skill failed:", e);
-    throw e;
+    return await R.testOpenClawSkill();
+  } catch (r) {
+    throw F("ai:test-openclaw-skill", void 0, r), console.error("[Main] ai:test-openclaw-skill failed:", r), r;
   }
 });
-ipcMain.handle("ai:test-openclaw-smoke", async (_, payload) => {
+S.handle("ai:test-openclaw-smoke", async (r, t) => {
   try {
-    const kind = (payload == null ? void 0 : payload.kind) === "skill" ? "skill" : "mcp";
-    return await aiService.testOpenClawSmoke({ kind });
+    const e = (t == null ? void 0 : t.kind) === "skill" ? "skill" : "mcp";
+    return await R.testOpenClawSmoke({ kind: e });
   } catch (e) {
-    console.error("[Main] ai:test-openclaw-smoke failed:", e);
-    throw e;
+    throw F("ai:test-openclaw-smoke", t, e), console.error("[Main] ai:test-openclaw-smoke failed:", e), e;
   }
 });
-ipcMain.handle("ai:test-proxy", async () => {
+S.handle("ai:test-proxy", async () => {
   try {
-    return await aiService.testProxy();
-  } catch (e) {
-    console.error("[Main] ai:test-proxy failed:", e);
-    throw e;
+    return await R.testProxy();
+  } catch (r) {
+    throw F("ai:test-proxy", void 0, r), console.error("[Main] ai:test-proxy failed:", r), r;
   }
 });
-ipcMain.handle("ai:test-generate", async (_, payload) => {
+S.handle("ai:test-generate", async (r, t) => {
   try {
-    return await aiService.testGenerate(payload == null ? void 0 : payload.prompt);
+    return await R.testGenerate(t == null ? void 0 : t.prompt);
   } catch (e) {
-    console.error("[Main] ai:test-generate failed:", e);
-    throw e;
+    throw F("ai:test-generate", t, e), console.error("[Main] ai:test-generate failed:", e), e;
   }
 });
-ipcMain.handle("ai:generate-title", async (_, payload) => {
+S.handle("ai:generate-title", async (r, t) => {
   try {
-    return await aiService.generateTitle(payload);
+    return await R.generateTitle(t);
   } catch (e) {
-    console.error("[Main] ai:generate-title failed:", e);
-    throw e;
+    throw F("ai:generate-title", t, e), console.error("[Main] ai:generate-title failed:", e), e;
   }
 });
-ipcMain.handle("ai:continue-writing", async (_, payload) => {
+S.handle("ai:continue-writing", async (r, t) => {
   try {
-    return await aiService.continueWriting(payload);
+    return await R.continueWriting(t);
   } catch (e) {
-    console.error("[Main] ai:continue-writing failed:", e);
-    throw e;
+    throw F("ai:continue-writing", t, e), console.error("[Main] ai:continue-writing failed:", e), e;
   }
 });
-ipcMain.handle("ai:preview-continue-prompt", async (_, payload) => {
+S.handle("ai:preview-continue-prompt", async (r, t) => {
   try {
-    return await aiService.previewContinuePrompt(payload);
+    return await R.previewContinuePrompt(t);
   } catch (e) {
-    console.error("[Main] ai:preview-continue-prompt failed:", e);
-    throw e;
+    throw F("ai:preview-continue-prompt", t, e), console.error("[Main] ai:preview-continue-prompt failed:", e), e;
   }
 });
-ipcMain.handle("ai:check-consistency", async (_, payload) => {
+S.handle("ai:check-consistency", async (r, t) => {
   try {
-    return await aiService.checkConsistency(payload);
+    return await R.checkConsistency(t);
   } catch (e) {
-    console.error("[Main] ai:check-consistency failed:", e);
-    throw e;
+    throw F("ai:check-consistency", t, e), console.error("[Main] ai:check-consistency failed:", e), e;
   }
 });
-ipcMain.handle("ai:generate-creative-assets", async (_, payload) => {
+S.handle("ai:generate-creative-assets", async (r, t) => {
   try {
-    return await aiService.generateCreativeAssets(payload);
+    return await R.generateCreativeAssets(t);
   } catch (e) {
-    console.error("[Main] ai:generate-creative-assets failed:", e);
-    throw e;
+    throw F("ai:generate-creative-assets", t, e), console.error("[Main] ai:generate-creative-assets failed:", e), e;
   }
 });
-ipcMain.handle("ai:preview-creative-assets-prompt", async (_, payload) => {
+S.handle("ai:preview-creative-assets-prompt", async (r, t) => {
   try {
-    return await aiService.previewCreativeAssetsPrompt(payload);
+    return await R.previewCreativeAssetsPrompt(t);
   } catch (e) {
-    console.error("[Main] ai:preview-creative-assets-prompt failed:", e);
-    throw e;
+    throw F("ai:preview-creative-assets-prompt", t, e), console.error("[Main] ai:preview-creative-assets-prompt failed:", e), e;
   }
 });
-ipcMain.handle("ai:validate-creative-assets", async (_, payload) => {
+S.handle("ai:validate-creative-assets", async (r, t) => {
   try {
-    return await aiService.validateCreativeAssetsDraft(payload);
+    return await R.validateCreativeAssetsDraft(t);
   } catch (e) {
-    console.error("[Main] ai:validate-creative-assets failed:", e);
-    throw e;
+    throw F("ai:validate-creative-assets", t, e), console.error("[Main] ai:validate-creative-assets failed:", e), e;
   }
 });
-ipcMain.handle("ai:confirm-creative-assets", async (_, payload) => {
+S.handle("ai:confirm-creative-assets", async (r, t) => {
   try {
-    return await aiService.confirmCreativeAssets(payload);
+    return await R.confirmCreativeAssets(t);
   } catch (e) {
-    console.error("[Main] ai:confirm-creative-assets failed:", e);
-    throw e;
+    throw F("ai:confirm-creative-assets", t, e), console.error("[Main] ai:confirm-creative-assets failed:", e), e;
   }
 });
-ipcMain.handle("ai:generate-map-image", async (_, payload) => {
+S.handle("ai:generate-map-image", async (r, t) => {
   try {
-    return await aiService.generateMapImage(payload);
+    return await R.generateMapImage(t);
   } catch (e) {
-    console.error("[Main] ai:generate-map-image failed:", e);
-    const message = e instanceof Error ? e.message : String(e);
-    return { ok: false, code: "UNKNOWN", detail: message };
+    return F("ai:generate-map-image", t, e), console.error("[Main] ai:generate-map-image failed:", e), { ok: !1, code: "UNKNOWN", detail: e instanceof Error ? e.message : String(e) };
   }
 });
-ipcMain.handle("ai:preview-map-prompt", async (_, payload) => {
+S.handle("ai:preview-map-prompt", async (r, t) => {
   try {
-    return await aiService.previewMapPrompt(payload);
+    return await R.previewMapPrompt(t);
   } catch (e) {
-    console.error("[Main] ai:preview-map-prompt failed:", e);
-    throw e;
+    throw F("ai:preview-map-prompt", t, e), console.error("[Main] ai:preview-map-prompt failed:", e), e;
   }
 });
-ipcMain.handle("ai:rebuild-chapter-summary", async (_, payload) => {
+S.handle("ai:rebuild-chapter-summary", async (r, t) => {
   try {
-    if (!(payload == null ? void 0 : payload.chapterId)) {
-      return { ok: false, detail: "chapterId is required" };
-    }
-    scheduleChapterSummaryRebuild(payload.chapterId, "manual");
-    return { ok: true, detail: "summary rebuild scheduled" };
+    return t != null && t.chapterId ? (Ge(t.chapterId, "manual"), { ok: !0, detail: "summary rebuild scheduled" }) : { ok: !1, detail: "chapterId is required" };
   } catch (e) {
-    console.error("[Main] ai:rebuild-chapter-summary failed:", e);
-    return { ok: false, detail: e instanceof Error ? e.message : String(e) };
+    return F("ai:rebuild-chapter-summary", t, e), console.error("[Main] ai:rebuild-chapter-summary failed:", e), { ok: !1, detail: e instanceof Error ? e.message : String(e) };
   }
 });
-ipcMain.handle("ai:execute-action", async (_, payload) => {
+S.handle("ai:execute-action", async (r, t) => {
   try {
-    return await aiService.executeAction(payload);
+    return await R.executeAction(t);
   } catch (e) {
-    console.error("[Main] ai:execute-action failed:", e);
-    throw e;
+    throw F("ai:execute-action", t, e), console.error("[Main] ai:execute-action failed:", e), e;
   }
 });
-ipcMain.handle("ai:openclaw-invoke", async (_, payload) => {
+S.handle("ai:openclaw-invoke", async (r, t) => {
   try {
-    return await aiService.invokeOpenClawTool(payload);
+    return await R.invokeOpenClawTool(t);
   } catch (e) {
-    console.error("[Main] ai:openclaw-invoke failed:", e);
-    const normalized = normalizeAiError(e);
+    F("ai:openclaw-invoke", t, e), console.error("[Main] ai:openclaw-invoke failed:", e);
+    const n = te(e);
     return {
-      ok: false,
-      code: normalized.code,
-      error: formatAiErrorForDisplay(normalized.code, normalized.message)
+      ok: !1,
+      code: n.code,
+      error: ge(n.code, n.message)
     };
   }
 });
-ipcMain.handle("ai:openclaw-mcp-invoke", async (_, payload) => {
+S.handle("ai:openclaw-mcp-invoke", async (r, t) => {
   try {
-    return await aiService.invokeOpenClawTool(payload);
+    return await R.invokeOpenClawTool(t);
   } catch (e) {
-    console.error("[Main] ai:openclaw-mcp-invoke failed:", e);
-    const normalized = normalizeAiError(e);
+    F("ai:openclaw-mcp-invoke", t, e), console.error("[Main] ai:openclaw-mcp-invoke failed:", e);
+    const n = te(e);
     return {
-      ok: false,
-      code: normalized.code,
-      error: formatAiErrorForDisplay(normalized.code, normalized.message)
+      ok: !1,
+      code: n.code,
+      error: ge(n.code, n.message)
     };
   }
 });
-ipcMain.handle("ai:openclaw-skill-invoke", async (_, payload) => {
+S.handle("ai:openclaw-skill-invoke", async (r, t) => {
   try {
-    return await aiService.invokeOpenClawSkill(payload);
+    return await R.invokeOpenClawSkill(t);
   } catch (e) {
-    console.error("[Main] ai:openclaw-skill-invoke failed:", e);
-    const normalized = normalizeAiError(e);
+    F("ai:openclaw-skill-invoke", t, e), console.error("[Main] ai:openclaw-skill-invoke failed:", e);
+    const n = te(e);
     return {
-      ok: false,
-      code: normalized.code,
-      error: formatAiErrorForDisplay(normalized.code, normalized.message)
+      ok: !1,
+      code: n.code,
+      error: ge(n.code, n.message)
     };
   }
 });
-ipcMain.handle("sync:pull", async () => {
+S.handle("sync:pull", async () => {
   try {
-    return await syncManager.pull();
-  } catch (e) {
-    console.error("[Main] sync:pull failed:", e);
-    throw e;
+    return await Ot.pull();
+  } catch (r) {
+    throw console.error("[Main] sync:pull failed:", r), r;
   }
 });
-ipcMain.handle("backup:export", async (_, password) => {
+S.handle("backup:export", async (r, t) => {
   try {
-    return await backupService.exportData(void 0, password);
+    return await Me.exportData(void 0, t);
   } catch (e) {
-    console.error("[Main] backup:export failed:", e);
-    throw e;
+    throw console.error("[Main] backup:export failed:", e), e;
   }
 });
-ipcMain.handle("backup:import", async (_, { filePath, password }) => {
+S.handle("backup:import", async (r, { filePath: t, password: e }) => {
   try {
-    if (!filePath) {
-      const result = await dialog.showOpenDialog({
+    if (!t) {
+      const n = await Ce.showOpenDialog({
         title: "Import Backup",
         filters: [{ name: "Novel Editor Backup", extensions: ["nebak"] }],
         properties: ["openFile"]
       });
-      if (result.canceled || result.filePaths.length === 0)
-        return { success: false, code: "CANCELLED" };
-      filePath = result.filePaths[0];
+      if (n.canceled || n.filePaths.length === 0)
+        return { success: !1, code: "CANCELLED" };
+      t = n.filePaths[0];
     }
-    await backupService.importData(filePath, password);
-    return { success: true };
-  } catch (e) {
-    console.error("[Main] backup:import failed:", e);
-    const msg = e.message || e.toString();
-    if (msg.includes("PASSWORD_REQUIRED")) {
-      return { success: false, code: "PASSWORD_REQUIRED", filePath };
-    }
-    if (msg.includes("PASSWORD_INVALID")) {
-      return { success: false, code: "PASSWORD_INVALID", filePath };
-    }
-    return { success: false, message: msg };
+    return await Me.importData(t, e), { success: !0 };
+  } catch (n) {
+    console.error("[Main] backup:import failed:", n);
+    const a = n.message || n.toString();
+    return a.includes("PASSWORD_REQUIRED") ? { success: !1, code: "PASSWORD_REQUIRED", filePath: t } : a.includes("PASSWORD_INVALID") ? { success: !1, code: "PASSWORD_INVALID", filePath: t } : { success: !1, message: a };
   }
 });
-ipcMain.handle("backup:get-auto", async () => {
+S.handle("backup:get-auto", async () => {
   try {
-    return await backupService.getAutoBackups();
-  } catch (e) {
-    console.error("[Main] backup:get-auto failed:", e);
-    throw e;
+    return await Me.getAutoBackups();
+  } catch (r) {
+    throw console.error("[Main] backup:get-auto failed:", r), r;
   }
 });
-ipcMain.handle("backup:restore-auto", async (_, filename) => {
+S.handle("backup:restore-auto", async (r, t) => {
   try {
-    await backupService.restoreAutoBackup(filename);
-    return true;
+    return await Me.restoreAutoBackup(t), !0;
   } catch (e) {
-    console.error("[Main] backup:restore-auto failed:", e);
-    throw e;
+    throw console.error("[Main] backup:restore-auto failed:", e), e;
   }
 });
-ipcMain.handle("sync:push", async () => {
+S.handle("sync:push", async () => {
   try {
-    return await syncManager.push();
-  } catch (e) {
-    console.error("[Main] sync:push failed:", e);
-    throw e;
+    return await Ot.push();
+  } catch (r) {
+    throw console.error("[Main] sync:push failed:", r), r;
   }
 });
-ipcMain.handle("db:search", async (_, { novelId, keyword, limit = 20, offset = 0 }) => {
+S.handle("db:search", async (r, { novelId: t, keyword: e, limit: n = 20, offset: a = 0 }) => {
   try {
-    return await search(novelId, keyword, limit, offset);
-  } catch (e) {
-    console.error("[Main] db:search failed:", e);
-    throw e;
+    return await Ct(t, e, n, a);
+  } catch (o) {
+    throw console.error("[Main] db:search failed:", o), o;
   }
 });
-ipcMain.handle("db:rebuild-search-index", async (_, novelId) => {
+S.handle("db:rebuild-search-index", async (r, t) => {
   try {
-    return await rebuildIndex(novelId);
+    return await Jt(t);
   } catch (e) {
-    console.error("[Main] db:rebuild-search-index failed:", e);
-    throw e;
+    throw console.error("[Main] db:rebuild-search-index failed:", e), e;
   }
 });
-ipcMain.handle("db:get-all-tags", async (_, novelId) => {
+S.handle("db:get-all-tags", async (r, t) => {
   try {
-    if (!novelId)
-      return [];
-    const tags = await db.tag.findMany({
-      where: { novelId },
+    return t ? (await h.tag.findMany({
+      where: { novelId: t },
       orderBy: { name: "asc" },
-      select: { name: true }
-    });
-    return tags.map((t) => t.name);
+      select: { name: !0 }
+    })).map((n) => n.name) : [];
   } catch (e) {
-    console.error("[Main] db:get-all-tags failed:", e);
-    throw e;
+    throw console.error("[Main] db:get-all-tags failed:", e), e;
   }
 });
-ipcMain.handle("db:get-plot-lines", async (_, novelId) => {
+S.handle("db:get-plot-lines", async (r, t) => {
   try {
-    return await db.plotLine.findMany({
-      where: { novelId },
+    return await h.plotLine.findMany({
+      where: { novelId: t },
       include: {
         points: {
-          include: { anchors: true },
+          include: { anchors: !0 },
           orderBy: { order: "asc" }
         }
       },
       orderBy: { sortOrder: "asc" }
     });
   } catch (e) {
-    console.error("[Main] db:get-plot-lines failed:", e);
-    throw e;
+    throw console.error("[Main] db:get-plot-lines failed:", e), e;
   }
 });
-ipcMain.handle("db:create-plot-line", async (_, data) => {
+S.handle("db:create-plot-line", async (r, t) => {
   try {
-    const maxOrder = await db.plotLine.aggregate({
-      where: { novelId: data.novelId },
-      _max: { sortOrder: true }
-    });
-    const order = (maxOrder._max.sortOrder || 0) + 1;
-    return await db.plotLine.create({
-      data: { ...data, sortOrder: order }
+    const n = ((await h.plotLine.aggregate({
+      where: { novelId: t.novelId },
+      _max: { sortOrder: !0 }
+    }))._max.sortOrder || 0) + 1;
+    return await h.plotLine.create({
+      data: { ...t, sortOrder: n }
     });
   } catch (e) {
-    console.error("[Main] db:create-plot-line failed. Data:", data, "Error:", e);
-    throw e;
+    throw console.error("[Main] db:create-plot-line failed. Data:", t, "Error:", e), e;
   }
 });
-ipcMain.handle("db:update-plot-line", async (_, data) => {
+S.handle("db:update-plot-line", async (r, t) => {
   try {
-    return await db.plotLine.update({
-      where: { id: data.id },
-      data: data.data
+    return await h.plotLine.update({
+      where: { id: t.id },
+      data: t.data
     });
   } catch (e) {
-    console.error("[Main] db:update-plot-line failed. ID:", data.id, "Error:", e);
-    throw e;
+    throw console.error("[Main] db:update-plot-line failed. ID:", t.id, "Error:", e), e;
   }
 });
-ipcMain.handle("db:delete-plot-line", async (_, id) => {
+S.handle("db:delete-plot-line", async (r, t) => {
   try {
-    return await db.plotLine.delete({ where: { id } });
+    return await h.plotLine.delete({ where: { id: t } });
   } catch (e) {
-    console.error("[Main] db:delete-plot-line failed. ID:", id, "Error:", e);
-    throw e;
+    throw console.error("[Main] db:delete-plot-line failed. ID:", t, "Error:", e), e;
   }
 });
-ipcMain.handle("db:create-plot-point", async (_, data) => {
+S.handle("db:create-plot-point", async (r, t) => {
   try {
-    const { plotLineId } = data;
-    const maxOrder = await db.plotPoint.aggregate({
-      where: { plotLineId },
-      _max: { order: true }
-    });
-    const order = (maxOrder._max.order || 0) + 1;
-    return await db.plotPoint.create({
-      data: { ...data, order }
+    const { plotLineId: e } = t, a = ((await h.plotPoint.aggregate({
+      where: { plotLineId: e },
+      _max: { order: !0 }
+    }))._max.order || 0) + 1;
+    return await h.plotPoint.create({
+      data: { ...t, order: a }
     });
   } catch (e) {
-    console.error("[Main] db:create-plot-point failed. Data:", data, "Error:", e);
-    throw e;
+    throw console.error("[Main] db:create-plot-point failed. Data:", t, "Error:", e), e;
   }
 });
-ipcMain.handle("db:update-plot-point", async (_, data) => {
+S.handle("db:update-plot-point", async (r, t) => {
   try {
-    return await db.plotPoint.update({
-      where: { id: data.id },
-      data: data.data
+    return await h.plotPoint.update({
+      where: { id: t.id },
+      data: t.data
     });
   } catch (e) {
-    console.error("[Main] db:update-plot-point failed. ID:", data.id, "Error:", e);
-    throw e;
+    throw console.error("[Main] db:update-plot-point failed. ID:", t.id, "Error:", e), e;
   }
 });
-ipcMain.handle("db:delete-plot-point", async (_, id) => {
+S.handle("db:delete-plot-point", async (r, t) => {
   try {
-    return await db.plotPoint.delete({ where: { id } });
+    return await h.plotPoint.delete({ where: { id: t } });
   } catch (e) {
-    console.error("[Main] db:delete-plot-point failed. ID:", id, "Error:", e);
-    throw e;
+    throw console.error("[Main] db:delete-plot-point failed. ID:", t, "Error:", e), e;
   }
 });
-ipcMain.handle("db:create-plot-point-anchor", async (_, data) => {
+S.handle("db:create-plot-point-anchor", async (r, t) => {
   try {
-    return await db.plotPointAnchor.create({ data });
+    return await h.plotPointAnchor.create({ data: t });
   } catch (e) {
-    console.error("[Main] db:create-plot-point-anchor failed. Data:", data, "Error:", e);
-    throw e;
+    throw console.error("[Main] db:create-plot-point-anchor failed. Data:", t, "Error:", e), e;
   }
 });
-ipcMain.handle("db:delete-plot-point-anchor", async (_, id) => {
+S.handle("db:delete-plot-point-anchor", async (r, t) => {
   try {
-    return await db.plotPointAnchor.delete({ where: { id } });
+    return await h.plotPointAnchor.delete({ where: { id: t } });
   } catch (e) {
-    console.error("[Main] db:delete-plot-point-anchor failed. ID:", id, "Error:", e);
-    throw e;
+    throw console.error("[Main] db:delete-plot-point-anchor failed. ID:", t, "Error:", e), e;
   }
 });
-ipcMain.handle("db:reorder-plot-lines", async (_, { lineIds }) => {
+S.handle("db:reorder-plot-lines", async (r, { lineIds: t }) => {
   try {
-    const updates = lineIds.map(
-      (id, index) => db.plotLine.update({
-        where: { id },
-        data: { sortOrder: index }
+    const e = t.map(
+      (n, a) => h.plotLine.update({
+        where: { id: n },
+        data: { sortOrder: a }
       })
     );
-    await db.$transaction(updates);
-    return { success: true };
+    return await h.$transaction(e), { success: !0 };
   } catch (e) {
-    console.error("[Main] db:reorder-plot-lines failed:", e);
-    throw e;
+    throw console.error("[Main] db:reorder-plot-lines failed:", e), e;
   }
 });
-ipcMain.handle("db:reorder-plot-points", async (_, { plotLineId, pointIds }) => {
+S.handle("db:reorder-plot-points", async (r, { plotLineId: t, pointIds: e }) => {
   try {
-    const updates = pointIds.map(
-      (id, index) => db.plotPoint.update({
-        where: { id },
-        data: { order: index, plotLineId }
+    const n = e.map(
+      (a, o) => h.plotPoint.update({
+        where: { id: a },
+        data: { order: o, plotLineId: t }
       })
     );
-    await db.$transaction(updates);
-    return { success: true };
-  } catch (e) {
-    console.error("[Main] db:reorder-plot-points failed:", e);
-    throw e;
+    return await h.$transaction(n), { success: !0 };
+  } catch (n) {
+    throw console.error("[Main] db:reorder-plot-points failed:", n), n;
   }
 });
-ipcMain.handle("db:upload-character-image", async (_, { characterId, type }) => {
+S.handle("db:upload-character-image", async (r, { characterId: t, type: e }) => {
   try {
-    const result = await dialog.showOpenDialog(win, {
-      title: type === "avatar" ? "Select Avatar Image" : "Select Full Body Image",
+    const n = await Ce.showOpenDialog(T, {
+      title: e === "avatar" ? "Select Avatar Image" : "Select Full Body Image",
       filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "webp", "gif", "bmp"] }],
       properties: ["openFile"]
     });
-    if (result.canceled || result.filePaths.length === 0)
+    if (n.canceled || n.filePaths.length === 0)
       return null;
-    const srcPath = result.filePaths[0];
-    const ext = path.extname(srcPath);
-    const charDir = path.join(app.getPath("userData"), "characters", characterId);
-    if (!fs$1.existsSync(charDir))
-      fs$1.mkdirSync(charDir, { recursive: true });
-    if (type === "avatar") {
-      const fileName = `avatar${ext}`;
-      const destPath = path.join(charDir, fileName);
-      const existingFiles = fs$1.readdirSync(charDir).filter((f) => f.startsWith("avatar."));
-      existingFiles.forEach((f) => {
+    const a = n.filePaths[0], o = L.extname(a), c = L.join(b.getPath("userData"), "characters", t);
+    if (x.existsSync(c) || x.mkdirSync(c, { recursive: !0 }), e === "avatar") {
+      const i = `avatar${o}`, l = L.join(c, i);
+      x.readdirSync(c).filter((E) => E.startsWith("avatar.")).forEach((E) => {
         try {
-          fs$1.unlinkSync(path.join(charDir, f));
+          x.unlinkSync(L.join(c, E));
         } catch {
         }
-      });
-      fs$1.copyFileSync(srcPath, destPath);
-      const relativePath = `characters/${characterId}/${fileName}`;
-      await db.character.update({
-        where: { id: characterId },
-        data: { avatar: relativePath }
-      });
-      return { path: relativePath };
+      }), x.copyFileSync(a, l);
+      const w = `characters/${t}/${i}`;
+      return await h.character.update({
+        where: { id: t },
+        data: { avatar: w }
+      }), { path: w };
     } else {
-      const timestamp = Date.now();
-      const fileName = `fullbody_${timestamp}${ext}`;
-      const destPath = path.join(charDir, fileName);
-      fs$1.copyFileSync(srcPath, destPath);
-      const relativePath = `characters/${characterId}/${fileName}`;
-      const char = await db.character.findUnique({ where: { id: characterId }, select: { fullBodyImages: true } });
-      let images = [];
+      const l = `fullbody_${Date.now()}${o}`, I = L.join(c, l);
+      x.copyFileSync(a, I);
+      const w = `characters/${t}/${l}`, E = await h.character.findUnique({ where: { id: t }, select: { fullBodyImages: !0 } });
+      let C = [];
       try {
-        images = JSON.parse((char == null ? void 0 : char.fullBodyImages) || "[]");
+        C = JSON.parse((E == null ? void 0 : E.fullBodyImages) || "[]");
       } catch {
       }
-      images.push(relativePath);
-      await db.character.update({
-        where: { id: characterId },
-        data: { fullBodyImages: JSON.stringify(images) }
-      });
-      return { path: relativePath, images };
+      return C.push(w), await h.character.update({
+        where: { id: t },
+        data: { fullBodyImages: JSON.stringify(C) }
+      }), { path: w, images: C };
     }
-  } catch (e) {
-    console.error("[Main] db:upload-character-image failed:", e);
-    throw e;
+  } catch (n) {
+    throw console.error("[Main] db:upload-character-image failed:", n), n;
   }
 });
-ipcMain.handle("db:delete-character-image", async (_, { characterId, imagePath, type }) => {
+S.handle("db:delete-character-image", async (r, { characterId: t, imagePath: e, type: n }) => {
   try {
-    const fullPath = path.join(app.getPath("userData"), imagePath);
-    if (fs$1.existsSync(fullPath))
-      fs$1.unlinkSync(fullPath);
-    if (type === "avatar") {
-      await db.character.update({
-        where: { id: characterId },
+    const a = L.join(b.getPath("userData"), e);
+    if (x.existsSync(a) && x.unlinkSync(a), n === "avatar")
+      await h.character.update({
+        where: { id: t },
         data: { avatar: null }
       });
-    } else {
-      const char = await db.character.findUnique({ where: { id: characterId }, select: { fullBodyImages: true } });
-      let images = [];
+    else {
+      const o = await h.character.findUnique({ where: { id: t }, select: { fullBodyImages: !0 } });
+      let c = [];
       try {
-        images = JSON.parse((char == null ? void 0 : char.fullBodyImages) || "[]");
+        c = JSON.parse((o == null ? void 0 : o.fullBodyImages) || "[]");
       } catch {
       }
-      images = images.filter((p) => p !== imagePath);
-      await db.character.update({
-        where: { id: characterId },
-        data: { fullBodyImages: JSON.stringify(images) }
+      c = c.filter((i) => i !== e), await h.character.update({
+        where: { id: t },
+        data: { fullBodyImages: JSON.stringify(c) }
       });
     }
-  } catch (e) {
-    console.error("[Main] db:delete-character-image failed:", e);
-    throw e;
+  } catch (a) {
+    throw console.error("[Main] db:delete-character-image failed:", a), a;
   }
 });
-ipcMain.handle("db:get-character-map-locations", async (_, characterId) => {
+S.handle("db:get-character-map-locations", async (r, t) => {
   try {
-    const markers = await db.characterMapMarker.findMany({
-      where: { characterId },
+    return (await h.characterMapMarker.findMany({
+      where: { characterId: t },
       include: {
-        map: { select: { id: true, name: true, type: true } }
+        map: { select: { id: !0, name: !0, type: !0 } }
       }
-    });
-    return markers.map((m) => ({
-      mapId: m.map.id,
-      mapName: m.map.name,
-      mapType: m.map.type
+    })).map((n) => ({
+      mapId: n.map.id,
+      mapName: n.map.name,
+      mapType: n.map.type
     }));
   } catch (e) {
-    console.error("[Main] db:get-character-map-locations failed:", e);
-    return [];
+    return console.error("[Main] db:get-character-map-locations failed:", e), [];
   }
 });
-ipcMain.handle("db:get-characters", async (_, novelId) => {
+S.handle("db:get-characters", async (r, t) => {
   try {
-    return await db.character.findMany({
-      where: { novelId },
+    return await h.character.findMany({
+      where: { novelId: t },
       include: {
         items: {
-          include: { item: true }
+          include: { item: !0 }
         }
       },
       orderBy: [
@@ -7660,699 +6366,596 @@ ipcMain.handle("db:get-characters", async (_, novelId) => {
       ]
     });
   } catch (e) {
-    console.error("[Main] db:get-characters failed:", e);
-    throw e;
+    throw console.error("[Main] db:get-characters failed:", e), e;
   }
 });
-ipcMain.handle("db:get-character", async (_, id) => {
+S.handle("db:get-character", async (r, t) => {
   try {
-    return await db.character.findUnique({
-      where: { id },
+    return await h.character.findUnique({
+      where: { id: t },
       include: {
         items: {
-          include: { item: true }
+          include: { item: !0 }
         }
       }
     });
   } catch (e) {
-    console.error("[Main] db:get-character failed:", e);
-    throw e;
+    throw console.error("[Main] db:get-character failed:", e), e;
   }
 });
-ipcMain.handle("db:create-character", async (_, data) => {
+S.handle("db:create-character", async (r, t) => {
   try {
-    const profileData = typeof data.profile === "object" ? JSON.stringify(data.profile) : data.profile;
-    return await db.character.create({
-      data: { ...data, profile: profileData }
+    const e = typeof t.profile == "object" ? JSON.stringify(t.profile) : t.profile;
+    return await h.character.create({
+      data: { ...t, profile: e }
     });
   } catch (e) {
-    console.error("[Main] db:create-character failed:", e);
-    throw e;
+    throw console.error("[Main] db:create-character failed:", e), e;
   }
 });
-ipcMain.handle("db:update-character", async (_, { id, data }) => {
+S.handle("db:update-character", async (r, { id: t, data: e }) => {
   try {
-    const profileData = typeof data.profile === "object" ? JSON.stringify(data.profile) : data.profile;
-    return await db.character.update({
-      where: { id },
-      data: { ...data, profile: profileData }
+    const n = typeof e.profile == "object" ? JSON.stringify(e.profile) : e.profile;
+    return await h.character.update({
+      where: { id: t },
+      data: { ...e, profile: n }
     });
-  } catch (e) {
-    console.error("[Main] db:update-character failed:", e);
-    throw e;
+  } catch (n) {
+    throw console.error("[Main] db:update-character failed:", n), n;
   }
 });
-ipcMain.handle("db:delete-character", async (_, id) => {
+S.handle("db:delete-character", async (r, t) => {
   try {
-    await db.character.delete({ where: { id } });
+    await h.character.delete({ where: { id: t } });
   } catch (e) {
-    console.error("[Main] db:delete-character failed:", e);
-    throw e;
+    throw console.error("[Main] db:delete-character failed:", e), e;
   }
 });
-ipcMain.handle("db:get-items", async (_, novelId) => {
+S.handle("db:get-items", async (r, t) => {
   try {
-    return await db.item.findMany({
-      where: { novelId },
+    return await h.item.findMany({
+      where: { novelId: t },
       orderBy: { sortOrder: "asc" }
     });
   } catch (e) {
-    console.error("[Main] db:get-items failed:", e);
-    throw e;
+    throw console.error("[Main] db:get-items failed:", e), e;
   }
 });
-ipcMain.handle("db:get-item", async (_, id) => {
+S.handle("db:get-item", async (r, t) => {
   try {
-    return await db.item.findUnique({ where: { id } });
+    return await h.item.findUnique({ where: { id: t } });
   } catch (e) {
-    console.error("[Main] db:get-item failed:", e);
-    throw e;
+    throw console.error("[Main] db:get-item failed:", e), e;
   }
 });
-ipcMain.handle("db:create-item", async (_, data) => {
+S.handle("db:create-item", async (r, t) => {
   try {
-    const maxOrder = await db.item.aggregate({
-      where: { novelId: data.novelId },
-      _max: { sortOrder: true }
-    });
-    const sortOrder = (maxOrder._max.sortOrder || 0) + 1;
-    return await db.item.create({
-      data: { ...data, sortOrder }
+    const n = ((await h.item.aggregate({
+      where: { novelId: t.novelId },
+      _max: { sortOrder: !0 }
+    }))._max.sortOrder || 0) + 1;
+    return await h.item.create({
+      data: { ...t, sortOrder: n }
     });
   } catch (e) {
-    console.error("[Main] db:create-item failed:", e);
-    throw e;
+    throw console.error("[Main] db:create-item failed:", e), e;
   }
 });
-ipcMain.handle("db:update-item", async (_, { id, data }) => {
+S.handle("db:update-item", async (r, { id: t, data: e }) => {
   try {
-    return await db.item.update({
-      where: { id },
-      data: { ...data, updatedAt: /* @__PURE__ */ new Date() }
+    return await h.item.update({
+      where: { id: t },
+      data: { ...e, updatedAt: /* @__PURE__ */ new Date() }
     });
-  } catch (e) {
-    console.error("[Main] db:update-item failed:", e);
-    throw e;
+  } catch (n) {
+    throw console.error("[Main] db:update-item failed:", n), n;
   }
 });
-ipcMain.handle("db:delete-item", async (_, id) => {
+S.handle("db:delete-item", async (r, t) => {
   try {
-    return await db.item.delete({ where: { id } });
+    return await h.item.delete({ where: { id: t } });
   } catch (e) {
-    console.error("[Main] db:delete-item failed:", e);
-    throw e;
+    throw console.error("[Main] db:delete-item failed:", e), e;
   }
 });
-ipcMain.handle("db:get-mentionables", async (_, novelId) => {
+S.handle("db:get-mentionables", async (r, t) => {
   try {
-    const [characters, items, worldSettings, maps] = await Promise.all([
-      db.character.findMany({
-        where: { novelId },
-        select: { id: true, name: true, avatar: true, role: true, isStarred: true },
+    const [e, n, a, o] = await Promise.all([
+      h.character.findMany({
+        where: { novelId: t },
+        select: { id: !0, name: !0, avatar: !0, role: !0, isStarred: !0 },
         orderBy: [
           { isStarred: "desc" },
           { name: "asc" }
         ]
       }),
-      db.item.findMany({
-        where: { novelId },
-        select: { id: true, name: true, icon: true },
+      h.item.findMany({
+        where: { novelId: t },
+        select: { id: !0, name: !0, icon: !0 },
         orderBy: { name: "asc" }
       }),
-      db.worldSetting.findMany({
-        where: { novelId },
-        select: { id: true, name: true, icon: true, type: true },
+      h.worldSetting.findMany({
+        where: { novelId: t },
+        select: { id: !0, name: !0, icon: !0, type: !0 },
         orderBy: { name: "asc" }
       }),
-      db.mapCanvas.findMany({
-        where: { novelId },
-        select: { id: true, name: true, type: true },
+      h.mapCanvas.findMany({
+        where: { novelId: t },
+        select: { id: !0, name: !0, type: !0 },
         orderBy: { name: "asc" }
       })
     ]);
     return [
-      ...characters.map((c) => ({ ...c, type: "character" })),
-      ...items.map((i) => ({ ...i, type: "item" })),
-      ...worldSettings.map((ws) => ({ id: ws.id, name: ws.name, icon: ws.icon, type: "world", role: ws.type })),
-      ...maps.map((m) => ({ id: m.id, name: m.name, type: "map", role: m.type }))
+      ...e.map((c) => ({ ...c, type: "character" })),
+      ...n.map((c) => ({ ...c, type: "item" })),
+      ...a.map((c) => ({ id: c.id, name: c.name, icon: c.icon, type: "world", role: c.type })),
+      ...o.map((c) => ({ id: c.id, name: c.name, type: "map", role: c.type }))
     ];
   } catch (e) {
-    console.error("[Main] db:get-mentionables failed:", e);
-    throw e;
+    throw console.error("[Main] db:get-mentionables failed:", e), e;
   }
 });
-ipcMain.handle("db:get-world-settings", async (_, novelId) => {
+S.handle("db:get-world-settings", async (r, t) => {
   try {
-    return await db.worldSetting.findMany({
-      where: { novelId },
+    return await h.worldSetting.findMany({
+      where: { novelId: t },
       orderBy: { sortOrder: "asc" }
     });
   } catch (e) {
-    console.error("[Main] db:get-world-settings failed:", e);
-    throw e;
+    throw console.error("[Main] db:get-world-settings failed:", e), e;
   }
 });
-ipcMain.handle("db:create-world-setting", async (_, data) => {
+S.handle("db:create-world-setting", async (r, t) => {
   try {
-    const last = await db.worldSetting.findFirst({
-      where: { novelId: data.novelId },
+    const e = await h.worldSetting.findFirst({
+      where: { novelId: t.novelId },
       orderBy: { sortOrder: "desc" }
     });
-    return await db.worldSetting.create({
+    return await h.worldSetting.create({
       data: {
-        novelId: data.novelId,
-        name: data.name,
-        type: data.type || "other",
-        sortOrder: ((last == null ? void 0 : last.sortOrder) || 0) + 1
+        novelId: t.novelId,
+        name: t.name,
+        type: t.type || "other",
+        sortOrder: ((e == null ? void 0 : e.sortOrder) || 0) + 1
       }
     });
   } catch (e) {
-    console.error("[Main] db:create-world-setting failed:", e);
-    throw e;
+    throw console.error("[Main] db:create-world-setting failed:", e), e;
   }
 });
-ipcMain.handle("db:update-world-setting", async (_, id, data) => {
+S.handle("db:update-world-setting", async (r, t, e) => {
   try {
-    return await db.worldSetting.update({
-      where: { id },
-      data
+    return await h.worldSetting.update({
+      where: { id: t },
+      data: e
     });
-  } catch (e) {
-    console.error("[Main] db:update-world-setting failed:", e);
-    throw e;
+  } catch (n) {
+    throw console.error("[Main] db:update-world-setting failed:", n), n;
   }
 });
-ipcMain.handle("db:delete-world-setting", async (_, id) => {
+S.handle("db:delete-world-setting", async (r, t) => {
   try {
-    return await db.worldSetting.delete({ where: { id } });
+    return await h.worldSetting.delete({ where: { id: t } });
   } catch (e) {
-    console.error("[Main] db:delete-world-setting failed:", e);
-    throw e;
+    throw console.error("[Main] db:delete-world-setting failed:", e), e;
   }
 });
-ipcMain.handle("db:get-maps", async (_, novelId) => {
+S.handle("db:get-maps", async (r, t) => {
   try {
-    return await db.mapCanvas.findMany({
-      where: { novelId },
+    return await h.mapCanvas.findMany({
+      where: { novelId: t },
       orderBy: { sortOrder: "asc" }
     });
   } catch (e) {
-    console.error("[Main] db:get-maps failed:", e);
-    throw e;
+    throw console.error("[Main] db:get-maps failed:", e), e;
   }
 });
-ipcMain.handle("db:get-map", async (_, id) => {
+S.handle("db:get-map", async (r, t) => {
   try {
-    return await db.mapCanvas.findUnique({
-      where: { id },
+    return await h.mapCanvas.findUnique({
+      where: { id: t },
       include: {
-        markers: { include: { character: { select: { id: true, name: true, avatar: true, role: true } } } },
+        markers: { include: { character: { select: { id: !0, name: !0, avatar: !0, role: !0 } } } },
         elements: { orderBy: { z: "asc" } }
       }
     });
   } catch (e) {
-    console.error("[Main] db:get-map failed:", e);
-    throw e;
+    throw console.error("[Main] db:get-map failed:", e), e;
   }
 });
-ipcMain.handle("db:create-map", async (_, data) => {
+S.handle("db:create-map", async (r, t) => {
   try {
-    return await db.mapCanvas.create({ data });
+    return await h.mapCanvas.create({ data: t });
   } catch (e) {
-    console.error("[Main] db:create-map failed:", e);
-    throw e;
+    throw console.error("[Main] db:create-map failed:", e), e;
   }
 });
-ipcMain.handle("db:update-map", async (_, { id, data }) => {
+S.handle("db:update-map", async (r, { id: t, data: e }) => {
   try {
-    const { markers, elements, createdAt, updatedAt, ...updateData } = data;
-    return await db.mapCanvas.update({ where: { id }, data: updateData });
-  } catch (e) {
-    console.error("[Main] db:update-map failed:", e);
-    throw e;
+    const { markers: n, elements: a, createdAt: o, updatedAt: c, ...i } = e;
+    return await h.mapCanvas.update({ where: { id: t }, data: i });
+  } catch (n) {
+    throw console.error("[Main] db:update-map failed:", n), n;
   }
 });
-ipcMain.handle("db:delete-map", async (_, id) => {
+S.handle("db:delete-map", async (r, t) => {
   try {
-    const map = await db.mapCanvas.findUnique({ where: { id }, select: { background: true, novelId: true } });
-    if (map == null ? void 0 : map.background) {
-      const bgPath = path.join(app.getPath("userData"), map.background);
-      if (fs$1.existsSync(bgPath))
-        fs$1.unlinkSync(bgPath);
+    const e = await h.mapCanvas.findUnique({ where: { id: t }, select: { background: !0, novelId: !0 } });
+    if (e != null && e.background) {
+      const n = L.join(b.getPath("userData"), e.background);
+      x.existsSync(n) && x.unlinkSync(n);
     }
-    return await db.mapCanvas.delete({ where: { id } });
+    return await h.mapCanvas.delete({ where: { id: t } });
   } catch (e) {
-    console.error("[Main] db:delete-map failed:", e);
-    throw e;
+    throw console.error("[Main] db:delete-map failed:", e), e;
   }
 });
-ipcMain.handle("db:upload-map-bg", async (_, mapId) => {
+S.handle("db:upload-map-bg", async (r, t) => {
   try {
-    const map = await db.mapCanvas.findUnique({ where: { id: mapId }, select: { novelId: true, background: true } });
-    if (!map)
+    const e = await h.mapCanvas.findUnique({ where: { id: t }, select: { novelId: !0, background: !0 } });
+    if (!e)
       return null;
-    const result = await dialog.showOpenDialog(win, {
+    const n = await Ce.showOpenDialog(T, {
       title: "Select Map Image",
       filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "webp", "gif", "bmp"] }],
       properties: ["openFile"]
     });
-    if (result.canceled || result.filePaths.length === 0)
+    if (n.canceled || n.filePaths.length === 0)
       return null;
-    const srcPath = result.filePaths[0];
-    const ext = path.extname(srcPath);
-    const mapsDir = path.join(app.getPath("userData"), "maps", map.novelId);
-    if (!fs$1.existsSync(mapsDir))
-      fs$1.mkdirSync(mapsDir, { recursive: true });
-    if (map.background) {
-      const oldPath = path.join(app.getPath("userData"), map.background);
-      if (fs$1.existsSync(oldPath))
-        fs$1.unlinkSync(oldPath);
+    const a = n.filePaths[0], o = L.extname(a), c = L.join(b.getPath("userData"), "maps", e.novelId);
+    if (x.existsSync(c) || x.mkdirSync(c, { recursive: !0 }), e.background) {
+      const g = L.join(b.getPath("userData"), e.background);
+      x.existsSync(g) && x.unlinkSync(g);
     }
-    const fileName = `${mapId}${ext}`;
-    const destPath = path.join(mapsDir, fileName);
-    fs$1.copyFileSync(srcPath, destPath);
-    const relativePath = `maps/${map.novelId}/${fileName}`;
-    const img = nativeImage.createFromPath(destPath);
-    const imgSize = img.getSize();
-    const width = imgSize.width || 1200;
-    const height = imgSize.height || 800;
-    await db.mapCanvas.update({
-      where: { id: mapId },
-      data: { background: relativePath, width, height }
-    });
-    return { path: relativePath, width, height };
+    const i = `${t}${o}`, l = L.join(c, i);
+    x.copyFileSync(a, l);
+    const I = `maps/${e.novelId}/${i}`, E = Ft.createFromPath(l).getSize(), C = E.width || 1200, p = E.height || 800;
+    return await h.mapCanvas.update({
+      where: { id: t },
+      data: { background: I, width: C, height: p }
+    }), { path: I, width: C, height: p };
   } catch (e) {
-    console.error("[Main] db:upload-map-bg failed:", e);
-    throw e;
+    throw console.error("[Main] db:upload-map-bg failed:", e), e;
   }
 });
-ipcMain.handle("db:get-map-markers", async (_, mapId) => {
+S.handle("db:get-map-markers", async (r, t) => {
   try {
-    return await db.characterMapMarker.findMany({
-      where: { mapId },
-      include: { character: { select: { id: true, name: true, avatar: true, role: true } } }
+    return await h.characterMapMarker.findMany({
+      where: { mapId: t },
+      include: { character: { select: { id: !0, name: !0, avatar: !0, role: !0 } } }
     });
   } catch (e) {
-    console.error("[Main] db:get-map-markers failed:", e);
-    throw e;
+    throw console.error("[Main] db:get-map-markers failed:", e), e;
   }
 });
-ipcMain.handle("db:create-map-marker", async (_, data) => {
+S.handle("db:create-map-marker", async (r, t) => {
   try {
-    return await db.characterMapMarker.create({
-      data,
-      include: { character: { select: { id: true, name: true, avatar: true, role: true } } }
+    return await h.characterMapMarker.create({
+      data: t,
+      include: { character: { select: { id: !0, name: !0, avatar: !0, role: !0 } } }
     });
   } catch (e) {
-    console.error("[Main] db:create-map-marker failed:", e);
-    throw e;
+    throw console.error("[Main] db:create-map-marker failed:", e), e;
   }
 });
-ipcMain.handle("db:update-map-marker", async (_, { id, data }) => {
+S.handle("db:update-map-marker", async (r, { id: t, data: e }) => {
   try {
-    return await db.characterMapMarker.update({
-      where: { id },
-      data,
-      include: { character: { select: { id: true, name: true, avatar: true, role: true } } }
+    return await h.characterMapMarker.update({
+      where: { id: t },
+      data: e,
+      include: { character: { select: { id: !0, name: !0, avatar: !0, role: !0 } } }
     });
-  } catch (e) {
-    console.error("[Main] db:update-map-marker failed:", e);
-    throw e;
+  } catch (n) {
+    throw console.error("[Main] db:update-map-marker failed:", n), n;
   }
 });
-ipcMain.handle("db:delete-map-marker", async (_, id) => {
+S.handle("db:delete-map-marker", async (r, t) => {
   try {
-    return await db.characterMapMarker.delete({ where: { id } });
+    return await h.characterMapMarker.delete({ where: { id: t } });
   } catch (e) {
-    console.error("[Main] db:delete-map-marker failed:", e);
-    throw e;
+    throw console.error("[Main] db:delete-map-marker failed:", e), e;
   }
 });
-ipcMain.handle("db:get-map-elements", async (_, mapId) => {
+S.handle("db:get-map-elements", async (r, t) => {
   try {
-    return await db.mapElement.findMany({
-      where: { mapId },
+    return await h.mapElement.findMany({
+      where: { mapId: t },
       orderBy: { z: "asc" }
     });
   } catch (e) {
-    console.error("[Main] db:get-map-elements failed:", e);
-    throw e;
+    throw console.error("[Main] db:get-map-elements failed:", e), e;
   }
 });
-ipcMain.handle("db:create-map-element", async (_, data) => {
+S.handle("db:create-map-element", async (r, t) => {
   try {
-    return await db.mapElement.create({ data });
+    return await h.mapElement.create({ data: t });
   } catch (e) {
-    console.error("[Main] db:create-map-element failed:", e);
-    throw e;
+    throw console.error("[Main] db:create-map-element failed:", e), e;
   }
 });
-ipcMain.handle("db:update-map-element", async (_, { id, data }) => {
+S.handle("db:update-map-element", async (r, { id: t, data: e }) => {
   try {
-    const { createdAt, updatedAt, map, ...updateData } = data;
-    return await db.mapElement.update({ where: { id }, data: updateData });
+    const { createdAt: n, updatedAt: a, map: o, ...c } = e;
+    return await h.mapElement.update({ where: { id: t }, data: c });
+  } catch (n) {
+    throw console.error("[Main] db:update-map-element failed:", n), n;
+  }
+});
+S.handle("db:delete-map-element", async (r, t) => {
+  try {
+    return await h.mapElement.delete({ where: { id: t } });
   } catch (e) {
-    console.error("[Main] db:update-map-element failed:", e);
-    throw e;
+    throw console.error("[Main] db:delete-map-element failed:", e), e;
   }
 });
-ipcMain.handle("db:delete-map-element", async (_, id) => {
+S.handle("db:get-relationships", async (r, t) => {
   try {
-    return await db.mapElement.delete({ where: { id } });
-  } catch (e) {
-    console.error("[Main] db:delete-map-element failed:", e);
-    throw e;
-  }
-});
-ipcMain.handle("db:get-relationships", async (_, characterId) => {
-  try {
-    const [asSource, asTarget] = await Promise.all([
-      db.relationship.findMany({
-        where: { sourceId: characterId },
-        include: { target: { select: { id: true, name: true, avatar: true, role: true } } }
+    const [e, n] = await Promise.all([
+      h.relationship.findMany({
+        where: { sourceId: t },
+        include: { target: { select: { id: !0, name: !0, avatar: !0, role: !0 } } }
       }),
-      db.relationship.findMany({
-        where: { targetId: characterId },
-        include: { source: { select: { id: true, name: true, avatar: true, role: true } } }
+      h.relationship.findMany({
+        where: { targetId: t },
+        include: { source: { select: { id: !0, name: !0, avatar: !0, role: !0 } } }
       })
     ]);
-    return [...asSource, ...asTarget];
+    return [...e, ...n];
   } catch (e) {
-    console.error("[Main] db:get-relationships failed:", e);
-    throw e;
+    throw console.error("[Main] db:get-relationships failed:", e), e;
   }
 });
-ipcMain.handle("db:create-relationship", async (_, data) => {
+S.handle("db:create-relationship", async (r, t) => {
   try {
-    return await db.relationship.create({
-      data,
+    return await h.relationship.create({
+      data: t,
       include: {
-        source: { select: { id: true, name: true, avatar: true, role: true } },
-        target: { select: { id: true, name: true, avatar: true, role: true } }
+        source: { select: { id: !0, name: !0, avatar: !0, role: !0 } },
+        target: { select: { id: !0, name: !0, avatar: !0, role: !0 } }
       }
     });
   } catch (e) {
-    console.error("[Main] db:create-relationship failed:", e);
-    throw e;
+    throw console.error("[Main] db:create-relationship failed:", e), e;
   }
 });
-ipcMain.handle("db:delete-relationship", async (_, id) => {
+S.handle("db:delete-relationship", async (r, t) => {
   try {
-    return await db.relationship.delete({ where: { id } });
+    return await h.relationship.delete({ where: { id: t } });
   } catch (e) {
-    console.error("[Main] db:delete-relationship failed:", e);
-    throw e;
+    throw console.error("[Main] db:delete-relationship failed:", e), e;
   }
 });
-ipcMain.handle("db:get-character-items", async (_, characterId) => {
+S.handle("db:get-character-items", async (r, t) => {
   try {
-    return await db.itemOwnership.findMany({
-      where: { characterId },
-      include: { item: true }
+    return await h.itemOwnership.findMany({
+      where: { characterId: t },
+      include: { item: !0 }
     });
   } catch (e) {
-    console.error("[Main] db:get-character-items failed:", e);
-    throw e;
+    throw console.error("[Main] db:get-character-items failed:", e), e;
   }
 });
-ipcMain.handle("db:add-item-to-character", async (_, data) => {
+S.handle("db:add-item-to-character", async (r, t) => {
   try {
-    return await db.itemOwnership.create({
-      data,
-      include: { item: true }
+    return await h.itemOwnership.create({
+      data: t,
+      include: { item: !0 }
     });
   } catch (e) {
-    console.error("[Main] db:add-item-to-character failed:", e);
-    throw e;
+    throw console.error("[Main] db:add-item-to-character failed:", e), e;
   }
 });
-ipcMain.handle("db:remove-item-from-character", async (_, id) => {
+S.handle("db:remove-item-from-character", async (r, t) => {
   try {
-    return await db.itemOwnership.delete({ where: { id } });
+    return await h.itemOwnership.delete({ where: { id: t } });
   } catch (e) {
-    console.error("[Main] db:remove-item-from-character failed:", e);
-    throw e;
+    throw console.error("[Main] db:remove-item-from-character failed:", e), e;
   }
 });
-ipcMain.handle("db:update-item-ownership", async (_, id, data) => {
+S.handle("db:update-item-ownership", async (r, t, e) => {
   try {
-    return await db.itemOwnership.update({
-      where: { id },
-      data,
-      include: { item: true }
+    return await h.itemOwnership.update({
+      where: { id: t },
+      data: e,
+      include: { item: !0 }
     });
-  } catch (e) {
-    console.error("[Main] db:update-item-ownership failed:", e);
-    throw e;
+  } catch (n) {
+    throw console.error("[Main] db:update-item-ownership failed:", n), n;
   }
 });
-ipcMain.handle("db:get-character-timeline", async (_, characterId) => {
+S.handle("db:get-character-timeline", async (r, t) => {
   try {
-    const character = await db.character.findUnique({ where: { id: characterId }, select: { name: true, novelId: true } });
-    if (!character)
+    const e = await h.character.findUnique({ where: { id: t }, select: { name: !0, novelId: !0 } });
+    if (!e)
       return [];
-    const anchors = await db.plotPointAnchor.findMany({
+    const n = await h.plotPointAnchor.findMany({
       where: {
         plotPoint: {
-          novelId: character.novelId,
-          description: { contains: `@${character.name}` }
+          novelId: e.novelId,
+          description: { contains: `@${e.name}` }
         }
       },
       include: {
-        plotPoint: { select: { title: true, description: true, plotLine: { select: { name: true } } } },
-        chapter: { select: { id: true, title: true, order: true, volume: { select: { title: true, order: true } } } }
+        plotPoint: { select: { title: !0, description: !0, plotLine: { select: { name: !0 } } } },
+        chapter: { select: { id: !0, title: !0, order: !0, volume: { select: { title: !0, order: !0 } } } }
       },
       orderBy: [{ chapter: { volume: { order: "asc" } } }, { chapter: { order: "asc" } }]
-    });
-    const seen = /* @__PURE__ */ new Set();
-    return anchors.filter((a) => a.chapter && !seen.has(a.chapter.id) && seen.add(a.chapter.id)).map((a) => {
-      var _a;
+    }), a = /* @__PURE__ */ new Set();
+    return n.filter((o) => o.chapter && !a.has(o.chapter.id) && a.add(o.chapter.id)).map((o) => {
+      var c;
       return {
-        chapterId: a.chapter.id,
-        chapterTitle: a.chapter.title,
-        volumeTitle: a.chapter.volume.title,
-        order: a.chapter.order,
-        volumeOrder: a.chapter.volume.order,
-        snippet: ((_a = a.plotPoint.description) == null ? void 0 : _a.substring(0, 100)) || a.plotPoint.title
+        chapterId: o.chapter.id,
+        chapterTitle: o.chapter.title,
+        volumeTitle: o.chapter.volume.title,
+        order: o.chapter.order,
+        volumeOrder: o.chapter.volume.order,
+        snippet: ((c = o.plotPoint.description) == null ? void 0 : c.substring(0, 100)) || o.plotPoint.title
       };
     });
   } catch (e) {
-    console.error("[Main] db:get-character-timeline failed:", e);
-    throw e;
+    throw console.error("[Main] db:get-character-timeline failed:", e), e;
   }
 });
-function extractTextFromLexical(jsonString) {
-  if (!jsonString)
+function un(r) {
+  if (!r)
     return "";
   try {
-    const content = JSON.parse(jsonString);
-    if (!content.root)
-      return jsonString;
-    const texts = [];
-    const traverse = (node) => {
-      if (node.text) {
-        texts.push(node.text);
-      }
-      if (node.children && Array.isArray(node.children)) {
-        node.children.forEach(traverse);
-      }
-      if (node.type === "paragraph" || node.type === "heading" || node.type === "quote") {
-        texts.push(" ");
-      }
+    const t = JSON.parse(r);
+    if (!t.root)
+      return r;
+    const e = [], n = (a) => {
+      a.text && e.push(a.text), a.children && Array.isArray(a.children) && a.children.forEach(n), (a.type === "paragraph" || a.type === "heading" || a.type === "quote") && e.push(" ");
     };
-    traverse(content.root);
-    return texts.join("").replace(/\s+/g, " ").trim();
-  } catch (e) {
-    return jsonString;
+    return n(t.root), e.join("").replace(/\s+/g, " ").trim();
+  } catch {
+    return r;
   }
 }
-ipcMain.handle("db:get-character-chapter-appearances", async (_, characterId) => {
+S.handle("db:get-character-chapter-appearances", async (r, t) => {
   try {
-    const character = await db.character.findUnique({ where: { id: characterId }, select: { name: true, novelId: true } });
-    if (!character)
-      return [];
-    const chapters = await db.chapter.findMany({
+    const e = await h.character.findUnique({ where: { id: t }, select: { name: !0, novelId: !0 } });
+    return e ? (await h.chapter.findMany({
       where: {
-        volume: { novelId: character.novelId },
+        volume: { novelId: e.novelId },
         // Use LIKE for rough match on JSON string (imperfect but fast first filter)
-        content: { contains: character.name }
+        content: { contains: e.name }
       },
       select: {
-        id: true,
-        title: true,
-        order: true,
-        content: true,
-        volume: { select: { title: true, order: true } }
+        id: !0,
+        title: !0,
+        order: !0,
+        content: !0,
+        volume: { select: { title: !0, order: !0 } }
       },
       orderBy: [{ volume: { order: "asc" } }, { order: "asc" }]
-    });
-    return chapters.map((ch) => {
-      const plainText = extractTextFromLexical(ch.content || "");
-      let snippet = "";
-      const idx = plainText.indexOf(character.name);
-      if (idx >= 0) {
-        const start = Math.max(0, idx - 30);
-        const end = Math.min(plainText.length, idx + character.name.length + 50);
-        snippet = (start > 0 ? "..." : "") + plainText.substring(start, end) + (end < plainText.length ? "..." : "");
-      } else {
+    })).map((a) => {
+      const o = un(a.content || "");
+      let c = "";
+      const i = o.indexOf(e.name);
+      if (i >= 0) {
+        const l = Math.max(0, i - 30), I = Math.min(o.length, i + e.name.length + 50);
+        c = (l > 0 ? "..." : "") + o.substring(l, I) + (I < o.length ? "..." : "");
       }
       return {
-        chapterId: ch.id,
-        chapterTitle: ch.title,
-        volumeTitle: ch.volume.title,
-        order: ch.order,
-        volumeOrder: ch.volume.order,
-        snippet
+        chapterId: a.id,
+        chapterTitle: a.title,
+        volumeTitle: a.volume.title,
+        order: a.order,
+        volumeOrder: a.volume.order,
+        snippet: c
       };
-    }).filter((item) => item.snippet !== "");
+    }).filter((a) => a.snippet !== "") : [];
   } catch (e) {
-    console.error("[Main] db:get-character-chapter-appearances failed:", e);
-    throw e;
+    throw console.error("[Main] db:get-character-chapter-appearances failed:", e), e;
   }
 });
-ipcMain.handle("db:get-recent-chapters", async (_, characterName, novelId, limit = 5) => {
+S.handle("db:get-recent-chapters", async (r, t, e, n = 5) => {
   try {
-    return await db.chapter.findMany({
+    return await h.chapter.findMany({
       where: {
-        volume: { novelId },
-        content: { contains: `@${characterName}` }
+        volume: { novelId: e },
+        content: { contains: `@${t}` }
       },
       select: {
-        id: true,
-        title: true,
-        order: true,
-        wordCount: true,
-        updatedAt: true
+        id: !0,
+        title: !0,
+        order: !0,
+        wordCount: !0,
+        updatedAt: !0
       },
       orderBy: { updatedAt: "desc" },
-      take: limit
+      take: n
     });
-  } catch (e) {
-    console.error("[Main] db:get-recent-chapters failed:", e);
-    throw e;
+  } catch (a) {
+    throw console.error("[Main] db:get-recent-chapters failed:", a), a;
   }
 });
-app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") {
-    app.quit();
-    win = null;
-  }
+b.on("window-all-closed", () => {
+  process.platform !== "darwin" && (b.quit(), T = null);
 });
-app.on("activate", () => {
-  if (BrowserWindow.getAllWindows().length === 0) {
-    createWindow();
-  }
+b.on("activate", () => {
+  wt.getAllWindows().length === 0 && kt();
 });
-app.whenReady().then(async () => {
-  var _a, _b;
-  console.log("[Main] App Ready. Starting DB Setup...");
-  if (aiDiagParse.error) {
-    console.error(`[AI-Diag] Invalid arguments: ${aiDiagParse.error}`);
-    app.exit(2);
+b.whenReady().then(async () => {
+  var a, o, c;
+  if (re.error) {
+    Ke(b.getPath("userData")), yt(), console.error(`[AI-Diag] Invalid arguments: ${re.error}`), b.exit(2);
     return;
   }
-  if (aiDiagParse.command && app.isPackaged) {
-    console.error("[AI-Diag] --ai-diag is only available in development mode.");
-    app.exit(1);
+  b.setAppUserModelId("com.noveleditor.app"), b.setName(b.isPackaged ? bt : on);
+  const r = (a = re.command) != null && a.userDataPath ? L.resolve(re.command.userDataPath) : sn();
+  if (b.setPath("userData", r), Ke(b.getPath("userData")), yt(), console.log("[Main] App Ready. Starting DB Setup..."), console.log("[Main] User Data Path:", b.getPath("userData")), re.command && b.isPackaged) {
+    console.error("[AI-Diag] --ai-diag is only available in development mode."), b.exit(1);
     return;
   }
-  if ((_a = aiDiagParse.command) == null ? void 0 : _a.userDataPath) {
-    const resolvedUserDataPath = path.resolve(aiDiagParse.command.userDataPath);
-    app.setPath("userData", resolvedUserDataPath);
-    console.log("[AI-Diag] userData override:", resolvedUserDataPath);
-  }
-  protocol.handle("local-resource", (request) => {
-    const relativePath = decodeURIComponent(request.url.replace("local-resource://", ""));
-    const fullPath = path.join(app.getPath("userData"), relativePath);
-    return net.fetch("file:///" + fullPath.replace(/\\/g, "/"));
+  (o = re.command) != null && o.userDataPath && console.log("[AI-Diag] userData override:", r), Ut.handle("local-resource", (i) => {
+    const l = decodeURIComponent(i.url.replace("local-resource://", "")), I = L.join(b.getPath("userData"), l);
+    return Bt.fetch("file:///" + I.replace(/\\/g, "/"));
   });
-  let dataPath;
-  if (app.isPackaged) {
-    const exePath = path.dirname(app.getPath("exe"));
-    dataPath = path.join(exePath, "data");
-  } else {
-    dataPath = app.getPath("userData");
-  }
-  const dbPath = ((_b = aiDiagParse.command) == null ? void 0 : _b.dbPath) ? path.resolve(aiDiagParse.command.dbPath) : path.join(dataPath, "novel_editor.db");
-  const dbUrl = `file:${dbPath}`;
-  console.log("[Main] Database Path:", dbPath);
-  if (!fs$1.existsSync(path.dirname(dbPath))) {
-    fs$1.mkdirSync(path.dirname(dbPath), { recursive: true });
-  }
-  if (!app.isPackaged) {
-    const schemaPath = path.resolve(__dirname$1, "../../../packages/core/prisma/schema.prisma");
-    console.log("[Main] Development mode detected (unpackaged). Checking schema at:", schemaPath);
-    if (fs$1.existsSync(schemaPath)) {
-      const dbFolder = path.dirname(dbPath);
-      if (!fs$1.existsSync(dbFolder)) {
-        fs$1.mkdirSync(dbFolder, { recursive: true });
-      }
-      console.log("[Main] Schema found.");
-      console.log("[Main] Cleaning up FTS tables before migration...");
-      initDb(dbUrl);
+  let t;
+  if (b.isPackaged) {
+    const i = L.dirname(b.getPath("exe"));
+    t = L.join(i, "data");
+  } else
+    t = b.getPath("userData");
+  const e = (c = re.command) != null && c.dbPath ? L.resolve(re.command.dbPath) : L.join(t, "novel_editor.db"), n = `file:${e}`;
+  if (console.log("[Main] Database Path:", e), x.existsSync(L.dirname(e)) || x.mkdirSync(L.dirname(e), { recursive: !0 }), !b.isPackaged) {
+    const i = L.resolve(ve, "../../../packages/core/prisma/schema.prisma");
+    if (console.log("[Main] Development mode detected (unpackaged). Checking schema at:", i), x.existsSync(i)) {
+      const l = L.dirname(e);
+      x.existsSync(l) || x.mkdirSync(l, { recursive: !0 }), console.log("[Main] Schema found."), console.log("[Main] Cleaning up FTS tables before migration..."), Ze(n);
       try {
-        await db.$executeRawUnsafe("DROP TABLE IF EXISTS search_index;");
-        console.log("[Main] FTS tables dropped successfully.");
-      } catch (e) {
-        console.warn("[Main] Failed to drop FTS table (non-critical):", e);
+        await h.$executeRawUnsafe("DROP TABLE IF EXISTS search_index;"), console.log("[Main] FTS tables dropped successfully.");
+      } catch (w) {
+        console.warn("[Main] Failed to drop FTS table (non-critical):", w);
       }
-      await db.$disconnect();
-      console.log("[Main] Attempting synchronous DB push to:", dbPath);
-      const prismaPath = path.resolve(__dirname$1, "../../../packages/core/node_modules/.bin/prisma.cmd");
-      console.log("[Main] Using Prisma binary at:", prismaPath);
-      if (!fs$1.existsSync(prismaPath)) {
-        console.error("[Main] Prisma binary NOT found at:", prismaPath);
-      } else {
+      await h.$disconnect(), console.log("[Main] Attempting synchronous DB push to:", e);
+      const I = L.resolve(ve, "../../../packages/core/node_modules/.bin/prisma.cmd");
+      if (console.log("[Main] Using Prisma binary at:", I), !x.existsSync(I))
+        console.error("[Main] Prisma binary NOT found at:", I);
+      else
         try {
-          const command = `"${prismaPath}" db push --schema="${schemaPath}" --accept-data-loss`;
-          console.log("[Main] Executing command:", command);
-          const output = execSync(command, {
-            env: { ...process.env, DATABASE_URL: dbUrl },
-            cwd: path.resolve(__dirname$1, "../../../packages/core"),
+          const w = `"${I}" db push --schema="${i}" --accept-data-loss`;
+          console.log("[Main] Executing command:", w);
+          const E = Ht(w, {
+            env: { ...process.env, DATABASE_URL: n },
+            cwd: L.resolve(ve, "../../../packages/core"),
             stdio: "pipe",
             // Avoid inherit to prevent encoding issues
-            windowsHide: true
+            windowsHide: !0
           });
-          console.log("[Main] DB Push output:", output.toString());
-          console.log("[Main] DB Push completed successfully.");
-        } catch (error) {
-          console.error("[Main] DB Push failed.");
-          if (error.stdout)
-            console.log("[Main] stdout:", error.stdout.toString());
-          if (error.stderr)
-            console.error("[Main] stderr:", error.stderr.toString());
+          console.log("[Main] DB Push output:", E.toString()), console.log("[Main] DB Push completed successfully.");
+        } catch (w) {
+          console.error("[Main] DB Push failed."), w.stdout && console.log("[Main] stdout:", w.stdout.toString()), w.stderr && console.error("[Main] stderr:", w.stderr.toString());
         }
-      }
-    } else {
-      console.warn("[Main] Schema file NOT found at:", schemaPath);
-    }
+    } else
+      console.warn("[Main] Schema file NOT found at:", i);
   }
-  initDb(dbUrl);
-  aiService = new AiService(() => app.getPath("userData"));
-  if (aiDiagParse.command) {
-    try {
-      const exitCode = await runAiDiagCommand(aiService, aiDiagParse.command);
-      await db.$disconnect();
-      app.exit(exitCode);
-      return;
-    } catch (error) {
-      console.error("[AI-Diag] Execution failed:", error);
-      await db.$disconnect();
-      app.exit(1);
-      return;
-    }
-  }
-  await initSearchIndex();
-  console.log("[Main] Search index initialized");
+  Ze(n);
   try {
-    await applyProxySettings(aiService.getSettings());
-  } catch (e) {
-    console.warn("[Main] Failed to apply AI proxy settings:", e);
+    await zt() && console.log("[Main] Bundled database schema applied successfully.");
+  } catch (i) {
+    throw console.error("[Main] Failed to ensure bundled database schema:", i), i;
   }
-  createWindow();
+  if (R = new Nr(() => b.getPath("userData")), re.command)
+    try {
+      const i = await dn(R, re.command);
+      await h.$disconnect(), b.exit(i);
+      return;
+    } catch (i) {
+      console.error("[AI-Diag] Execution failed:", i), await h.$disconnect(), b.exit(1);
+      return;
+    }
+  await Wt(), console.log("[Main] Search index initialized");
+  try {
+    await xt(R.getSettings());
+  } catch (i) {
+    console.warn("[Main] Failed to apply AI proxy settings:", i);
+  }
+  kt();
 });
 export {
-  MAIN_DIST,
-  RENDERER_DIST,
-  VITE_DEV_SERVER_URL
+  An as MAIN_DIST,
+  Mt as RENDERER_DIST,
+  qe as VITE_DEV_SERVER_URL
 };

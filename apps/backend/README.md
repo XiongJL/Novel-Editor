@@ -77,3 +77,8 @@ apps/backend/
 ## 7. 本批次说明（2026-03-04）
 - 本轮 AI 相关改动主要发生在桌面端（`apps/desktop`），例如 AI 创作工坊、续写流程、摘要策略与诊断入口收口。
 - 后端同步 API 在本批次无新增必需接口。
+
+## 8. AI Key Storage Note
+- AI API keys and tokens are stored locally by the desktop app in the Electron userData directory.
+- They are not part of backend sync payloads, and backup/restore does not migrate them.
+

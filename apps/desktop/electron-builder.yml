@@ -1,6 +1,6 @@
 appId: com.noveleditor.app
-productName: 小说编辑器
-copyright: Copyright © 2024
+productName: 云梦小说编辑器
+copyright: Copyright © 2026
 
 directories:
   output: release
@@ -12,7 +12,10 @@ files:
   - package.json
   - node_modules/@prisma/**/*
   - node_modules/.prisma/**/*
+  - node_modules/@prisma/client/.prisma/**/*
+  - node_modules/@novel-editor/core/node_modules/.prisma/**/*
   - node_modules/@novel-editor/**/*
+  - node_modules/@novel-editor/core/node_modules/@prisma/client/.prisma/**/*
 
 win:
   target:
@@ -22,9 +25,12 @@ win:
     - target: portable
       arch:
         - x64
-  icon: build/icon.ico
+  icon: build/icon_ink_pen_256.ico
   sign: null
   signAndEditExecutable: false
+
+mac:
+  icon: build/icon_ink_pen_512.icns
 
 nsis:
   oneClick: false
@@ -32,14 +38,19 @@ nsis:
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
   createStartMenuShortcut: true
-  shortcutName: 小说编辑器
+  shortcutName: 云梦编辑器
   artifactName: ${productName}-Setup-${version}.${ext}
 
 portable:
   artifactName: ${productName}-Portable-${version}.${ext}
 
-asar: true
+asar: false
 asarUnpack:
   - "**/*.node"
   - "**/node_modules/.prisma/**/*"
+  - "**/node_modules/@prisma/client/.prisma/**/*"
+  - "**/node_modules/@prisma/client/**/*"
+  - "**/node_modules/@novel-editor/core/node_modules/.prisma/**/*"
+  - "**/node_modules/@novel-editor/core/node_modules/@prisma/client/.prisma/**/*"
+  - "**/node_modules/@novel-editor/core/node_modules/@prisma/client/**/*"
   - "**/node_modules/@prisma/engines/**/*"

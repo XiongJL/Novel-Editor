@@ -30,6 +30,7 @@ import {
     TitleGenerationPayload,
 } from './types';
 import { ContextBuilder } from './context/ContextBuilder';
+import { devLog, devLogError, redactForLog } from '../debug/devLogger';
 
 const MAX_IMAGE_SIZE_BYTES = 10 * 1024 * 1024;
 const DRAFT_MAX_FIELD_LENGTH = 2000;
@@ -553,11 +554,15 @@ export class AiService {
     }
 
     async generateTitle(payload: TitleGenerationPayload): Promise<{ candidates: TitleCandidate[] }> {
+        devLog('INFO', 'AiService.generateTitle.start', 'Generate title start', {
+            chapterId: payload.chapterId,
+            novelId: payload.novelId,
+            providerType: this.settingsCache.providerType,
+        });
         const provider = this.getProvider();
-        const style = payload.style ?? 'stable';
         const count = Math.max(5, Math.min(10, payload.count ?? 6));
-        const currentPlain = extractPlainTextFromLexical(payload.content).slice(0, 3600);
-        const currentExcerpt = currentPlain.slice(-1400);
+        const currentPlain = extractPlainTextFromLexical(payload.content);
+        const currentChapterFullText = currentPlain.slice(0, 4000);
 
         const novel = await db.novel.findUnique({
             where: { id: payload.novelId },
@@ -586,20 +591,28 @@ export class AiService {
                 id: { not: payload.chapterId },
             },
             select: {
-                id: true,
                 title: true,
-                content: true,
-                updatedAt: true,
+                order: true,
+                volume: {
+                    select: {
+                        title: true,
+                        order: true,
+                    },
+                },
             },
-            orderBy: { updatedAt: 'desc' },
-            take: 3,
+            orderBy: [
+                { volume: { order: 'desc' } },
+                { order: 'desc' },
+            ],
+            take: 30,
         });
-        const recentSummaries = recentChapters.map((item, index) => {
-            const plain = extractPlainTextFromLexical(item.content);
+        const recentChapterTitles = recentChapters.map((item, index) => {
             return {
                 index: index + 1,
+                volumeTitle: item.volume?.title || '',
+                volumeOrder: item.volume?.order || 0,
+                chapterOrder: item.order || 0,
                 title: item.title || `Chapter-${index + 1}`,
-                summary: plain.slice(0, 180),
             };
         });
 
@@ -615,7 +628,6 @@ export class AiService {
             systemPrompt,
             prompt: JSON.stringify({
                 task: 'chapter_title_generation',
-                style,
                 count,
                 novel: {
                     title: novel?.title || '',
@@ -627,8 +639,8 @@ export class AiService {
                     volumeTitle: chapter?.volume?.title || '',
                     volumeOrder: chapter?.volume?.order || 0,
                 },
-                recentChapterSummaries: recentSummaries,
-                currentChapterExcerpt: currentExcerpt,
+                recentChapterTitles,
+                currentChapterFullText,
                 constraints: [
                     'title length <= 16 Chinese characters preferred',
                     'avoid spoilers and proper nouns overuse',
@@ -658,6 +670,10 @@ export class AiService {
             : [];
 
         if (normalizedFromJson.length > 0) {
+            devLog('INFO', 'AiService.generateTitle.success', 'Generate title success', {
+                chapterId: payload.chapterId,
+                candidateCount: normalizedFromJson.length,
+            });
             return { candidates: normalizedFromJson };
         }
 
@@ -669,10 +685,18 @@ export class AiService {
             .map((title) => ({ title, styleTag: '稳健推进' }));
 
         if (normalizedFromLines.length > 0) {
+            devLog('INFO', 'AiService.generateTitle.success', 'Generate title success', {
+                chapterId: payload.chapterId,
+                candidateCount: normalizedFromLines.length,
+            });
             return { candidates: normalizedFromLines };
         }
 
-        const fallbackBase = (chapter?.title || currentExcerpt.slice(0, 12) || '新章节').trim();
+        const fallbackBase = (chapter?.title || currentChapterFullText.slice(0, 12) || '新章节').trim();
+        devLog('INFO', 'AiService.generateTitle.success', 'Generate title success', {
+            chapterId: payload.chapterId,
+            candidateCount: count,
+        });
         return {
             candidates: Array.from({ length: count }, (_, i) => ({
                 title: `${fallbackBase} · ${i + 1}`,
@@ -682,7 +706,15 @@ export class AiService {
     }
 
     async previewContinuePrompt(payload: ContinueWritingPayload): Promise<PromptPreviewResult> {
+        devLog('INFO', 'AiService.previewContinuePrompt.start', 'Preview continue prompt start', {
+            chapterId: payload.chapterId,
+            novelId: payload.novelId,
+            contextChapterCount: payload.contextChapterCount,
+        });
         const bundle = await this.buildContinuePromptBundle(payload);
+        devLog('INFO', 'AiService.previewContinuePrompt.success', 'Preview continue prompt success', {
+            chapterId: payload.chapterId,
+        });
         return {
             structured: bundle.structured,
             rawPrompt: buildRawPromptPreview(bundle.systemPrompt, bundle.effectiveUserPrompt),
@@ -693,6 +725,13 @@ export class AiService {
     }
 
     async continueWriting(payload: ContinueWritingPayload): Promise<ContinueWritingResult> {
+        devLog('INFO', 'AiService.continueWriting.start', 'Continue writing start', {
+            chapterId: payload.chapterId,
+            novelId: payload.novelId,
+            providerType: this.settingsCache.providerType,
+            targetLength: payload.targetLength,
+            contextChapterCount: payload.contextChapterCount,
+        });
         const provider = this.getProvider();
         const bundle = await this.buildContinuePromptBundle(payload);
         const generationTemperature = Number.isFinite(payload.temperature)
@@ -711,12 +750,18 @@ export class AiService {
             text: response.text,
         });
 
-        return {
+        const result = {
             text: response.text,
             usedContext: bundle.usedContext,
             warnings: bundle.warnings,
             consistency,
         };
+        devLog('INFO', 'AiService.continueWriting.success', 'Continue writing success', {
+            chapterId: payload.chapterId,
+            warningCount: bundle.warnings.length,
+            generatedLength: result.text.length,
+        });
+        return result;
     }
 
     async checkConsistency(payload: { novelId: string; text: string }): Promise<{ ok: boolean; issues: string[] }> {
@@ -735,7 +780,15 @@ export class AiService {
     }
 
     async previewCreativeAssetsPrompt(payload: CreativeAssetsGeneratePayload): Promise<PromptPreviewResult> {
+        devLog('INFO', 'AiService.previewCreativeAssetsPrompt.start', 'Preview creative assets prompt start', {
+            novelId: payload.novelId,
+            briefLength: payload.brief?.length ?? 0,
+            targetSections: payload.targetSections,
+        });
         const bundle = await this.buildCreativeAssetsPromptBundle(payload);
+        devLog('INFO', 'AiService.previewCreativeAssetsPrompt.success', 'Preview creative assets prompt success', {
+            novelId: payload.novelId,
+        });
         return {
             structured: bundle.structured,
             rawPrompt: buildRawPromptPreview(bundle.systemPrompt, bundle.effectiveUserPrompt),
@@ -775,6 +828,12 @@ export class AiService {
     }
 
     async generateCreativeAssets(payload: CreativeAssetsGeneratePayload): Promise<{ draft: CreativeAssetsDraft }> {
+        devLog('INFO', 'AiService.generateCreativeAssets.start', 'Generate creative assets start', {
+            novelId: payload.novelId,
+            briefLength: payload.brief?.length ?? 0,
+            providerType: this.settingsCache.providerType,
+            targetSections: payload.targetSections,
+        });
         const provider = this.getProvider();
         const bundle = await this.buildCreativeAssetsPromptBundle(payload);
         const targetSections = this.resolveCreativeTargetSections(payload);
@@ -793,6 +852,17 @@ export class AiService {
                     const list = (parsed as any)?.[section];
                     (filtered as any)[section] = Array.isArray(list) ? list : [];
                 }
+                devLog('INFO', 'AiService.generateCreativeAssets.success', 'Generate creative assets success', {
+                    novelId: payload.novelId,
+                    counts: {
+                        plotLines: filtered.plotLines?.length ?? 0,
+                        plotPoints: filtered.plotPoints?.length ?? 0,
+                        characters: filtered.characters?.length ?? 0,
+                        items: filtered.items?.length ?? 0,
+                        skills: filtered.skills?.length ?? 0,
+                        maps: filtered.maps?.length ?? 0,
+                    },
+                });
                 return { draft: filtered };
             }
         } catch {
@@ -822,6 +892,17 @@ export class AiService {
         for (const section of targetSections) {
             (filteredFallback as any)[section] = (fallbackDraft as any)[section] ?? [];
         }
+        devLog('INFO', 'AiService.generateCreativeAssets.success', 'Generate creative assets success', {
+            novelId: payload.novelId,
+            counts: {
+                plotLines: filteredFallback.plotLines?.length ?? 0,
+                plotPoints: filteredFallback.plotPoints?.length ?? 0,
+                characters: filteredFallback.characters?.length ?? 0,
+                items: filteredFallback.items?.length ?? 0,
+                skills: filteredFallback.skills?.length ?? 0,
+                maps: filteredFallback.maps?.length ?? 0,
+            },
+        });
         return {
             draft: filteredFallback,
         };
@@ -1065,6 +1146,17 @@ export class AiService {
     }
 
     async confirmCreativeAssets(payload: { novelId: string; draft: CreativeAssetsDraft }): Promise<ConfirmCreativeAssetsResult> {
+        devLog('INFO', 'AiService.confirmCreativeAssets.start', 'Confirm creative assets start', {
+            novelId: payload.novelId,
+            draftCounts: redactForLog({
+                plotLines: payload.draft.plotLines?.length ?? 0,
+                plotPoints: payload.draft.plotPoints?.length ?? 0,
+                characters: payload.draft.characters?.length ?? 0,
+                items: payload.draft.items?.length ?? 0,
+                skills: payload.draft.skills?.length ?? 0,
+                maps: payload.draft.maps?.length ?? 0,
+            }),
+        });
         const validation = await this.validateCreativeAssetsDraft(payload);
         const zeroCreated = {
             plotLines: 0,
@@ -1077,6 +1169,11 @@ export class AiService {
         };
 
         if (!validation.ok) {
+            devLog('WARN', 'AiService.confirmCreativeAssets.validationFailed', 'Confirm creative assets validation failed', {
+                novelId: payload.novelId,
+                errors: validation.errors,
+                warnings: validation.warnings,
+            });
             return {
                 success: false,
                 created: zeroCreated,
@@ -1254,13 +1351,22 @@ export class AiService {
                 committedCreated = localCreated;
             });
 
-            return {
+            const result = {
                 success: true,
                 created: committedCreated,
                 warnings: validation.warnings,
-                transactionMode: 'atomic',
+                transactionMode: 'atomic' as const,
             };
+            devLog('INFO', 'AiService.confirmCreativeAssets.success', 'Confirm creative assets success', {
+                novelId: payload.novelId,
+                created: committedCreated,
+                warningCount: validation.warnings.length,
+            });
+            return result;
         } catch (error) {
+            devLogError('AiService.confirmCreativeAssets.error', error, {
+                novelId: payload.novelId,
+            });
             for (const file of createdFiles) {
                 try {
                     if (fs.existsSync(file)) fs.unlinkSync(file);
@@ -1295,7 +1401,16 @@ export class AiService {
     }
 
     async previewMapPrompt(payload: AiMapImagePayload): Promise<PromptPreviewResult> {
+        devLog('INFO', 'AiService.previewMapPrompt.start', 'Preview map prompt start', {
+            novelId: payload.novelId,
+            mapId: payload.mapId,
+            promptLength: payload.prompt?.length ?? 0,
+        });
         const bundle = await this.buildMapPromptBundle(payload);
+        devLog('INFO', 'AiService.previewMapPrompt.success', 'Preview map prompt success', {
+            novelId: payload.novelId,
+            mapId: payload.mapId,
+        });
         return {
             structured: bundle.structured,
             rawPrompt: bundle.effectiveUserPrompt,
@@ -1305,6 +1420,12 @@ export class AiService {
     }
 
     async generateMapImage(payload: AiMapImagePayload): Promise<AiMapImageResult> {
+        devLog('INFO', 'AiService.generateMapImage.start', 'Generate map image start', {
+            novelId: payload.novelId,
+            mapId: payload.mapId,
+            promptLength: payload.prompt?.length ?? 0,
+            providerType: this.settingsCache.providerType,
+        });
         const startTime = Date.now();
         const finalize = (result: AiMapImageResult): AiMapImageResult => {
             this.recordMapImageCall({
@@ -1370,13 +1491,23 @@ export class AiService {
                 data: { background: saved.relativePath },
             });
 
-            return finalize({
+            const successResult = finalize({
                 ok: true,
                 detail: 'Map image generated and stored successfully',
                 mapId,
                 path: saved.relativePath,
             });
+            devLog('INFO', 'AiService.generateMapImage.success', 'Generate map image success', {
+                novelId: payload.novelId,
+                mapId,
+                imagePath: saved.relativePath,
+            });
+            return successResult;
         } catch (error) {
+            devLogError('AiService.generateMapImage.error', error, {
+                novelId: payload.novelId,
+                mapId: payload.mapId,
+            });
             const normalized = normalizeAiError(error);
             return finalize({
                 ok: false,
@@ -1535,8 +1666,8 @@ export class AiService {
         const writeParamsForPrompt = {
             ...context.params,
             targetLength: isZh
-                ? `约${Math.max(100, Number(context.params.targetLength || 500))}汉字`
-                : `about ${Math.max(100, Number(context.params.targetLength || 500))} Chinese characters`,
+                ? `约${Math.max(100, Math.min(4000, Number(context.params.targetLength || 500)))}汉字`
+                : `about ${Math.max(100, Math.min(4000, Number(context.params.targetLength || 500)))} Chinese characters`,
         };
         const systemPrompt = isZh
             ? '你是中文小说续写助手。严格遵守世界观和大纲，不得破坏既有设定与人物行为逻辑。'
@@ -1902,3 +2033,4 @@ export class AiService {
         this.persistMapImageStats();
     }
 }
+

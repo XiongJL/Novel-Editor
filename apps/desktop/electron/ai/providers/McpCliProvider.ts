@@ -1,6 +1,7 @@
 ﻿import fs from 'node:fs';
 import { spawn } from 'node:child_process';
 import { AiGenerateRequest, AiGenerateResponse, AiHealthCheckResult, AiProvider, AiSettings } from '../types';
+import { devLog, devLogError, redactForLog } from '../../debug/devLogger';
 
 function splitArgs(raw: string): string[] {
     if (!raw.trim()) return [];
@@ -24,9 +25,18 @@ export class McpCliProvider implements AiProvider {
         }
 
         try {
+            devLog('INFO', 'McpCliProvider.healthCheck.request', 'MCP CLI health check request', {
+                cliPath,
+                timeoutMs: this.settings.mcpCli.startupTimeoutMs,
+            });
             const { stdout } = await this.runProcess(['--version'], '', this.settings.mcpCli.startupTimeoutMs);
+            devLog('INFO', 'McpCliProvider.healthCheck.response', 'MCP CLI health check response', {
+                cliPath,
+                stdout,
+            });
             return { ok: true, detail: (stdout || 'MCP CLI is executable').slice(0, 200) };
         } catch (error: any) {
+            devLogError('McpCliProvider.healthCheck.error', error, { cliPath });
             return { ok: false, detail: `MCP CLI check failed: ${error?.message || 'unknown error'}` };
         }
     }
@@ -41,7 +51,19 @@ export class McpCliProvider implements AiProvider {
         const hasPromptPlaceholder = argsTemplate.includes('{prompt}');
         const parsedArgs = splitArgs(argsTemplate.replace('{prompt}', prompt));
 
+        devLog('INFO', 'McpCliProvider.generate.request', 'MCP CLI generate request', {
+            cliPath: this.settings.mcpCli.cliPath,
+            args: parsedArgs,
+            prompt: hasPromptPlaceholder ? '' : prompt,
+            promptEmbeddedInArgs: hasPromptPlaceholder,
+        });
+
         const { stdout } = await this.runProcess(parsedArgs, hasPromptPlaceholder ? '' : prompt, this.settings.mcpCli.startupTimeoutMs);
+
+        devLog('INFO', 'McpCliProvider.generate.response', 'MCP CLI generate response', {
+            cliPath: this.settings.mcpCli.cliPath,
+            stdout,
+        });
 
         return {
             text: stdout.trim(),
@@ -52,6 +74,7 @@ export class McpCliProvider implements AiProvider {
     private async runProcess(args: string[], stdinText: string, timeoutMs: number): Promise<{ stdout: string; stderr: string }> {
         const { cliPath, workingDir, envJson } = this.settings.mcpCli;
         const extraEnv = this.parseEnvJson(envJson);
+        const startedAt = Date.now();
 
         return new Promise((resolve, reject) => {
             const child = spawn(cliPath, args, {
@@ -69,6 +92,11 @@ export class McpCliProvider implements AiProvider {
                 if (done) return;
                 done = true;
                 child.kill('SIGTERM');
+                devLog('ERROR', 'McpCliProvider.runProcess.timeout', 'MCP CLI process timeout', {
+                    cliPath,
+                    args,
+                    elapsedMs: Date.now() - startedAt,
+                });
                 reject(new Error('MCP CLI process timeout'));
             }, Math.max(1000, timeoutMs));
 
@@ -84,6 +112,12 @@ export class McpCliProvider implements AiProvider {
                 if (done) return;
                 done = true;
                 clearTimeout(timer);
+                devLogError('McpCliProvider.runProcess.error', error, {
+                    cliPath,
+                    args,
+                    elapsedMs: Date.now() - startedAt,
+                    env: redactForLog(extraEnv),
+                });
                 reject(error);
             });
 
@@ -93,10 +127,24 @@ export class McpCliProvider implements AiProvider {
                 clearTimeout(timer);
 
                 if (code !== 0) {
+                    devLog('ERROR', 'McpCliProvider.runProcess.exit', 'MCP CLI exited with non-zero code', {
+                        cliPath,
+                        args,
+                        code,
+                        elapsedMs: Date.now() - startedAt,
+                        stderr,
+                    });
                     reject(new Error(`MCP CLI exited with code ${code}: ${stderr.slice(0, 300)}`));
                     return;
                 }
 
+                devLog('INFO', 'McpCliProvider.runProcess.exit', 'MCP CLI process completed', {
+                    cliPath,
+                    args,
+                    code,
+                    elapsedMs: Date.now() - startedAt,
+                    stderr,
+                });
                 resolve({ stdout, stderr });
             });
 

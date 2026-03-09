@@ -1,7 +1,9 @@
 ﻿# Active Tasks
 
 ## 当前目标
-- [ ] 聚焦主线：完成 Phase E 入库闭环收尾 + 标题生成进度条（Phase C）
+- [ ] 聚焦主线：完成 Phase G 验收收尾 + Phase H 覆盖矩阵补缺
+- [x] 文档同步：AI `apiKey/apiToken` 仅本地保存，不写入数据库，也不参与备份恢复
+- [x] 文档同步：开发模式 debug 日志与 Prisma 打包初始化方案已写入开发文档
 
 ## 执行清单（按顺序）
 
@@ -10,8 +12,10 @@
 - [x] 新增 `AiProvider` 抽象与 Provider 工厂
 - [x] 实现 HTTP Provider（支持 OpenAI/Anthropic 兼容接口）
 - [x] 实现 MCP CLI Provider（stdio 通信）
+- [x] 开发模式 Debug 日志：AI 请求/响应 + 主进程错误写入 `debug-dev.log`（15MB 覆盖，仅开发模式）
+- [x] Prisma 打包初始化：构建期生成 `packages/core/generated/client` + `schema-init.sql`，打包版首启自动建表
 
-### Phase B: AI 设置界面
+### Phase B: AI 设置界面（已验收）
 - [x] 在 `SettingsModal` 新增 `AI` 分页
 - [x] API 配置表单：`baseUrl` `apiKey` `model` `timeoutMs`
 - [x] 多模型可选：支持 OpenAI/Gemini/豆包预设，文本模型与生图模型分离配置
@@ -20,9 +24,9 @@
 - [x] “测试连接”按钮：HTTP 连通测试
 - [x] “测试 MCP”按钮：CLI 可执行与握手测试
 - [x] “测试代理”按钮：代理路径连通测试
-- [ ] 直连模式验收：不依赖 OpenClaw，仅通过软件 UI + 豆包模型完成“生成->确认->入库”
+- [x] 直连模式验收：不依赖 OpenClaw，仅通过软件 UI + 豆包模型完成“生成->确认->入库”
 
-### Phase C: 标题 AI 生成
+### Phase C: 标题 AI 生成（已完成）
 - [x] 在章节标题输入区域新增“AI 生成标题”入口
 - [x] 输入上下文：当前章节正文 + 最近章节摘要 + 小说基础信息
 - [x] 输出 5-10 个候选标题 + 风格标签
@@ -30,7 +34,7 @@
 - [x] 标题生成过程可视化进度（与续写一致）：按钮 loading + 阶段提示/进度条（请求中/生成中/解析中）
 - [x] 标题生成状态提示文案与失败提示统一（i18n）
 
-### Phase D: 自动续写（强约束）
+### Phase D: 自动续写（强约束，已完成）
 - [x] 新建 `ContextBuilder`：统一组装续写上下文
 - [x] 续写前强制读取并注入：
     - [x] 全量世界观（`WorldSetting`）
@@ -40,13 +44,13 @@
 - [x] 支持参数：目标字数、上下文章数、风格、温度
 - [x] 生成后执行一致性检查并返回冲突提示
 
-### Phase D.1: 续写触发与交互分流（新增）
+### Phase D.1: 续写触发与交互分流（新增，已完成）
 - [x] 统一触发入口：UI “续写”按钮 + `chapter.generate` action
-- [ ] 新建章节（空章）续写资格校验：
+- [x] 新建章节（空章）续写资格校验：
     - [x] 判断是否第一章
     - [x] 判断是否存在大纲（PlotLine/PlotPoint）
     - [x] 第一章且无大纲时阻断并提供三路径引导（去大纲/先手写/去 AI 大纲生成）
-- [ ] 现有章节续写配置弹窗：
+- [x] 现有章节续写配置弹窗：
     - [x] 灵感选择（支持多选已有灵感）
     - [x] 长度（短/中/长）映射 `targetLength`
     - [x] 创意程度（稳妥/平衡/创意）映射 `temperature`
@@ -59,12 +63,12 @@
 - [x] `chapter.generate` / `continueWriting` 已接入 `ideaIds`，并注入 `ContextBuilder` 动态上下文（缺失灵感返回 warnings）
 - [x] OpenClaw 写入审计：`chapter.save` 保留来源 `ai_agent` 与 rollback point
 
-### Phase E: AI 快速创建创作资产（新增）
+### Phase E: AI 快速创建创作资产（新增，功能已完成）
 - [x] 新增“AI 创作工坊”入口（ActivityBar: `ai_workbench`）
 - [x] AI 输出结构化草稿（JSON schema 约束）
 - [x] 预览区支持编辑、删除、勾选
 - [x] 入库前校验：`validateCreativeAssetsDraft`（必填/类型/重名/地图资产关系/标准化）
-- [ ] 地图生成支持：
+- [x] 地图生成支持：
     - [x] 文本描述生成地图图片
     - [x] 图片下载与本地保存（`userData/maps/<novelId>/`）
     - [x] 图片路径关联到 `MapCanvas.background`
@@ -73,7 +77,7 @@
     - [x] 地图 AI 生成过程可视化进度：进度条或阶段提示（请求中/生成中/下载中/入库中），并显示预计耗时或已耗时
     - [x] 生成按钮交互优化：禁用期间显示明确状态与原因，避免“无反馈等待”
     - [x] 配额保护（Doubao-Seedream-5.0-lite）：默认低成本参数 + 429 明确提示 + 调用统计
-- [ ] 用户确认后执行入库：
+- [x] 用户确认后执行入库：
     - [x] 大纲 -> `PlotLine/PlotPoint`
     - [x] 角色 -> `Character`
     - [x] 物品/技能 -> `Item`（type 区分）
@@ -85,7 +89,7 @@
 - [x] AI 工坊内新增“提示词预览”（结构化/原文）+ 本次临时提示词覆盖（仅本次生效）
 - [x] 地图 AI 生成模态框新增“引用世界观 + 提示词预览”（结构化/原文）+ 本次临时提示词覆盖（仅本次生效）
 
-### Phase F: 记忆压缩与 RAG
+### Phase F: 记忆压缩与 RAG（已完成）
 - [x] 新增章节摘要表与更新流程
     - [x] Prisma schema 已新增 `ChapterSummary`（含内容指纹、事实JSON、模型元数据、状态与错误信息、索引）
     - [x] 章节保存后异步更新 `ChapterSummary`（`db:save-chapter` 与 `chapter.save` action 双路径）
@@ -93,7 +97,7 @@
     - [x] 摘要模式可配置：本地启发式 / AI 摘要（AI 失败自动回退本地）
     - [x] 摘要触发策略可配置：自动 / 仅手动 / 章节完稿后触发（AI 默认仅手动）
     - [x] 编辑器章节页已提供“手动生成摘要”按钮（调用 `ai:rebuild-chapter-summary`）
-- [ ] 新增卷摘要/全书摘要聚合
+- [x] 新增卷摘要/全书摘要聚合
     - [x] Prisma schema 已新增 `NarrativeSummary`（volume/novel 聚合层，含覆盖范围、约束与元数据）
     - [x] `chapterSummary` 完成后异步触发聚合更新（volume + novel）
     - [x] ContextBuilder 已接入最新 `NarrativeSummary`（续写上下文注入）
@@ -111,6 +115,8 @@
 - [ ] 手工测试：AI 工坊入库前校验可阻断非法草稿并返回可读错误
 - [ ] 手工测试：AI 工坊原子事务生效（任一失败时整批回滚）
 - [ ] 手工测试：AI 地图图片是否成功落盘并可在地图工作台打开
+- [ ] 手工测试：打包版首启自动建库 + 创建小说成功
+- [ ] 手工测试：打包版升级路径设计评审（migration runner，不依赖运行时 `db push`）
 - [ ] 终端验收：`ai:diag smoke mcp|skill|coverage` 与 `--json` 输出符合预期
 - [ ] 补充用户文档（AI 设置与故障排查）
 - [x] 文档同步：`.agent/*`、`DEVELOPMENT.md`、`README.md`、`USER_GUIDE*.md`、`apps/backend/README.md`

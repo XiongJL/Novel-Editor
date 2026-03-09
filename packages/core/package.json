@@ -14,8 +14,8 @@
     "lint": "eslint . --ext .ts,.tsx",
     "db:push": "prisma db push",
     "db:studio": "prisma studio",
-    "generate": "prisma generate",
-    "build": "tsc"
+    "generate": "node scripts/generate-prisma-client.mjs",
+    "build": "pnpm run generate && tsc"
   },
   "dependencies": {
     "@prisma/client": "^5.10.2",

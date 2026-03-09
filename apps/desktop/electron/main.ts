@@ -1,5 +1,5 @@
 import { app, BrowserWindow, ipcMain, dialog, nativeImage, protocol, net, session } from 'electron'
-import { initDb, db } from '@novel-editor/core'
+import { initDb, db, ensureDbSchema } from '@novel-editor/core'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import { execSync } from 'child_process'
@@ -8,6 +8,7 @@ import * as searchIndex from './search/searchIndex'
 import { AiService } from './ai/AiService'
 import { scheduleChapterSummaryRebuild } from './ai/summary/chapterSummary'
 import { formatAiErrorForDisplay, normalizeAiError } from './ai/errors'
+import { devLog, devLogError, initDevLogger, isDevDebugEnabled, redactForLog } from './debug/devLogger'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -23,18 +24,31 @@ process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL ? path.join(process.env.APP_ROOT, 
 
 // Global error handling - ensure process exits on uncaught errors
 process.on('uncaughtException', (error) => {
+    devLogError('Main.uncaughtException', error);
     console.error('[Main] Uncaught Exception:', error);
     app.quit();
     process.exit(1);
 });
 
 process.on('unhandledRejection', (reason, promise) => {
+    devLogError('Main.unhandledRejection', reason, { promise: String(promise) });
     console.error('[Main] Unhandled Rejection at:', promise, 'reason:', reason);
     app.quit();
     process.exit(1);
 });
 
 let win: BrowserWindow | null
+let consolePatched = false
+const PACKAGED_APP_NAME = '云梦小说编辑器';
+const DEV_APP_NAME = 'Novel Editor Dev';
+
+function resolveDefaultUserDataPath(): string {
+    const appDataPath = app.getPath('appData');
+    if (app.isPackaged) {
+        return path.join(appDataPath, PACKAGED_APP_NAME);
+    }
+    return path.join(appDataPath, '@novel-editor', 'desktop-dev');
+}
 
 type AiDiagCommand =
     | { action: 'smoke'; kind: 'mcp' | 'skill'; json: boolean; dbPath?: string; userDataPath?: string }
@@ -145,6 +159,33 @@ async function runAiDiagCommand(aiService: AiService, command: AiDiagCommand): P
         return 1;
     }
     return 0;
+}
+
+function patchDevConsoleLogging(): void {
+    if (!isDevDebugEnabled() || consolePatched) return;
+    consolePatched = true;
+
+    const originalError = console.error.bind(console);
+    const originalWarn = console.warn.bind(console);
+
+    console.error = (...args: unknown[]) => {
+        devLog('ERROR', 'console.error', 'console.error called', { args: redactForLog(args) });
+        originalError(...args);
+    };
+
+    console.warn = (...args: unknown[]) => {
+        devLog('WARN', 'console.warn', 'console.warn called', { args: redactForLog(args) });
+        originalWarn(...args);
+    };
+}
+
+function logAiIpcError(channel: string, payload: unknown, error: unknown): void {
+    const normalized = normalizeAiError(error);
+    devLogError(`Main.${channel}`, error, {
+        payload: redactForLog(payload),
+        normalizedError: normalized,
+        displayMessage: formatAiErrorForDisplay(normalized.code, normalized.message),
+    });
 }
 
 const aiDiagParse = parseAiDiagCommand(process.argv);
@@ -747,6 +788,7 @@ ipcMain.handle('ai:get-settings', async () => {
     try {
         return aiService.getSettings();
     } catch (e) {
+        logAiIpcError('ai:get-settings', undefined, e);
         console.error('[Main] ai:get-settings failed:', e);
         throw e;
     }
@@ -756,6 +798,7 @@ ipcMain.handle('ai:get-map-image-stats', async () => {
     try {
         return aiService.getMapImageStats();
     } catch (e) {
+        logAiIpcError('ai:get-map-image-stats', undefined, e);
         console.error('[Main] ai:get-map-image-stats failed:', e);
         throw e;
     }
@@ -765,6 +808,7 @@ ipcMain.handle('ai:list-actions', async () => {
     try {
         return aiService.listActions();
     } catch (e) {
+        logAiIpcError('ai:list-actions', undefined, e);
         console.error('[Main] ai:list-actions failed:', e);
         throw e;
     }
@@ -774,6 +818,7 @@ ipcMain.handle('ai:get-capability-coverage', async () => {
     try {
         return aiService.getCapabilityCoverage();
     } catch (e) {
+        logAiIpcError('ai:get-capability-coverage', undefined, e);
         console.error('[Main] ai:get-capability-coverage failed:', e);
         throw e;
     }
@@ -783,6 +828,7 @@ ipcMain.handle('ai:get-mcp-manifest', async () => {
     try {
         return aiService.getMcpToolsManifest();
     } catch (e) {
+        logAiIpcError('ai:get-mcp-manifest', undefined, e);
         console.error('[Main] ai:get-mcp-manifest failed:', e);
         throw e;
     }
@@ -792,6 +838,7 @@ ipcMain.handle('ai:get-openclaw-manifest', async () => {
     try {
         return aiService.getOpenClawManifest();
     } catch (e) {
+        logAiIpcError('ai:get-openclaw-manifest', undefined, e);
         console.error('[Main] ai:get-openclaw-manifest failed:', e);
         throw e;
     }
@@ -801,6 +848,7 @@ ipcMain.handle('ai:get-openclaw-skill-manifest', async () => {
     try {
         return aiService.getOpenClawSkillManifest();
     } catch (e) {
+        logAiIpcError('ai:get-openclaw-skill-manifest', undefined, e);
         console.error('[Main] ai:get-openclaw-skill-manifest failed:', e);
         throw e;
     }
@@ -812,6 +860,7 @@ ipcMain.handle('ai:update-settings', async (_, partial: any) => {
         await applyProxySettings(updated);
         return updated;
     } catch (e) {
+        logAiIpcError('ai:update-settings', partial, e);
         console.error('[Main] ai:update-settings failed:', e);
         throw e;
     }
@@ -821,6 +870,7 @@ ipcMain.handle('ai:test-connection', async () => {
     try {
         return await aiService.testConnection();
     } catch (e) {
+        logAiIpcError('ai:test-connection', undefined, e);
         console.error('[Main] ai:test-connection failed:', e);
         throw e;
     }
@@ -830,6 +880,7 @@ ipcMain.handle('ai:test-mcp', async () => {
     try {
         return await aiService.testMcp();
     } catch (e) {
+        logAiIpcError('ai:test-mcp', undefined, e);
         console.error('[Main] ai:test-mcp failed:', e);
         throw e;
     }
@@ -839,6 +890,7 @@ ipcMain.handle('ai:test-openclaw-mcp', async () => {
     try {
         return await aiService.testOpenClawMcp();
     } catch (e) {
+        logAiIpcError('ai:test-openclaw-mcp', undefined, e);
         console.error('[Main] ai:test-openclaw-mcp failed:', e);
         throw e;
     }
@@ -848,6 +900,7 @@ ipcMain.handle('ai:test-openclaw-skill', async () => {
     try {
         return await aiService.testOpenClawSkill();
     } catch (e) {
+        logAiIpcError('ai:test-openclaw-skill', undefined, e);
         console.error('[Main] ai:test-openclaw-skill failed:', e);
         throw e;
     }
@@ -858,6 +911,7 @@ ipcMain.handle('ai:test-openclaw-smoke', async (_, payload: { kind?: 'mcp' | 'sk
         const kind = payload?.kind === 'skill' ? 'skill' : 'mcp';
         return await aiService.testOpenClawSmoke({ kind });
     } catch (e) {
+        logAiIpcError('ai:test-openclaw-smoke', payload, e);
         console.error('[Main] ai:test-openclaw-smoke failed:', e);
         throw e;
     }
@@ -867,6 +921,7 @@ ipcMain.handle('ai:test-proxy', async () => {
     try {
         return await aiService.testProxy();
     } catch (e) {
+        logAiIpcError('ai:test-proxy', undefined, e);
         console.error('[Main] ai:test-proxy failed:', e);
         throw e;
     }
@@ -876,6 +931,7 @@ ipcMain.handle('ai:test-generate', async (_, payload: { prompt?: string } | unde
     try {
         return await aiService.testGenerate(payload?.prompt);
     } catch (e) {
+        logAiIpcError('ai:test-generate', payload, e);
         console.error('[Main] ai:test-generate failed:', e);
         throw e;
     }
@@ -885,6 +941,7 @@ ipcMain.handle('ai:generate-title', async (_, payload: any) => {
     try {
         return await aiService.generateTitle(payload);
     } catch (e) {
+        logAiIpcError('ai:generate-title', payload, e);
         console.error('[Main] ai:generate-title failed:', e);
         throw e;
     }
@@ -894,6 +951,7 @@ ipcMain.handle('ai:continue-writing', async (_, payload: any) => {
     try {
         return await aiService.continueWriting(payload);
     } catch (e) {
+        logAiIpcError('ai:continue-writing', payload, e);
         console.error('[Main] ai:continue-writing failed:', e);
         throw e;
     }
@@ -903,6 +961,7 @@ ipcMain.handle('ai:preview-continue-prompt', async (_, payload: any) => {
     try {
         return await aiService.previewContinuePrompt(payload);
     } catch (e) {
+        logAiIpcError('ai:preview-continue-prompt', payload, e);
         console.error('[Main] ai:preview-continue-prompt failed:', e);
         throw e;
     }
@@ -912,6 +971,7 @@ ipcMain.handle('ai:check-consistency', async (_, payload: any) => {
     try {
         return await aiService.checkConsistency(payload);
     } catch (e) {
+        logAiIpcError('ai:check-consistency', payload, e);
         console.error('[Main] ai:check-consistency failed:', e);
         throw e;
     }
@@ -921,6 +981,7 @@ ipcMain.handle('ai:generate-creative-assets', async (_, payload: any) => {
     try {
         return await aiService.generateCreativeAssets(payload);
     } catch (e) {
+        logAiIpcError('ai:generate-creative-assets', payload, e);
         console.error('[Main] ai:generate-creative-assets failed:', e);
         throw e;
     }
@@ -930,6 +991,7 @@ ipcMain.handle('ai:preview-creative-assets-prompt', async (_, payload: any) => {
     try {
         return await aiService.previewCreativeAssetsPrompt(payload);
     } catch (e) {
+        logAiIpcError('ai:preview-creative-assets-prompt', payload, e);
         console.error('[Main] ai:preview-creative-assets-prompt failed:', e);
         throw e;
     }
@@ -939,6 +1001,7 @@ ipcMain.handle('ai:validate-creative-assets', async (_, payload: any) => {
     try {
         return await aiService.validateCreativeAssetsDraft(payload);
     } catch (e) {
+        logAiIpcError('ai:validate-creative-assets', payload, e);
         console.error('[Main] ai:validate-creative-assets failed:', e);
         throw e;
     }
@@ -948,6 +1011,7 @@ ipcMain.handle('ai:confirm-creative-assets', async (_, payload: any) => {
     try {
         return await aiService.confirmCreativeAssets(payload);
     } catch (e) {
+        logAiIpcError('ai:confirm-creative-assets', payload, e);
         console.error('[Main] ai:confirm-creative-assets failed:', e);
         throw e;
     }
@@ -957,6 +1021,7 @@ ipcMain.handle('ai:generate-map-image', async (_, payload: any) => {
     try {
         return await aiService.generateMapImage(payload);
     } catch (e) {
+        logAiIpcError('ai:generate-map-image', payload, e);
         console.error('[Main] ai:generate-map-image failed:', e);
         const message = e instanceof Error ? e.message : String(e);
         return { ok: false, code: 'UNKNOWN', detail: message };
@@ -967,6 +1032,7 @@ ipcMain.handle('ai:preview-map-prompt', async (_, payload: any) => {
     try {
         return await aiService.previewMapPrompt(payload);
     } catch (e) {
+        logAiIpcError('ai:preview-map-prompt', payload, e);
         console.error('[Main] ai:preview-map-prompt failed:', e);
         throw e;
     }
@@ -980,6 +1046,7 @@ ipcMain.handle('ai:rebuild-chapter-summary', async (_, payload: { chapterId?: st
         scheduleChapterSummaryRebuild(payload.chapterId, 'manual');
         return { ok: true, detail: 'summary rebuild scheduled' };
     } catch (e) {
+        logAiIpcError('ai:rebuild-chapter-summary', payload, e);
         console.error('[Main] ai:rebuild-chapter-summary failed:', e);
         return { ok: false, detail: e instanceof Error ? e.message : String(e) };
     }
@@ -989,6 +1056,7 @@ ipcMain.handle('ai:execute-action', async (_, payload: { actionId: string; paylo
     try {
         return await aiService.executeAction(payload);
     } catch (e) {
+        logAiIpcError('ai:execute-action', payload, e);
         console.error('[Main] ai:execute-action failed:', e);
         throw e;
     }
@@ -998,6 +1066,7 @@ ipcMain.handle('ai:openclaw-invoke', async (_, payload: { name: string; argument
     try {
         return await aiService.invokeOpenClawTool(payload);
     } catch (e) {
+        logAiIpcError('ai:openclaw-invoke', payload, e);
         console.error('[Main] ai:openclaw-invoke failed:', e);
         const normalized = normalizeAiError(e);
         return {
@@ -1012,6 +1081,7 @@ ipcMain.handle('ai:openclaw-mcp-invoke', async (_, payload: { name: string; argu
     try {
         return await aiService.invokeOpenClawTool(payload);
     } catch (e) {
+        logAiIpcError('ai:openclaw-mcp-invoke', payload, e);
         console.error('[Main] ai:openclaw-mcp-invoke failed:', e);
         const normalized = normalizeAiError(e);
         return {
@@ -1026,6 +1096,7 @@ ipcMain.handle('ai:openclaw-skill-invoke', async (_, payload: { name: string; in
     try {
         return await aiService.invokeOpenClawSkill(payload);
     } catch (e) {
+        logAiIpcError('ai:openclaw-skill-invoke', payload, e);
         console.error('[Main] ai:openclaw-skill-invoke failed:', e);
         const normalized = normalizeAiError(e);
         return {
@@ -2078,13 +2149,27 @@ app.on('activate', () => {
 })
 
 app.whenReady().then(async () => {
-    console.log('[Main] App Ready. Starting DB Setup...');
-
     if (aiDiagParse.error) {
+        initDevLogger(app.getPath('userData'));
+        patchDevConsoleLogging();
         console.error(`[AI-Diag] Invalid arguments: ${aiDiagParse.error}`);
         app.exit(2);
         return;
     }
+
+    app.setAppUserModelId('com.noveleditor.app');
+    app.setName(app.isPackaged ? PACKAGED_APP_NAME : DEV_APP_NAME);
+
+    const resolvedUserDataPath = aiDiagParse.command?.userDataPath
+        ? path.resolve(aiDiagParse.command.userDataPath)
+        : resolveDefaultUserDataPath();
+
+    app.setPath('userData', resolvedUserDataPath);
+
+    initDevLogger(app.getPath('userData'));
+    patchDevConsoleLogging();
+    console.log('[Main] App Ready. Starting DB Setup...');
+    console.log('[Main] User Data Path:', app.getPath('userData'));
 
     if (aiDiagParse.command && app.isPackaged) {
         console.error('[AI-Diag] --ai-diag is only available in development mode.');
@@ -2093,8 +2178,6 @@ app.whenReady().then(async () => {
     }
 
     if (aiDiagParse.command?.userDataPath) {
-        const resolvedUserDataPath = path.resolve(aiDiagParse.command.userDataPath);
-        app.setPath('userData', resolvedUserDataPath);
         console.log('[AI-Diag] userData override:', resolvedUserDataPath);
     }
 
@@ -2192,6 +2275,15 @@ app.whenReady().then(async () => {
 
     // 4. Initialize Core Database (Re-connect/Use instance)
     initDb(dbUrl);
+    try {
+        const schemaApplied = await ensureDbSchema();
+        if (schemaApplied) {
+            console.log('[Main] Bundled database schema applied successfully.');
+        }
+    } catch (error) {
+        console.error('[Main] Failed to ensure bundled database schema:', error);
+        throw error;
+    }
     aiService = new AiService(() => app.getPath('userData'));
 
     if (aiDiagParse.command) {

@@ -128,7 +128,6 @@ export default function Editor({ novelId, onBack }: EditorProps) {
     const [titleGenStage, setTitleGenStage] = useState<TitleGenerationStage | null>(null);
     const [titleGenStatus, setTitleGenStatus] = useState('');
     const [titleCandidates, setTitleCandidates] = useState<Array<{ title: string; styleTag: string }>>([]);
-    const [titleGenStyle, setTitleGenStyle] = useState<'stable' | 'literary' | 'viral'>('stable');
     const [isRebuildingSummary, setIsRebuildingSummary] = useState(false);
     const [summaryStatus, setSummaryStatus] = useState('');
     const [isContinueModalOpen, setIsContinueModalOpen] = useState(false);
@@ -145,7 +144,7 @@ export default function Editor({ novelId, onBack }: EditorProps) {
     const [continuePromptDirty, setContinuePromptDirty] = useState(false);
     const [continueConfig, setContinueConfig] = useState<{
         ideaIds: string[];
-        targetLength: number;
+        targetLength: string;
         creativityPreset: 'safe' | 'balanced' | 'creative';
         contextChapterCount: number;
         style: string;
@@ -155,7 +154,7 @@ export default function Editor({ novelId, onBack }: EditorProps) {
         currentLocation: string;
     }>({
         ideaIds: [],
-        targetLength: 500,
+        targetLength: '500',
         creativityPreset: 'balanced',
         contextChapterCount: 3,
         style: 'default',
@@ -244,6 +243,12 @@ export default function Editor({ novelId, onBack }: EditorProps) {
         }
     }, []);
 
+    const normalizeContinueTargetLength = useCallback((value: string) => {
+        const parsed = Number(value);
+        if (!Number.isFinite(parsed)) return 500;
+        return Math.max(100, Math.min(4000, parsed));
+    }, []);
+
     useEffect(() => {
         return () => {
             clearTitleGenTimers();
@@ -330,11 +335,10 @@ export default function Editor({ novelId, onBack }: EditorProps) {
         }
     };
 
-    const handleGenerateTitle = useCallback(async (styleOverride?: 'stable' | 'literary' | 'viral') => {
+    const handleGenerateTitle = useCallback(async () => {
         if (!currentChapter) return;
         const chapterContent = contentRef.current || '';
         if (!chapterContent.trim()) return;
-        const selectedStyle = styleOverride || titleGenStyle;
 
         setIsGeneratingTitle(true);
         clearTitleGenTimers();
@@ -357,7 +361,6 @@ export default function Editor({ novelId, onBack }: EditorProps) {
                 novelId,
                 chapterId: currentChapter.id,
                 content: chapterContent,
-                style: selectedStyle,
                 count: 6,
             });
 
@@ -389,7 +392,7 @@ export default function Editor({ novelId, onBack }: EditorProps) {
             setTitleGenStage(null);
             setIsGeneratingTitle(false);
         }
-    }, [clearTitleGenStatusTimer, clearTitleGenTimers, currentChapter, novelId, titleGenStyle, t]);
+    }, [clearTitleGenStatusTimer, clearTitleGenTimers, currentChapter, novelId, t]);
 
     const handleRebuildChapterSummary = useCallback(async () => {
         if (!currentChapter) return;
@@ -462,7 +465,7 @@ export default function Editor({ novelId, onBack }: EditorProps) {
                 currentContent: contentRef.current || '',
                 ideaIds: continueConfig.ideaIds,
                 contextChapterCount: continueConfig.contextChapterCount,
-                targetLength: continueConfig.targetLength,
+                targetLength: normalizeContinueTargetLength(continueConfig.targetLength),
                 style: continueConfig.style,
                 tone: continueConfig.tone,
                 pace: continueConfig.pace,
@@ -481,7 +484,7 @@ export default function Editor({ novelId, onBack }: EditorProps) {
         } finally {
             setContinuePromptLoading(false);
         }
-    }, [continueConfig, continuePromptDirty, currentChapter, isContinueModalOpen, novelId, t]);
+    }, [continueConfig, continuePromptDirty, currentChapter, isContinueModalOpen, normalizeContinueTargetLength, novelId, t]);
 
     useEffect(() => {
         if (!isContinueModalOpen || !currentChapter) return;
@@ -522,7 +525,7 @@ export default function Editor({ novelId, onBack }: EditorProps) {
             return;
         }
 
-        const targetLength = Math.max(100, Math.min(5000, Number(continueConfig.targetLength) || 500));
+        const targetLength = normalizeContinueTargetLength(continueConfig.targetLength);
         const temperature = continueConfig.creativityPreset === 'safe'
             ? 0.4
             : continueConfig.creativityPreset === 'creative'
@@ -578,7 +581,7 @@ export default function Editor({ novelId, onBack }: EditorProps) {
             setIsContinuing(false);
             window.setTimeout(() => setContinueStatus(''), 6000);
         }
-    }, [closeContinueModal, continueConfig, continuePromptOverride, currentChapter, isContinuing, novelId, plotLines, t]);
+    }, [closeContinueModal, continueConfig, continuePromptOverride, currentChapter, isContinuing, normalizeContinueTargetLength, novelId, plotLines, t]);
 
     // Load Novel Details
     useEffect(() => {
@@ -1996,21 +1999,6 @@ export default function Editor({ novelId, onBack }: EditorProps) {
                                                 placeholder={t('editor.chapterTitle')}
                                                 className={`flex-1 min-w-[260px] bg-transparent text-2xl md:text-3xl font-bold outline-none text-left md:text-center font-serif ${preferences.theme === 'dark' ? 'text-neutral-100 placeholder-neutral-600' : 'text-neutral-900 placeholder-neutral-300'}`}
                                             />
-                                            <select
-                                                value={titleGenStyle}
-                                                onChange={(e) => setTitleGenStyle(e.target.value as 'stable' | 'literary' | 'viral')}
-                                                className={clsx(
-                                                    "shrink-0 text-xs rounded-lg border px-2 py-1.5",
-                                                    preferences.theme === 'dark'
-                                                        ? "bg-transparent border-white/10 text-neutral-300"
-                                                        : "bg-white border-gray-200 text-gray-600"
-                                                )}
-                                                title={t('editor.aiTitleStyleLabel', '标题风格')}
-                                            >
-                                                <option value="stable">{t('editor.aiTitleStyle.stable', '稳健')}</option>
-                                                <option value="literary">{t('editor.aiTitleStyle.literary', '文艺')}</option>
-                                                <option value="viral">{t('editor.aiTitleStyle.viral', '张力')}</option>
-                                            </select>
                                             <button
                                                 onClick={() => void handleGenerateTitle()}
                                                 disabled={isGeneratingTitle || !currentChapter || !content.trim()}
@@ -2339,11 +2327,20 @@ export default function Editor({ novelId, onBack }: EditorProps) {
                                         {t('editor.continueLength')}
                                     </div>
                                     <input
-                                        type="number"
-                                        min={100}
-                                        max={5000}
+                                        type="text"
+                                        inputMode="numeric"
+                                        pattern="[0-9]*"
                                         value={continueConfig.targetLength}
-                                        onChange={(e) => setContinueConfig((prev) => ({ ...prev, targetLength: Math.max(100, Math.min(5000, Number(e.target.value) || 500)) }))}
+                                        onChange={(e) => {
+                                            const nextValue = e.target.value.replace(/[^\d]/g, '');
+                                            setContinueConfig((prev) => ({ ...prev, targetLength: nextValue }));
+                                        }}
+                                        onBlur={() => {
+                                            setContinueConfig((prev) => ({
+                                                ...prev,
+                                                targetLength: String(normalizeContinueTargetLength(prev.targetLength)),
+                                            }));
+                                        }}
                                         placeholder="500"
                                         className={clsx("w-full rounded-lg border px-2 py-2", preferences.theme === 'dark' ? 'bg-transparent border-white/10 text-neutral-200' : 'border-gray-200')}
                                     />

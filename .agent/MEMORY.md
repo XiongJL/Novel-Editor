@@ -83,3 +83,23 @@
 - **命令生成规则**:
   - 对于 Windows 本地操作：生成 PowerShell 语法命令
   - 对于 WSL 相关操作：生成 Linux/Bash 语法命令
+
+### 2026-03-06
+- Clarified storage rule: AI API Key / API Token are stored only in local userData/ai-settings.json.
+- These secrets are not written into the novel database and must stay outside backup/restore scope.
+
+### 2026-03-09
+- Added dev-only debug log pipeline:
+  - file: `userData/debug-dev.log`
+  - records main-process errors, warnings, AI request/response bodies, provider failures
+  - redacts `Authorization`, `apiKey`, `token`, `access_token`, `refresh_token`
+  - truncates by overwrite after 15MB
+- Prisma packaging strategy changed:
+  - stop depending on packaged runtime `prisma db push`
+  - `packages/core` now generates Prisma Client into `packages/core/generated/client`
+  - build also generates `packages/core/generated/client/schema-init.sql`
+  - packaged app first-run calls `ensureDbSchema()` to apply bundled SQL if core tables are missing
+- Follow-up direction:
+  - first-install uses bundled schema init
+  - later upgrades should use versioned migration runner, not runtime `db push` on user machines
+
