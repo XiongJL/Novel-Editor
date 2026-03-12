@@ -6,19 +6,35 @@ on:
       - "v*"
   workflow_dispatch:
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
-
 permissions:
   contents: write
 
 jobs:
+  prepare-release:
+    name: Prepare GitHub Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Ensure release exists
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || \
+            gh release create "$GITHUB_REF_NAME" \
+              --verify-tag \
+              --generate-notes \
+              --title "$GITHUB_REF_NAME"
+
   build-windows:
     name: Build Windows
+    needs:
+      - prepare-release
     runs-on: windows-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Sync package versions from tag
         if: startsWith(github.ref, 'refs/tags/v')
@@ -35,9 +51,10 @@ jobs:
           NODE
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 24
+          package-manager-cache: false
 
       - name: Setup pnpm
         run: |
@@ -50,24 +67,33 @@ jobs:
       - name: Build Windows artifacts
         run: pnpm --filter novel-editor-desktop run build:win
 
-      - name: Upload Windows artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-windows
-          if-no-files-found: error
-          path: |
-            apps/desktop/release/*Setup-*.exe
-            apps/desktop/release/*Portable-*.exe
-            apps/desktop/release/*.blockmap
+      - name: Upload Windows assets to release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $files = Get-ChildItem apps/desktop/release -File | Where-Object {
+            $_.Name -like '*Setup-*.exe' -or
+            $_.Name -like '*Portable-*.exe' -or
+            $_.Name -like '*.blockmap'
+          } | ForEach-Object { $_.FullName }
+
+          if (-not $files) {
+            throw "No Windows release assets found."
+          }
+
+          gh release upload $env:GITHUB_REF_NAME $files --clobber
 
   build-macos:
     name: Build macOS
+    needs:
+      - prepare-release
     runs-on: macos-latest
     env:
       CSC_IDENTITY_AUTO_DISCOVERY: "false"
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Sync package versions from tag
         if: startsWith(github.ref, 'refs/tags/v')
@@ -84,9 +110,10 @@ jobs:
           NODE
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 24
+          package-manager-cache: false
 
       - name: Setup pnpm
         run: |
@@ -99,61 +126,21 @@ jobs:
       - name: Build macOS artifacts
         run: pnpm --filter novel-editor-desktop run build:mac
 
-      - name: Upload macOS artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-macos
-          if-no-files-found: error
-          path: |
+      - name: Upload macOS assets to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          shopt -s nullglob
+          files=(
             apps/desktop/release/*.dmg
             apps/desktop/release/*.zip
             apps/desktop/release/*.blockmap
             apps/desktop/release/latest-mac.yml
+          )
 
-  publish-release:
-    name: Publish GitHub Release
-    needs:
-      - build-windows
-      - build-macos
-    runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
-    steps:
-      - name: Download Windows artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: release-windows
-          path: release-assets/windows
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "No macOS release assets found." >&2
+            exit 1
+          fi
 
-      - name: Download macOS artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: release-macos
-          path: release-assets/macos
-
-      - name: Normalize release asset names
-        shell: bash
-        run: |
-          normalize_dir() {
-            local dir="$1"
-            shopt -s nullglob
-            for path in "$dir"/*; do
-              local base
-              base="$(basename "$path")"
-              case "$base" in
-                -*)
-                  mv "$path" "$dir/云梦小说编辑器$base"
-                  ;;
-              esac
-            done
-          }
-
-          normalize_dir release-assets/windows
-          normalize_dir release-assets/macos
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          generate_release_notes: true
-          files: |
-            release-assets/windows/**
-            release-assets/macos/**
+          gh release upload "$GITHUB_REF_NAME" "${files[@]}" --clobber
