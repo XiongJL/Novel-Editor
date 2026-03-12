@@ -57,8 +57,8 @@ pnpm build
 2. 提交代码并推送到默认分支。
 3. 创建并推送版本标签：
 ```bash
-git tag v0.1.1
-git push origin v0.1.1
+git tag v0.1.2
+git push origin v0.1.2
 ```
 4. GitHub Actions 会自动：
    - 构建 Windows 安装包与便携版
@@ -69,7 +69,7 @@ git push origin v0.1.1
 说明：
 - 自动发布工作流位于 `.github/workflows/release.yml`。
 - Release 文案模板位于 `.github/RELEASE_TEMPLATE.md`。
-- 当前版本发布草稿位于 `docs/releases/v0.1.1.md`。
+- 当前版本发布草稿位于 `docs/releases/v0.1.2.md`。
 - macOS 构建由 GitHub 的 macOS runner 执行；本地 Windows 机器不负责产出正式 DMG。
 
 ## 项目结构

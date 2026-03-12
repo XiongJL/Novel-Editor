@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, and this project follows Semantic Versioning in release tags.
 
+## [0.1.2] - 2026-03-12
+
+### Fixed
+- GitHub Actions release workflow no longer depends on downloading `pnpm/action-setup`, avoiding intermittent `401 Unauthorized` failures during macOS job bootstrap.
+- Release pipeline now installs `pnpm@8.15.9` directly on the runner before dependency installation.
+
 ## [0.1.1] - 2026-03-12
 
 ### Changed

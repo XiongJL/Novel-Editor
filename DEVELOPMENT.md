@@ -112,7 +112,7 @@ pnpm --filter @novel-editor/desktop run ai:diag -- coverage
 - `build:mac` 需要在 macOS 环境执行；当前 Windows 开发机不作为生成正式 mac 安装包的目标环境。
 - GitHub 自动发布：
   - 工作流：`.github/workflows/release.yml`
-  - 触发方式：推送版本标签，例如 `git tag v0.1.1 && git push origin v0.1.1`
+  - 触发方式：推送版本标签，例如 `git tag v0.1.2 && git push origin v0.1.2`
   - CI 中的 pnpm 版本与仓库声明保持一致，当前为 `8.15.9`
   - 行为：自动构建 Windows / macOS 产物，并上传到 GitHub Releases
 - 打包体积控制：
