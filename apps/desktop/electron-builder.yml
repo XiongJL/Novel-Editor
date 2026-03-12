@@ -21,7 +21,7 @@ files:
   - node_modules/@novel-editor/core/dist/**/*
   - node_modules/@novel-editor/core/generated/client/index.js
   - node_modules/@novel-editor/core/generated/client/package.json
-  - node_modules/@novel-editor/core/generated/client/query_engine-windows.dll.node
+  - node_modules/@novel-editor/core/generated/client/*query_engine*.node
   - node_modules/@novel-editor/core/generated/client/schema-init.sql
   - node_modules/@novel-editor/core/generated/client/schema.prisma
   - node_modules/@novel-editor/core/generated/client/runtime/library.js

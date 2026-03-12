@@ -42,7 +42,12 @@ const prismaEnginesPackageJson = resolvePackageJson('@prisma/engines');
 const prismaEnginesDir = path.dirname(prismaEnginesPackageJson);
 
 const schemaEngineFile = findEngineFile(prismaEnginesDir, (name) => name.startsWith('schema-engine-'));
-const queryEngineLibraryFile = findEngineFile(prismaEnginesDir, (name) => name.startsWith('query_engine-') && name.endsWith('.node'));
+const queryEngineLibraryFile = findEngineFile(
+    prismaEnginesDir,
+    (name) =>
+        (name.startsWith('query_engine-') || name.startsWith('libquery_engine-')) &&
+        name.endsWith('.node'),
+);
 
 if (!schemaEngineFile || !queryEngineLibraryFile) {
     console.error('[Prisma Generate] Required local Prisma engines were not found.');

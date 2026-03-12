@@ -27,3 +27,11 @@ target
 *.db-journal
 功能借鉴/*
 release*/
+
+# Keep release workflow and release notes tracked
+!.github/
+!.github/workflows/
+!.github/workflows/release.yml
+!docs/
+!docs/releases/
+!docs/releases/*.md
