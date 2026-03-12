@@ -6,6 +6,9 @@ on:
       - "v*"
   workflow_dispatch:
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 permissions:
   contents: write
 
@@ -17,10 +20,24 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Sync package versions from tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="$VERSION" node <<'NODE'
+          const fs = require('fs');
+          for (const file of ['package.json', 'apps/desktop/package.json']) {
+            const data = JSON.parse(fs.readFileSync(file, 'utf8'));
+            data.version = process.env.VERSION;
+            fs.writeFileSync(file, JSON.stringify(data, null, 2) + '\n');
+          }
+          NODE
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
 
       - name: Setup pnpm
         run: |
@@ -52,10 +69,24 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Sync package versions from tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="$VERSION" node <<'NODE'
+          const fs = require('fs');
+          for (const file of ['package.json', 'apps/desktop/package.json']) {
+            const data = JSON.parse(fs.readFileSync(file, 'utf8'));
+            data.version = process.env.VERSION;
+            fs.writeFileSync(file, JSON.stringify(data, null, 2) + '\n');
+          }
+          NODE
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
 
       - name: Setup pnpm
         run: |
@@ -98,6 +129,26 @@ jobs:
         with:
           name: release-macos
           path: release-assets/macos
+
+      - name: Normalize release asset names
+        shell: bash
+        run: |
+          normalize_dir() {
+            local dir="$1"
+            shopt -s nullglob
+            for path in "$dir"/*; do
+              local base
+              base="$(basename "$path")"
+              case "$base" in
+                -*)
+                  mv "$path" "$dir/云梦小说编辑器$base"
+                  ;;
+              esac
+            done
+          }
+
+          normalize_dir release-assets/windows
+          normalize_dir release-assets/macos
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
