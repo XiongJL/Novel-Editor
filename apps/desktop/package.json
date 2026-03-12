@@ -1,10 +1,10 @@
 {
   "name": "novel-editor-desktop",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "type": "module",
   "private": true,
   "main": "dist-electron/main.js",
-  "author":"XiongJL",
+  "author": "XiongJL",
   "description": "云梦AI小说辅助创作工具",
   "scripts": {
     "dev": "vite",

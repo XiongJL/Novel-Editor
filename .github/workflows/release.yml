@@ -72,12 +72,25 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          $version = $env:GITHUB_REF_NAME.Substring(1)
+          $stageDir = Join-Path $env:RUNNER_TEMP "release-upload-windows"
+          New-Item -ItemType Directory -Force -Path $stageDir | Out-Null
+
           $files = Get-ChildItem apps/desktop/release -File | Where-Object {
             $_.Name -like '*Setup-*.exe' -or
             $_.Name -like '*Portable-*.exe' -or
-            $_.Name -like '*.blockmap'
+            $_.Name -like '*Setup-*.exe.blockmap'
           } | ForEach-Object {
-            "$($_.FullName)#$($_.Name)"
+            $targetName = switch -Wildcard ($_.Name) {
+              '*Setup-*.exe.blockmap' { "novel-editor-setup-$version.exe.blockmap"; break }
+              '*Setup-*.exe' { "novel-editor-setup-$version.exe"; break }
+              '*Portable-*.exe' { "novel-editor-portable-$version.exe"; break }
+              default { throw "Unexpected Windows asset: $($_.Name)" }
+            }
+
+            $targetPath = Join-Path $stageDir $targetName
+            Copy-Item $_.FullName $targetPath -Force
+            "$targetPath#$($_.Name)"
           }
 
           if (-not $files) {
@@ -133,6 +146,9 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           shopt -s nullglob
+          version="${GITHUB_REF_NAME#v}"
+          stage_dir="${RUNNER_TEMP}/release-upload-macos"
+          mkdir -p "$stage_dir"
           files=(
             apps/desktop/release/*.dmg
             apps/desktop/release/*.zip
@@ -147,7 +163,29 @@ jobs:
 
           labeled_files=()
           for file in "${files[@]}"; do
-            labeled_files+=("${file}#$(basename "$file")")
+            base="$(basename "$file")"
+            case "$base" in
+              *.dmg.blockmap)
+                target_name="novel-editor-mac-${version}.dmg.blockmap"
+                ;;
+              *.dmg)
+                target_name="novel-editor-mac-${version}.dmg"
+                ;;
+              *.zip)
+                target_name="novel-editor-mac-${version}.zip"
+                ;;
+              latest*.yml)
+                target_name="$base"
+                ;;
+              *)
+                echo "Unexpected macOS asset: $base" >&2
+                exit 1
+                ;;
+            esac
+
+            target_path="${stage_dir}/${target_name}"
+            cp "$file" "$target_path"
+            labeled_files+=("${target_path}#${base}")
           done
 
           gh release upload "$GITHUB_REF_NAME" "${labeled_files[@]}" --clobber
