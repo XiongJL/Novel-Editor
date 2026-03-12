@@ -1,4 +1,4 @@
-﻿import { AiGenerateRequest, AiGenerateResponse, AiHealthCheckResult, AiImageRequest, AiImageResponse, AiProvider, AiSettings } from '../types';
+import { AiGenerateRequest, AiGenerateResponse, AiHealthCheckResult, AiImageRequest, AiImageResponse, AiProvider, AiSettings } from '../types';
 import { devLog, devLogError, redactForLog } from '../../debug/devLogger';
 
 function joinUrl(baseUrl: string, path: string): string {
@@ -95,7 +95,7 @@ export class HttpProvider implements AiProvider {
 
         const controller = new AbortController();
         let didTimeout = false;
-        const timeout = Math.max(1000, this.settings.http.timeoutMs);
+        const timeout = Math.max(1000, req.timeoutMs ?? this.settings.http.timeoutMs);
         const timer = setTimeout(() => {
             didTimeout = true;
             controller.abort();

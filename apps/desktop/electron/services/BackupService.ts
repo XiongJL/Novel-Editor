@@ -5,13 +5,6 @@ import crypto from 'crypto';
 import { db } from '@novel-editor/core';
 import { app, dialog } from 'electron';
 
-const BACKUP_DIR = path.join(app.getPath('userData'), 'backups');
-const AUTO_BACKUP_DIR = path.join(BACKUP_DIR, 'auto');
-
-// Ensure directories exist
-if (!fs.existsSync(BACKUP_DIR)) fs.mkdirSync(BACKUP_DIR, { recursive: true });
-if (!fs.existsSync(AUTO_BACKUP_DIR)) fs.mkdirSync(AUTO_BACKUP_DIR, { recursive: true });
-
 interface BackupManifest {
     version: number;
     appVersion: string;
@@ -33,6 +26,21 @@ export interface AutoBackupInfo {
 }
 
 export class BackupService {
+    private getBackupDir(): string {
+        return path.join(app.getPath('userData'), 'backups');
+    }
+
+    private getAutoBackupDir(): string {
+        return path.join(this.getBackupDir(), 'auto');
+    }
+
+    private ensureBackupDirs(): void {
+        const backupDir = this.getBackupDir();
+        const autoBackupDir = this.getAutoBackupDir();
+
+        if (!fs.existsSync(backupDir)) fs.mkdirSync(backupDir, { recursive: true });
+        if (!fs.existsSync(autoBackupDir)) fs.mkdirSync(autoBackupDir, { recursive: true });
+    }
 
     // --- Encryption Helpers ---
 
@@ -195,9 +203,10 @@ export class BackupService {
     // 3. Auto Backup Logic
     async createAutoBackup() {
         try {
+            this.ensureBackupDirs();
             const timestamp = Date.now();
             const filename = `auto_backup_${timestamp}.nebak`;
-            const filePath = path.join(AUTO_BACKUP_DIR, filename);
+            const filePath = path.join(this.getAutoBackupDir(), filename);
 
             // Re-use exportData logic but to specific path without password
             await this.exportData(filePath);
@@ -211,28 +220,32 @@ export class BackupService {
     }
 
     private async rotateAutoBackups() {
-        const files = fs.readdirSync(AUTO_BACKUP_DIR)
+        this.ensureBackupDirs();
+        const autoBackupDir = this.getAutoBackupDir();
+        const files = fs.readdirSync(autoBackupDir)
             .filter(f => f.endsWith('.nebak'))
             .map(f => ({
                 name: f,
-                time: fs.statSync(path.join(AUTO_BACKUP_DIR, f)).mtime.getTime()
+                time: fs.statSync(path.join(autoBackupDir, f)).mtime.getTime()
             }))
             .sort((a, b) => b.time - a.time); // Newest first
 
         // Keep 3
         const toDelete = files.slice(3);
         for (const file of toDelete) {
-            fs.unlinkSync(path.join(AUTO_BACKUP_DIR, file.name));
+            fs.unlinkSync(path.join(autoBackupDir, file.name));
             console.log('[BackupService] Rotated auto-backup:', file.name);
         }
     }
 
     // 4. List Auto Backups
     async getAutoBackups(): Promise<AutoBackupInfo[]> {
-        return fs.readdirSync(AUTO_BACKUP_DIR)
+        this.ensureBackupDirs();
+        const autoBackupDir = this.getAutoBackupDir();
+        return fs.readdirSync(autoBackupDir)
             .filter(f => f.endsWith('.nebak'))
             .map(f => {
-                const stats = fs.statSync(path.join(AUTO_BACKUP_DIR, f));
+                const stats = fs.statSync(path.join(autoBackupDir, f));
                 return {
                     filename: f,
                     createdAt: stats.mtime.getTime(),
@@ -244,7 +257,8 @@ export class BackupService {
 
     // 5. Restore from Auto Backup
     async restoreAutoBackup(filename: string): Promise<void> {
-        const filePath = path.join(AUTO_BACKUP_DIR, filename);
+        this.ensureBackupDirs();
+        const filePath = path.join(this.getAutoBackupDir(), filename);
         if (!fs.existsSync(filePath)) throw new Error('Backup file not found');
 
         // Use standard importData logic (no password for auto backups)

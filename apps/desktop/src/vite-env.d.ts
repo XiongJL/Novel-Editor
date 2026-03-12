@@ -424,10 +424,14 @@ interface AIAPI {
     }>
     checkConsistency: (payload: { novelId: string; text: string }) => Promise<{ ok: boolean; issues: string[] }>
     previewCreativeAssetsPrompt: (payload: {
+        locale?: string;
         brief: string;
         novelId: string;
         overrideUserPrompt?: string;
         targetSections?: Array<'plotLines' | 'plotPoints' | 'characters' | 'items' | 'skills' | 'maps'>;
+        contextChapterCount?: number;
+        includeExistingEntities?: boolean;
+        filterCompletedPlotLines?: boolean;
     }) => Promise<{
         structured: {
             goal: string
@@ -440,10 +444,14 @@ interface AIAPI {
         usedContext?: string[]
     }>
     generateCreativeAssets: (payload: {
+        locale?: string;
         brief: string;
         novelId: string;
         overrideUserPrompt?: string;
         targetSections?: Array<'plotLines' | 'plotPoints' | 'characters' | 'items' | 'skills' | 'maps'>;
+        contextChapterCount?: number;
+        includeExistingEntities?: boolean;
+        filterCompletedPlotLines?: boolean;
     }) => Promise<{
         draft: Record<string, unknown>
     }>

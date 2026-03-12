@@ -102,4 +102,9 @@
 - Follow-up direction:
   - first-install uses bundled schema init
   - later upgrades should use versioned migration runner, not runtime `db push` on user machines
+- Packaging/UI follow-up notes:
+  - packaged/development backup cache location is `app.getPath('userData')/backups/auto`
+  - default theme is still `dark` in `apps/desktop/src/hooks/useEditorPreferences.tsx`
+  - `BrowserWindow` runtime icon still points to `electron-vite.svg`, so builder icon alone cannot fix all icon surfaces
+  - install directory naming is still affected by `apps/desktop/package.json` package name `@novel-editor/desktop`
 

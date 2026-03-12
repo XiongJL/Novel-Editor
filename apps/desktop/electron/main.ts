@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, nativeImage, protocol, net, session } from 'electron'
+﻿import { app, BrowserWindow, ipcMain, dialog, nativeImage, protocol, net, session } from 'electron'
 import { initDb, db, ensureDbSchema } from '@novel-editor/core'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
@@ -41,6 +41,87 @@ let win: BrowserWindow | null
 let consolePatched = false
 const PACKAGED_APP_NAME = '云梦小说编辑器';
 const DEV_APP_NAME = 'Novel Editor Dev';
+
+function resolveWindowsAppUserModelId(): string {
+    if (app.isPackaged && process.platform === 'win32') {
+        return process.execPath;
+    }
+
+    return 'com.noveleditor.app';
+}
+
+function isPortableMode(): boolean {
+    return app.isPackaged && typeof process.env.PORTABLE_EXECUTABLE_DIR === 'string' && process.env.PORTABLE_EXECUTABLE_DIR.length > 0;
+}
+
+function getLegacyPackagedDataDir(): string {
+    return path.join(path.dirname(app.getPath('exe')), 'data');
+}
+
+function getPortableDataDir(): string {
+    const portableDir = process.env.PORTABLE_EXECUTABLE_DIR;
+    if (!portableDir) {
+        return getLegacyPackagedDataDir();
+    }
+    return path.join(portableDir, 'data');
+}
+
+function copyDirectoryContentsIfMissing(sourceDir: string, targetDir: string): void {
+    if (!fs.existsSync(sourceDir)) return;
+    if (!fs.existsSync(targetDir)) {
+        fs.mkdirSync(targetDir, { recursive: true });
+    }
+
+    const entries = fs.readdirSync(sourceDir, { withFileTypes: true });
+    for (const entry of entries) {
+        const sourcePath = path.join(sourceDir, entry.name);
+        const targetPath = path.join(targetDir, entry.name);
+
+        if (fs.existsSync(targetPath)) {
+            continue;
+        }
+
+        if (entry.isDirectory()) {
+            fs.cpSync(sourcePath, targetPath, { recursive: true });
+            continue;
+        }
+
+        fs.copyFileSync(sourcePath, targetPath);
+    }
+}
+
+function migrateLegacyInstalledDataToUserData(): void {
+    if (!app.isPackaged || isPortableMode()) {
+        return;
+    }
+
+    const legacyDataDir = getLegacyPackagedDataDir();
+    const targetDataDir = app.getPath('userData');
+    const legacyDbPath = path.join(legacyDataDir, 'novel_editor.db');
+    const targetDbPath = path.join(targetDataDir, 'novel_editor.db');
+
+    if (!fs.existsSync(legacyDbPath) || fs.existsSync(targetDbPath)) {
+        return;
+    }
+
+    copyDirectoryContentsIfMissing(legacyDataDir, targetDataDir);
+    console.log('[Main] Migrated legacy packaged data from exe/data to userData.');
+}
+
+function resolveWindowIcon(): string | undefined {
+    if (app.isPackaged) {
+        const packagedIcon = path.join(process.resourcesPath, 'icon_ink_pen_256.ico');
+        return fs.existsSync(packagedIcon) ? packagedIcon : undefined;
+    }
+
+    const devIcon = path.join(process.env.APP_ROOT || '', 'build', 'icon_ink_pen_256.ico');
+    if (fs.existsSync(devIcon)) {
+        return devIcon;
+    }
+
+    const fallbackIcon = path.join(process.env.VITE_PUBLIC || '', 'electron-vite.svg');
+    return fs.existsSync(fallbackIcon) ? fallbackIcon : undefined;
+}
 
 function resolveDefaultUserDataPath(): string {
     const appDataPath = app.getPath('appData');
@@ -251,12 +332,15 @@ async function applyProxySettings(settings: any): Promise<void> {
 }
 
 function createWindow() {
+    const isDevMode = !app.isPackaged;
+    const icon = resolveWindowIcon();
     win = new BrowserWindow({
         width: 1200,
         height: 800,
-        icon: path.join(process.env.VITE_PUBLIC || '', 'electron-vite.svg'),
+        ...(icon ? { icon } : {}),
         webPreferences: {
             preload: path.join(__dirname, 'preload.mjs'),
+            devTools: isDevMode,
         },
         // Win11 style & White Screen Fix
         frame: true,
@@ -275,12 +359,22 @@ function createWindow() {
         win?.webContents.send('main-process-message', (new Date).toLocaleString())
     })
 
-    // Register DevTools toggle shortcuts (F12 or Ctrl+Shift+I)
+    win.webContents.on('devtools-opened', () => {
+        if (!isDevMode) {
+            win?.webContents.closeDevTools();
+        }
+    })
+
     win.webContents.on('before-input-event', (event, input) => {
         if (input.key === 'F11') {
             win?.setFullScreen(!win.isFullScreen());
             event.preventDefault();
         }
+
+        if (!isDevMode) {
+            return;
+        }
+
         if (input.key === 'F12' || (input.control && input.shift && input.key.toLowerCase() === 'i')) {
             if (win?.webContents.isDevToolsOpened()) {
                 win.webContents.closeDevTools()
@@ -293,8 +387,6 @@ function createWindow() {
 
     if (VITE_DEV_SERVER_URL) {
         win.loadURL(VITE_DEV_SERVER_URL)
-        // Open DevTools in development mode
-        // win.webContents.openDevTools()
     } else {
         // win.loadFile('dist/index.html')
         win.loadFile(path.join(RENDERER_DIST, 'index.html'))
@@ -2157,7 +2249,7 @@ app.whenReady().then(async () => {
         return;
     }
 
-    app.setAppUserModelId('com.noveleditor.app');
+    app.setAppUserModelId(resolveWindowsAppUserModelId());
     app.setName(app.isPackaged ? PACKAGED_APP_NAME : DEV_APP_NAME);
 
     const resolvedUserDataPath = aiDiagParse.command?.userDataPath
@@ -2188,19 +2280,20 @@ app.whenReady().then(async () => {
         return net.fetch('file:///' + fullPath.replace(/\\/g, '/'));
     });
 
+
     // 1. Setup Data Paths
-    // In production: use exe directory (portable mode)
-    // In development: use userData (AppData)
+    // Installed package: use userData
+    // Portable build: use exe/data
+    // Development: use userData
     let dataPath: string;
 
-    if (app.isPackaged) {
-        // Production: database alongside the executable
-        const exePath = path.dirname(app.getPath('exe'));
-        dataPath = path.join(exePath, 'data');
+    if (app.isPackaged && isPortableMode()) {
+        dataPath = getPortableDataDir();
     } else {
-        // Development: use userData for isolation
         dataPath = app.getPath('userData');
     }
+
+    migrateLegacyInstalledDataToUserData();
 
     const dbPath = aiDiagParse.command?.dbPath
         ? path.resolve(aiDiagParse.command.dbPath)
@@ -2314,3 +2407,6 @@ app.whenReady().then(async () => {
     // 6. Create Window
     createWindow();
 })
+
+
+

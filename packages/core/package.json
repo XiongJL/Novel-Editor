@@ -2,6 +2,11 @@
   "name": "@novel-editor/core",
   "version": "0.0.0",
   "type": "module",
+  "files": [
+    "dist",
+    "generated",
+    "package.json"
+  ],
   "exports": {
     ".": {
       "import": "./dist/index.js",
@@ -15,7 +20,7 @@
     "db:push": "prisma db push",
     "db:studio": "prisma studio",
     "generate": "node scripts/generate-prisma-client.mjs",
-    "build": "pnpm run generate && tsc"
+    "build": "node scripts/generate-prisma-client.mjs && tsc"
   },
   "dependencies": {
     "@prisma/client": "^5.10.2",

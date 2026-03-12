@@ -1,7 +1,16 @@
-﻿import { defineConfig } from 'vite'
 import path from 'node:path'
-import electron from 'vite-plugin-electron/simple'
 import react from '@vitejs/plugin-react'
+import electronSimpleImport from 'vite-plugin-electron/simple'
+import { defineConfig } from 'vite'
+
+const electronSimple =
+    typeof electronSimpleImport === 'function'
+        ? electronSimpleImport
+        : (electronSimpleImport as { default?: typeof electronSimpleImport }).default
+
+if (typeof electronSimple !== 'function') {
+    throw new TypeError('vite-plugin-electron/simple did not export a callable plugin factory')
+}
 
 // https://vitejs.dev/config/
 export default defineConfig(() => {
@@ -17,9 +26,8 @@ export default defineConfig(() => {
         },
         plugins: [
             react(),
-            electron({
+            electronSimple({
                 main: {
-                    // Shortcut of `build.lib.entry`.
                     entry: 'electron/main.ts',
                     vite: {
                         build: {
@@ -28,19 +36,14 @@ export default defineConfig(() => {
                             },
                         },
                         resolve: {
-                            // Force Node.js resolution
                             conditions: ['node'],
                             mainFields: ['module', 'jsnext:main', 'jsnext'],
                         },
                     },
                 },
                 preload: {
-                    // Shortcut of `build.rollupOptions.input`.
-                    // Preload scripts may contain Web assets, so use the `build.rollupOptions.input` instead `build.lib.entry`.
                     input: path.join(__dirname, 'electron/preload.ts'),
                 },
-                // Polyfill the Electron and Node.js built-in modules for Renderer process.
-                // See https://github.com/electron-vite/vite-plugin-electron-renderer
                 renderer: {},
             }),
         ],

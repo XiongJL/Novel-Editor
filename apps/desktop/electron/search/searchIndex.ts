@@ -6,6 +6,53 @@
 
 import { db } from '@novel-editor/core';
 
+const SEARCH_INDEX_REQUIRED_COLUMNS = [
+    'content',
+    'entity_type',
+    'entity_id',
+    'novel_id',
+    'chapter_id',
+    'title',
+    'volume_title',
+    'chapter_order',
+    'volume_order',
+    'volume_id',
+];
+
+async function createSearchIndexTable(): Promise<void> {
+    await db.$executeRaw`
+        CREATE VIRTUAL TABLE search_index USING fts5(
+            content,
+            entity_type,
+            entity_id UNINDEXED,
+            novel_id UNINDEXED,
+            chapter_id UNINDEXED,
+            title,
+            volume_title,
+            chapter_order UNINDEXED,
+            volume_order UNINDEXED,
+            volume_id UNINDEXED,
+            tokenize='unicode61'
+        );
+    `;
+}
+
+async function getSearchIndexColumns(): Promise<string[]> {
+    const rows = await db.$queryRawUnsafe<Array<{ name: string }>>('PRAGMA table_info(search_index);');
+    return rows.map((row) => row.name);
+}
+
+async function rebuildAllIndexes(): Promise<void> {
+    const novels = await db.novel.findMany({
+        where: { deleted: false },
+        select: { id: true },
+    });
+
+    for (const novel of novels) {
+        await rebuildIndex(novel.id);
+    }
+}
+
 // Initialize FTS5 table if not exists
 export async function initSearchIndex(): Promise<void> {
     try {
@@ -15,38 +62,20 @@ export async function initSearchIndex(): Promise<void> {
         `;
 
         if (tableExists.length === 0) {
-            // Create FTS5 virtual table
-            await db.$executeRaw`
-                CREATE VIRTUAL TABLE search_index USING fts5(
-                    content,
-                    entity_type,
-                    entity_id UNINDEXED,
-                    novel_id UNINDEXED,
-                    chapter_id UNINDEXED,
-                    title,
-                    volume_title,
-                    chapter_order UNINDEXED,
-                    volume_order UNINDEXED,
-                    volume_id UNINDEXED,
-                    tokenize='unicode61'
-                );
-            `;
+            await createSearchIndexTable();
             console.log('[SearchIndex] FTS5 table created successfully');
+            await rebuildAllIndexes();
+            console.log('[SearchIndex] FTS5 index rebuilt from source data');
         } else {
-            // Migration: Add missing columns
-            const columnsToAdd = ['volume_title', 'chapter_order', 'volume_order', 'volume_id'];
-            for (const col of columnsToAdd) {
-                try {
-                    await db.$executeRawUnsafe(`SELECT ${col} FROM search_index LIMIT 1;`);
-                } catch (e) {
-                    console.warn(`[SearchIndex] Schema mismatch (missing ${col}). Attempting to add column...`);
-                    try {
-                        await db.$executeRawUnsafe(`ALTER TABLE search_index ADD COLUMN ${col};`);
-                        console.log(`[SearchIndex] Added ${col} column successfully`);
-                    } catch (alterError) {
-                        console.error(`[SearchIndex] Failed to add column ${col}:`, alterError);
-                    }
-                }
+            const existingColumns = await getSearchIndexColumns();
+            const missingColumns = SEARCH_INDEX_REQUIRED_COLUMNS.filter((column) => !existingColumns.includes(column));
+
+            if (missingColumns.length > 0) {
+                console.warn(`[SearchIndex] Schema mismatch detected. Rebuilding FTS5 table. Missing columns: ${missingColumns.join(', ')}`);
+                await db.$executeRawUnsafe('DROP TABLE IF EXISTS search_index;');
+                await createSearchIndexTable();
+                await rebuildAllIndexes();
+                console.log('[SearchIndex] FTS5 table rebuilt successfully');
             }
         }
     } catch (error) {

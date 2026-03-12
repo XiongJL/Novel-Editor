@@ -1,4 +1,4 @@
-﻿export type AiProviderType = 'http' | 'mcp-cli';
+export type AiProviderType = 'http' | 'mcp-cli';
 export type AiProxyMode = 'system' | 'off' | 'custom';
 
 export interface AiProxySettings {
@@ -59,6 +59,7 @@ export interface AiGenerateRequest {
     systemPrompt?: string;
     maxTokens?: number;
     temperature?: number;
+    timeoutMs?: number;
 }
 
 export interface AiGenerateResponse {
@@ -210,10 +211,14 @@ export interface AiMapImagePayload {
 }
 
 export interface CreativeAssetsGeneratePayload {
+    locale?: string;
     brief: string;
     novelId: string;
     overrideUserPrompt?: string;
     targetSections?: Array<'plotLines' | 'plotPoints' | 'characters' | 'items' | 'skills' | 'maps'>;
+    contextChapterCount?: number;
+    includeExistingEntities?: boolean;
+    filterCompletedPlotLines?: boolean;
 }
 
 export interface PromptPreviewStructured {

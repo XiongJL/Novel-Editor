@@ -1,4 +1,4 @@
-{
+﻿{
   "common": {
     "cancel": "Cancel",
     "save": "Save",
@@ -331,6 +331,112 @@
       }
     },
     "ai": {
+      "title": "AI",
+      "provider": "AI Provider",
+      "providerHttp": "HTTP API",
+      "providerMcp": "MCP CLI",
+      "preset": {
+        "doubao": "Preset: Doubao Ark",
+        "openai": "Preset: OpenAI Compatible",
+        "gemini": "Preset: Gemini Compatible"
+      },
+      "baseUrl": "Base URL",
+      "modelPreset": "Common text models (optional)",
+      "modelPresetHint": "Selecting a preset model will automatically fill the input below",
+      "model": "Text model",
+      "imageModelPreset": "Common image models (optional)",
+      "imageModelPresetHint": "Selecting an image model will automatically fill the input below",
+      "imageModel": "Image model",
+      "imageSize": "Image Size",
+      "imageOutputFormat": "Image Output Format",
+      "apiKey": "API Key / Token",
+      "timeoutMs": "Request timeout (ms)",
+      "maxTokens": "Max output tokens",
+      "maxTokensHint": "Limits maximum output length (too small may cause truncation)",
+      "cliPath": "CLI path",
+      "workingDir": "Working directory",
+      "argsTemplate": "Args template",
+      "envJson": "Environment JSON",
+      "testConnection": "Test Connection",
+      "testMcp": "Test MCP",
+      "testProxy": "Test Proxy",
+      "testGenerate": "Test Generate",
+      "testPrompt": "Test prompt",
+      "localOnlyTitle": "Local AI Settings",
+      "localOnlyDesc": "API keys and tokens are stored only on this device. They are not written into the novel database and are excluded from backup and restore.",
+      "presetDesc": "Presets only fill recommended endpoints, models and default parameters. They never write your secret key automatically.",
+      "section": {
+        "http": "HTTP Model Settings",
+        "httpBase": "HTTP Base Settings",
+        "httpText": "Text Model Settings",
+        "httpImage": "Image Model Settings",
+        "httpAdvanced": "Other Advanced Settings",
+        "mcp": "MCP CLI Settings",
+        "proxy": "Proxy Settings",
+        "testAndSave": "Connectivity Checks & Save"
+      },
+      "check": {
+        "connection": "Connection test",
+        "mcp": "MCP test",
+        "proxy": "Proxy test",
+        "generate": "Generate test"
+      },
+      "status": {
+        "loadFailed": "Failed to load AI settings",
+        "saveFailed": "Failed to save AI settings",
+        "saved": "AI settings saved",
+        "presetDoubao": "Doubao preset applied",
+        "presetOpenai": "OpenAI-compatible preset applied",
+        "presetGemini": "Gemini-compatible preset applied",
+        "ok": "ok",
+        "failed": "failed",
+        "error": "error"
+      },
+      "proxy": {
+        "mode": "Proxy Mode",
+        "system": "Proxy: System",
+        "off": "Proxy: Off",
+        "custom": "Proxy: Custom",
+        "all": "ALL proxy",
+        "http": "HTTP proxy",
+        "https": "HTTPS proxy",
+        "no": "NO_PROXY",
+        "noHint": "Bypass proxy for these hostnames or IPs. Use comma-separated list, e.g., localhost,127.0.0.1"
+      },
+      "imageWatermark": {
+        "label": "Image Watermark",
+        "off": "Watermark: Off",
+        "on": "Watermark: On"
+      },
+      "creativity": {
+        "label": "Creativity Level",
+        "safe": "Creativity: Safe",
+        "balanced": "Creativity: Balanced",
+        "creative": "Creativity: Creative",
+        "safeDesc": "More stable and less likely to drift, good for strict continuation and structured generation.",
+        "balancedDesc": "Balanced between stability and creativity. Recommended default.",
+        "creativeDesc": "More imaginative but more likely to drift. Better for brainstorming."
+      },
+      "summary": {
+        "title": "Chapter Summary Strategy",
+        "mode": "Summary Mode",
+        "modeLocal": "Local heuristic summary (no token cost)",
+        "modeAi": "AI summary (more accurate, costs tokens)",
+        "triggerLabel": "Summary Trigger",
+        "trigger": {
+          "manual": "Trigger: Manual only (recommended for AI)",
+          "finalized": "Trigger: After chapter is finalized",
+          "auto": "Trigger: Automatic (not recommended with frequent autosave)"
+        },
+        "debounceMs": "Debounce after save (ms)",
+        "minIntervalMs": "Minimum update interval (ms)",
+        "minWordDelta": "Minimum word delta",
+        "finalizeStableMs": "Finalize stable window (ms)",
+        "finalizeMinWords": "Minimum finalized words",
+        "recentRawCount": "Recent chapters kept as raw text during continuation",
+        "notice": "Note: Local heuristic summaries can be inaccurate. AI summaries cost tokens. Prefer maintaining outline and story lines first.",
+        "notice2": "Recommendation: AI summaries should default to manual trigger. If you choose finalized trigger, the app will wait until the chapter stays unchanged long enough and reaches the minimum word count."
+      },
       "openclawSmokeResult": "OpenClaw Smoke Result",
       "smokePassed": "Passed",
       "smokeFailed": "Failed",
@@ -527,3 +633,5 @@
       "editInRightDockHintCompact": "Draft details are now on the right. Use the top Draft button to show or hide them."
     }
   }
+
+

@@ -1,4 +1,4 @@
-﻿import fs from 'node:fs';
+import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { db } from '@novel-editor/core';
@@ -123,7 +123,7 @@ const DEFAULT_AI_SETTINGS: AiSettings = {
         imageOutputFormat: 'png',
         imageWatermark: false,
         timeoutMs: 60000,
-        maxTokens: 2048,
+        maxTokens: 4096,
         temperature: 0.7,
     },
     mcpCli: {
@@ -842,6 +842,8 @@ export class AiService {
             prompt: bundle.effectiveUserPrompt,
             maxTokens: this.settingsCache.http.maxTokens,
             temperature: this.settingsCache.http.temperature,
+            // 创作工坊需要生成多个板块的结构化 JSON，内容量大，使用更宽裕的超时
+            timeoutMs: Math.max(this.settingsCache.http.timeoutMs, 180000),
         });
 
         try {
@@ -1743,34 +1745,24 @@ export class AiService {
         effectiveUserPrompt: string;
         structured: PromptPreviewResult['structured'];
         usedContext: string[];
+        estimatedTokens: number;
     }> {
         const targetSections = this.resolveCreativeTargetSections(payload);
-        const [novel, worldSettings, counts] = await Promise.all([
-            db.novel.findUnique({
-                where: { id: payload.novelId },
-                select: { id: true, title: true, description: true },
-            }),
-            (db as any).worldSetting.findMany({
-                where: { novelId: payload.novelId },
-                orderBy: { updatedAt: 'desc' },
-                take: 8,
-                select: { name: true, content: true },
-            }),
-            Promise.all([
-                db.plotLine.count({ where: { novelId: payload.novelId } }),
-                db.character.count({ where: { novelId: payload.novelId } }),
-                db.item.count({ where: { novelId: payload.novelId } }),
-                (db as any).mapCanvas.count({ where: { novelId: payload.novelId } }),
-            ]),
-        ]);
+        const isZh = (payload.locale || 'zh').startsWith('zh');
 
-        const [plotLineCount, characterCount, itemCount, mapCount] = counts;
-        const usedContext = [
-            `Novel: ${novel?.title || payload.novelId}`,
-            `World settings referenced: ${worldSettings.length}`,
-            `Existing entities: plotLines=${plotLineCount}, characters=${characterCount}, items=${itemCount}, maps=${mapCount}`,
-        ];
-        const systemPrompt = 'Generate structured creative assets in strict JSON format. Output only requested sections.';
+        // 获取小说基本信息
+        const novel = await db.novel.findUnique({
+            where: { id: payload.novelId },
+            select: { id: true, title: true, description: true },
+        });
+
+        // 通过 ContextBuilder 获取丰富上下文
+        const context = await this.contextBuilder.buildForCreativeAssets(payload);
+
+        const systemPrompt = isZh
+            ? '你是一位小说创作助手，擅长根据用户的创意需求和已有小说内容生成结构化的创作素材。请严格以 JSON 格式输出，只输出 JSON，不要添加任何其他文字。所有生成的名称、描述等文本内容必须使用中文。生成的内容应与小说已有的角色、情节、世界观保持一致和关联。'
+            : 'You are a novel creation assistant. Generate structured creative assets in strict JSON format based on existing novel content. Output only JSON, no extra text. Generated content should be consistent with existing characters, plot, and world settings.';
+
         const outputSchema = {
             plotLines: [{ name: 'string', description: 'string?' }],
             plotPoints: [{ title: 'string', description: 'string?', plotLineName: 'string?' }],
@@ -1779,47 +1771,97 @@ export class AiService {
             skills: [{ name: 'string', description: 'string?' }],
             maps: [{ name: 'string', type: 'world|region|scene', description: 'string?', imagePrompt: 'string?' }],
         };
-        const defaultUserPrompt = JSON.stringify({
+
+        const constraints = isZh
+            ? [
+                '仅返回严格的 JSON，不要包含 markdown 代码块标记或其他文字',
+                '必须为所有请求的 section 生成内容，不得遗漏任何一个板块',
+                `请求的 section 列表: ${targetSections.join(', ')}`,
+                '未请求的 section 必须设为空数组',
+                '生成内容必须与已有小说内容（角色、情节、世界观）保持一致和关联',
+                '避免与已存在的实体重名',
+                '所有字段内容简洁、可直接使用',
+                '所有名称和描述必须使用中文',
+            ]
+            : [
+                'return strict JSON only, no markdown code fences or extra text',
+                'generate content for ALL requested sections, do not leave any empty',
+                `requested sections: ${targetSections.join(', ')}`,
+                'all unrequested sections must be empty arrays',
+                'generated content must be consistent and related to existing novel content',
+                'avoid duplicate names against existing entities',
+                'fields should be concise and directly usable',
+            ];
+
+        // 构建包含丰富上下文的提示词
+        const promptData: Record<string, unknown> = {
             task: 'creative_assets_generation',
+            language: isZh ? 'Chinese' : 'English',
             brief: payload.brief,
             novel: {
                 title: novel?.title || '',
                 description: novel?.description || '',
             },
-            worldSettings: worldSettings.map((item: any) => ({
-                name: String(item.name || ''),
-                description: String(item.content || '').slice(0, 180),
-            })),
             targetSections,
             outputShape: targetSections,
             outputSchema,
-            constraints: [
-                'return strict JSON only',
-                'output only requested sections; all unrequested sections must be empty arrays',
-                'avoid duplicate names against existing entities',
-                'fields should be concise and directly usable',
-            ],
-        });
+            constraints,
+        };
+
+        // 注入已有实体上下文
+        if (context.existingEntities.characters.length > 0) {
+            promptData.existingCharacters = context.existingEntities.characters;
+        }
+        if (context.existingEntities.items.length > 0) {
+            promptData.existingItems = context.existingEntities.items;
+        }
+        if (context.existingEntities.plotLines.length > 0) {
+            promptData.existingPlotLines = context.existingEntities.plotLines;
+        }
+        if (context.existingEntities.worldSettings.length > 0) {
+            promptData.worldSettings = context.existingEntities.worldSettings;
+        }
+
+        // 注入章节摘要上下文
+        if (context.recentSummaries.length > 0) {
+            promptData.recentChapterSummaries = context.recentSummaries;
+        }
+        if (context.narrativeSummaries.length > 0) {
+            promptData.narrativeSummary = context.narrativeSummaries[0];
+        }
+
+        const defaultUserPrompt = JSON.stringify(promptData);
         const effectiveUserPrompt = payload.overrideUserPrompt?.trim() ? payload.overrideUserPrompt.trim() : defaultUserPrompt;
+
+        const usedContext = [
+            `Novel: ${novel?.title || payload.novelId}`,
+            ...context.usedContext,
+        ];
+
+        const goalText = isZh
+            ? '根据用户创意简述和已有小说内容，生成可编辑的草稿素材。'
+            : 'Generate editable draft assets based on user brief and existing novel content.';
+        const constraintsSummary = isZh
+            ? ['仅输出严格 JSON', '返回所有请求的板块', '与已有内容关联', '内容简洁可用', '避免重名', '使用中文']
+            : ['Output strict JSON.', 'Return ALL selected sections.', 'Stay consistent with existing content.', 'Prefer concise fields.', 'Avoid name conflicts.'];
+
         return {
             systemPrompt,
             defaultUserPrompt,
             effectiveUserPrompt,
             structured: {
-                goal: 'Generate editable draft assets for outline, world and map creation.',
+                goal: goalText,
                 contextRefs: usedContext,
                 params: {
                     briefLength: payload.brief.trim().length,
                     sections: targetSections,
+                    locale: payload.locale || 'zh',
+                    estimatedContextTokens: context.estimatedTokens,
                 },
-                constraints: [
-                    'Output strict JSON.',
-                    'Return only selected sections.',
-                    'Prefer concise, production-ready fields.',
-                    'Avoid obvious name conflicts.',
-                ],
+                constraints: constraintsSummary,
             },
             usedContext,
+            estimatedTokens: context.estimatedTokens,
         };
     }
 

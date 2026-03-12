@@ -1,21 +1,38 @@
 appId: com.noveleditor.app
-productName: 云梦小说编辑器
-copyright: Copyright © 2026
+productName: "云梦小说编辑器"
+copyright: "Copyright 2026"
 
 directories:
   output: release
   buildResources: build
 
+compression: maximum
+
+extraResources:
+  - from: build/icon_ink_pen_256.ico
+    to: icon_ink_pen_256.ico
+
 files:
   - dist/**/*
   - dist-electron/**/*
   - package.json
-  - node_modules/@prisma/**/*
-  - node_modules/.prisma/**/*
-  - node_modules/@prisma/client/.prisma/**/*
-  - node_modules/@novel-editor/core/node_modules/.prisma/**/*
-  - node_modules/@novel-editor/**/*
-  - node_modules/@novel-editor/core/node_modules/@prisma/client/.prisma/**/*
+  - node_modules/adm-zip/**/*
+  - node_modules/@novel-editor/core/package.json
+  - node_modules/@novel-editor/core/dist/**/*
+  - node_modules/@novel-editor/core/generated/client/index.js
+  - node_modules/@novel-editor/core/generated/client/package.json
+  - node_modules/@novel-editor/core/generated/client/query_engine-windows.dll.node
+  - node_modules/@novel-editor/core/generated/client/schema-init.sql
+  - node_modules/@novel-editor/core/generated/client/schema.prisma
+  - node_modules/@novel-editor/core/generated/client/runtime/library.js
+  - "!node_modules/@novel-editor/core/node_modules{,/**/*}"
+  - "!node_modules/@novel-editor/core/.turbo{,/**/*}"
+  - "!node_modules/@novel-editor/core/prisma{,/**/*}"
+  - "!node_modules/@novel-editor/core/scripts{,/**/*}"
+  - "!node_modules/@novel-editor/core/src{,/**/*}"
+  - "!node_modules/@novel-editor/core/.env"
+  - "!node_modules/@novel-editor/core/pnpm-lock.yaml"
+  - "!node_modules/@novel-editor/core/tsconfig.json"
 
 win:
   target:
@@ -25,12 +42,17 @@ win:
     - target: portable
       arch:
         - x64
-  icon: build/icon_ink_pen_256.ico
+  icon: icon_ink_pen_256.ico
   sign: null
-  signAndEditExecutable: false
+  signAndEditExecutable: true
 
 mac:
-  icon: build/icon_ink_pen_512.icns
+  target:
+    - target: dmg
+      arch:
+        - universal
+  icon: icon_ink_pen_512.icns
+  artifactName: "${productName}-mac-${version}.${ext}"
 
 nsis:
   oneClick: false
@@ -38,19 +60,21 @@ nsis:
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
   createStartMenuShortcut: true
-  shortcutName: 云梦编辑器
-  artifactName: ${productName}-Setup-${version}.${ext}
+  shortcutName: "${productName}"
+  installerIcon: icon_ink_pen_256.ico
+  uninstallerIcon: icon_ink_pen_256.ico
+  installerHeaderIcon: icon_ink_pen_256.ico
+  artifactName: "${productName}-Setup-${version}.${ext}"
+  include: build/installer.nsh
+  deleteAppDataOnUninstall: false
 
 portable:
-  artifactName: ${productName}-Portable-${version}.${ext}
+  artifactName: "${productName}-Portable-${version}.${ext}"
 
-asar: false
+asar: true
 asarUnpack:
-  - "**/*.node"
-  - "**/node_modules/.prisma/**/*"
-  - "**/node_modules/@prisma/client/.prisma/**/*"
-  - "**/node_modules/@prisma/client/**/*"
-  - "**/node_modules/@novel-editor/core/node_modules/.prisma/**/*"
-  - "**/node_modules/@novel-editor/core/node_modules/@prisma/client/.prisma/**/*"
-  - "**/node_modules/@novel-editor/core/node_modules/@prisma/client/**/*"
-  - "**/node_modules/@prisma/engines/**/*"
+  - "node_modules/@novel-editor/core/generated/client/*.node"
+
+electronLanguages:
+  - en-US
+  - zh-CN

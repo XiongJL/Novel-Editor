@@ -2,15 +2,32 @@
 
 一个面向长篇创作的桌面写作工具，支持离线写作、结构化创作管理与 AI 辅助。
 
+## 下载
+
+- 发布版本统一放在 GitHub 仓库的 `Releases` 页面：
+  - https://github.com/XiongJL/Novel-Editor/releases
+- Windows：
+  - 安装版：`云梦小说编辑器-Setup-<version>.exe`
+  - 便携版：`云梦小说编辑器-Portable-<version>.exe`
+- macOS：
+  - 安装包：`云梦小说编辑器-mac-<version>.dmg`
+
+可直接在仓库顶部 `Releases` 或上方链接下载对应平台安装包。
+
 ## 快速开始
 
 ### 环境
 - Node.js 18+
-- pnpm
+- pnpm 8.15.9+
 
-### 启动
+### 初始化
 ```bash
 pnpm install
+pnpm run setup
+```
+
+### 启动桌面端
+```bash
 pnpm dev
 ```
 
@@ -18,8 +35,42 @@ pnpm dev
 ```bash
 pnpm db:push
 pnpm db:generate
+pnpm dev:desktop
+pnpm build:desktop:win
+pnpm build:desktop:mac
+pnpm build:core
+pnpm build:desktop
 pnpm build
 ```
+
+说明：
+- `pnpm run setup` 会先生成 `packages/core` 的 Prisma Client 与编译产物，适合作为首次拉取后的初始化步骤。
+- `pnpm dev` 会通过 Turbo 启动工作区里的 `dev` 任务；当前主要入口是桌面端。
+- 如果只想启动桌面端，直接使用 `pnpm dev:desktop`。
+- `pnpm build:desktop:win` 会先生成并修正 `win-unpacked` 主程序图标，再基于该目录打包 Windows 安装版与便携版。
+- `pnpm build:desktop:mac` 用于在 macOS 环境构建 universal DMG。
+
+## 发布流程
+
+### GitHub Releases
+1. 确认 `package.json` 与 `apps/desktop/package.json` 版本号一致。
+2. 提交代码并推送到默认分支。
+3. 创建并推送版本标签：
+```bash
+git tag v0.1.1
+git push origin v0.1.1
+```
+4. GitHub Actions 会自动：
+   - 构建 Windows 安装包与便携版
+   - 构建 macOS DMG
+   - 创建 GitHub Release
+   - 上传安装包到 Release Assets
+
+说明：
+- 自动发布工作流位于 `.github/workflows/release.yml`。
+- Release 文案模板位于 `.github/RELEASE_TEMPLATE.md`。
+- 当前版本发布草稿位于 `docs/releases/v0.1.1.md`。
+- macOS 构建由 GitHub 的 macOS runner 执行；本地 Windows 机器不负责产出正式 DMG。
 
 ## 项目结构
 - `apps/desktop`：Electron 桌面端（主应用）

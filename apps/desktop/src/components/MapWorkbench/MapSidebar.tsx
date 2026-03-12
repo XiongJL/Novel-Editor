@@ -1,8 +1,9 @@
-﻿import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { clsx } from 'clsx';
 import { Plus, Trash2, ChevronRight, Map as MapIcon, Globe, Mountain, Image as ImageIcon, Edit3, Check, X } from 'lucide-react';
 import { ConfirmModal } from '../ui/ConfirmModal';
+import { Combobox } from '../ui/Combobox';
 import { MapCanvas } from '../../types';
 
 interface MapSidebarProps {
@@ -244,10 +245,14 @@ export default function MapSidebar({ novelId, theme, onSelectMap, activeMapId }:
                             <label className={clsx('text-[10px] font-medium block mb-1', isDark ? 'text-neutral-500' : 'text-neutral-400')}>
                                 {t('map.mapType', '地图类型')}
                             </label>
-                            <select
+                            <Combobox
+                                options={[
+                                    { id: 'world', name: t('map.type.world') as string },
+                                    { id: 'region', name: t('map.type.region') as string },
+                                    { id: 'scene', name: t('map.type.scene') as string },
+                                ]}
                                 value={editType}
-                                onChange={async (e) => {
-                                    const newType = e.target.value;
+                                onChange={async (newType) => {
                                     setEditType(newType);
                                     try {
                                         await window.db.updateMap(activeMapId, { type: newType });
@@ -256,15 +261,9 @@ export default function MapSidebar({ novelId, theme, onSelectMap, activeMapId }:
                                         console.error('Failed to update map type:', err);
                                     }
                                 }}
-                                className={clsx(
-                                    'w-full text-xs px-2 py-1.5 rounded-lg border outline-none transition-colors',
-                                    isDark ? 'bg-white/5 border-white/10 text-neutral-200' : 'bg-gray-50 border-gray-200 text-neutral-800',
-                                )}
-                            >
-                                <option value="world">{t('map.type.world')}</option>
-                                <option value="region">{t('map.type.region')}</option>
-                                <option value="scene">{t('map.type.scene')}</option>
-                            </select>
+                                theme={theme}
+                                creatable={false}
+                            />
                         </div>
                         <div>
                             <label className={clsx('text-[10px] font-medium block mb-1', isDark ? 'text-neutral-500' : 'text-neutral-400')}>

@@ -1,7 +1,11 @@
 node_modules
 dist
 release
+apps/desktop/release
 out
+.tmp/
+apps/desktop/.tmp/
+novel-editor-desktop.exe
 .turbo
 .next
 .DS_Store
@@ -22,5 +26,4 @@ target
 *.db
 *.db-journal
 功能借鉴/*
-.gitignore
 release*/

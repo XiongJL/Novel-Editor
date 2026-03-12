@@ -11,7 +11,7 @@ export interface EditorPreferences {
 }
 
 const DEFAULT_PREFERENCES: EditorPreferences = {
-    theme: 'dark',
+    theme: 'light',
     fontFamily: 'serif',
     fontSize: 18,
     lineHeight: 1.8,

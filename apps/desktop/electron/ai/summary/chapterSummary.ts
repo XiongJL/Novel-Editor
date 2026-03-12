@@ -30,7 +30,7 @@ const DEFAULT_AI_SETTINGS: AiSettings = {
         imageOutputFormat: 'png',
         imageWatermark: false,
         timeoutMs: 60000,
-        maxTokens: 2048,
+        maxTokens: 4096,
         temperature: 0.7,
     },
     mcpCli: {

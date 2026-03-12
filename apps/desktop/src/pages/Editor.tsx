@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowLeft, Save, PanelLeftClose, PanelLeftOpen, Settings, ChevronRight, LayoutGrid, FileText, Sparkles, ScrollText, Loader2 } from 'lucide-react';
 import NarrativeMatrix from '../components/StoryWorkbench/NarrativeMatrix';
@@ -34,8 +34,11 @@ import { usePlotSystem } from '../hooks/usePlotSystem';
 import { PlotPointModal } from '../components/StoryWorkbench/PlotPointModal';
 import { Idea, Novel, Volume, Chapter } from '../types';
 import { formatAiErrorFromUnknown } from '../utils/aiError';
-import PromptInlinePanel from '../components/AIPromptPreview/PromptInlinePanel';
+
+
+import { ContinueWritingModal, type ContinueWritingConfig } from '../components/Editor/ContinueWritingModal';
 import type { PromptPreviewData } from '../components/AIPromptPreview/types';
+
 
 // Global variable to track active chapter metadata to avoid closure staleness
 let activeChapterMetadata: { id: string; title: string } | null = null;
@@ -142,17 +145,7 @@ export default function Editor({ novelId, onBack }: EditorProps) {
     const [continuePromptOverride, setContinuePromptOverride] = useState('');
     const [continuePromptDefault, setContinuePromptDefault] = useState('');
     const [continuePromptDirty, setContinuePromptDirty] = useState(false);
-    const [continueConfig, setContinueConfig] = useState<{
-        ideaIds: string[];
-        targetLength: string;
-        creativityPreset: 'safe' | 'balanced' | 'creative';
-        contextChapterCount: number;
-        style: string;
-        tone: string;
-        pace: string;
-        userIntent: string;
-        currentLocation: string;
-    }>({
+    const [continueConfig, setContinueConfig] = useState<ContinueWritingConfig>({
         ideaIds: [],
         targetLength: '500',
         creativityPreset: 'balanced',
@@ -422,7 +415,9 @@ export default function Editor({ novelId, onBack }: EditorProps) {
         editor.update(() => {
             const root = $getRoot();
             const normalized = deduped.replace(/\r\n/g, '\n').trim();
-            const blocks = normalized.split(/\n{2,}/).map((block) => block.trim()).filter(Boolean);
+            // 按单个换行分割，每行一个段落，确保每段都能获得 CSS text-indent 首行缩进
+            // 同时去除段首的全角/半角空格（缩进由 CSS text-indent 统一控制）
+            const blocks = normalized.split(/\n+/).map((block) => block.replace(/^[\s\u3000]+/, '').trim()).filter(Boolean);
             if (blocks.length === 0) return;
             blocks.forEach((block) => {
                 const paragraph = $createParagraphNode();
@@ -1624,7 +1619,6 @@ export default function Editor({ novelId, onBack }: EditorProps) {
         + (creativeDraft.skills?.length ?? 0)
         + (creativeDraft.maps?.length ?? 0)
     ), [creativeDraft]);
-    const hasDraft = draftCount > 0;
     const isCompactDraftDock = viewportWidth < 1700;
 
     return (
@@ -1847,8 +1841,7 @@ export default function Editor({ novelId, onBack }: EditorProps) {
                             >
                                 <LayoutGrid className="w-4 h-4" />
                             </button>
-                            {hasDraft && (
-                                <button
+                            <button
                                     onClick={() => {
                                         setViewMode('editor');
                                         setIsDraftDockOpen((prev) => !prev);
@@ -1862,14 +1855,15 @@ export default function Editor({ novelId, onBack }: EditorProps) {
                                     title={isDraftDockOpen ? t('aiWorkbench.closeDraftDock') : t('aiWorkbench.openDraftDock')}
                                 >
                                     <Sparkles className="w-4 h-4" />
-                                    <span className={clsx(
-                                        "absolute -right-1 -top-1 min-w-4 h-4 px-1 rounded-full text-[10px] leading-4 text-center",
-                                        preferences.theme === 'dark' ? "bg-indigo-500 text-white" : "bg-indigo-600 text-white",
-                                    )}>
-                                        {draftCount}
-                                    </span>
+                                    {draftCount > 0 && (
+                                        <span className={clsx(
+                                            "absolute -right-1 -top-1 min-w-4 h-4 px-1 rounded-full text-[10px] leading-4 text-center",
+                                            preferences.theme === 'dark' ? "bg-indigo-500 text-white" : "bg-indigo-600 text-white",
+                                        )}>
+                                            {draftCount}
+                                        </span>
+                                    )}
                                 </button>
-                            )}
                         </div>
                     </div>
 
@@ -2146,7 +2140,7 @@ export default function Editor({ novelId, onBack }: EditorProps) {
                                     theme={preferences.theme}
                                 />
                             </div>
-                            {hasDraft && isDraftDockOpen && !isCompactDraftDock && (
+                            {isDraftDockOpen && !isCompactDraftDock && (
                                 <div className={clsx(
                                     "w-[420px] min-w-[360px] max-w-[520px] shrink-0 border-l",
                                     preferences.theme === 'dark' ? 'border-white/10 bg-[#0F0F13]' : 'border-gray-200 bg-gray-50',
@@ -2160,7 +2154,7 @@ export default function Editor({ novelId, onBack }: EditorProps) {
                                     />
                                 </div>
                             )}
-                            {hasDraft && isDraftDockOpen && isCompactDraftDock && (
+                            {isDraftDockOpen && isCompactDraftDock && (
                                 <>
                                     <button
                                         type="button"
@@ -2247,280 +2241,42 @@ export default function Editor({ novelId, onBack }: EditorProps) {
             />
 
             {isContinueModalOpen && currentChapter && (
-                <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/45 px-4">
-                    <div className={clsx(
-                        "w-full max-w-2xl rounded-2xl border shadow-2xl",
-                        preferences.theme === 'dark' ? 'bg-[#11131a] border-white/10' : 'bg-white border-gray-200'
-                    )}>
-                        <div className={clsx(
-                            "px-5 py-4 border-b flex items-center justify-between",
-                            preferences.theme === 'dark' ? 'border-white/10' : 'border-gray-100'
-                        )}>
-                            <div>
-                                <h3 className={clsx("text-sm font-semibold", preferences.theme === 'dark' ? 'text-neutral-100' : 'text-gray-900')}>
-                                    {t('editor.continueModalTitle')}
-                                </h3>
-                                <p className={clsx("text-xs mt-1", preferences.theme === 'dark' ? 'text-neutral-400' : 'text-gray-500')}>
-                                    {t('editor.continueModalDesc')}
-                                </p>
-                            </div>
-                            <button
-                                onClick={closeContinueModal}
-                                className={clsx("text-xs px-2 py-1 rounded border", preferences.theme === 'dark' ? 'border-white/10 text-neutral-300' : 'border-gray-200 text-gray-600')}
-                            >
-                                {t('common.cancel')}
-                            </button>
-                        </div>
-
-                        <div className="px-5 py-4 space-y-4 max-h-[70vh] overflow-y-auto">
-                            {(() => {
-                                const plain = extractPlainTextFromLexical(contentRef.current || '');
-                                const hasOutline = plotLines.some((line) => (line.points?.length || 0) > 0) || plotLines.length > 0;
-                                const blocked = currentChapter.order === 1 && !hasOutline && plain.length < 120;
-                                if (!blocked) return null;
-                                return (
-                                    <div className={clsx(
-                                        "rounded-xl border px-3 py-3",
-                                        preferences.theme === 'dark' ? 'border-amber-500/30 bg-amber-500/10 text-amber-200' : 'border-amber-200 bg-amber-50 text-amber-800'
-                                    )}>
-                                        <div className="text-sm font-medium">
-                                            {t('editor.continueBlocked')}
-                                        </div>
-                                        <div className="text-xs mt-1 opacity-90">
-                                            {t('editor.continueBlockedHint')}
-                                        </div>
-                                        <div className="mt-2 flex items-center gap-2">
-                                            <button
-                                                onClick={() => {
-                                                    setActiveTab('outline');
-                                                    setIsSidePanelOpen(true);
-                                                    closeContinueModal();
-                                                }}
-                                                className={clsx("text-xs px-2 py-1 rounded border", preferences.theme === 'dark' ? 'border-amber-300/40' : 'border-amber-300')}
-                                            >
-                                                {t('editor.gotoOutline')}
-                                            </button>
-                                            <button
-                                                onClick={closeContinueModal}
-                                                className={clsx("text-xs px-2 py-1 rounded border", preferences.theme === 'dark' ? 'border-amber-300/40' : 'border-amber-300')}
-                                            >
-                                                {t('editor.writeManually')}
-                                            </button>
-                                            <button
-                                                onClick={() => {
-                                                    setActiveTab('ai_workbench');
-                                                    setIsSidePanelOpen(true);
-                                                    closeContinueModal();
-                                                }}
-                                                className={clsx("text-xs px-2 py-1 rounded border", preferences.theme === 'dark' ? 'border-amber-300/40' : 'border-amber-300')}
-                                            >
-                                                {t('editor.gotoAiOutlineGenerator')}
-                                            </button>
-                                        </div>
-                                    </div>
-                                );
-                            })()}
-
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                <label className="text-xs">
-                                    <div className={clsx("mb-1", preferences.theme === 'dark' ? 'text-neutral-400' : 'text-gray-500')}>
-                                        {t('editor.continueLength')}
-                                    </div>
-                                    <input
-                                        type="text"
-                                        inputMode="numeric"
-                                        pattern="[0-9]*"
-                                        value={continueConfig.targetLength}
-                                        onChange={(e) => {
-                                            const nextValue = e.target.value.replace(/[^\d]/g, '');
-                                            setContinueConfig((prev) => ({ ...prev, targetLength: nextValue }));
-                                        }}
-                                        onBlur={() => {
-                                            setContinueConfig((prev) => ({
-                                                ...prev,
-                                                targetLength: String(normalizeContinueTargetLength(prev.targetLength)),
-                                            }));
-                                        }}
-                                        placeholder="500"
-                                        className={clsx("w-full rounded-lg border px-2 py-2", preferences.theme === 'dark' ? 'bg-transparent border-white/10 text-neutral-200' : 'border-gray-200')}
-                                    />
-                                </label>
-                                <label className="text-xs">
-                                    <div className={clsx("mb-1", preferences.theme === 'dark' ? 'text-neutral-400' : 'text-gray-500')}>
-                                        {t('editor.continueCreativity')}
-                                    </div>
-                                    <select
-                                        value={continueConfig.creativityPreset}
-                                        onChange={(e) => setContinueConfig((prev) => ({ ...prev, creativityPreset: e.target.value as 'safe' | 'balanced' | 'creative' }))}
-                                        className={clsx("w-full rounded-lg border px-2 py-2", preferences.theme === 'dark' ? 'bg-transparent border-white/10 text-neutral-200' : 'border-gray-200')}
-                                    >
-                                        <option value="safe">{t('editor.creativeSafe')}</option>
-                                        <option value="balanced">{t('editor.creativeBalanced')}</option>
-                                        <option value="creative">{t('editor.creativeCreative')}</option>
-                                    </select>
-                                </label>
-                            </div>
-
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                <label className="text-xs">
-                                    <div className={clsx("mb-1", preferences.theme === 'dark' ? 'text-neutral-400' : 'text-gray-500')}>
-                                        {t('editor.continueStyle')}
-                                    </div>
-                                    <select
-                                        value={continueConfig.style}
-                                        onChange={(e) => setContinueConfig((prev) => ({ ...prev, style: e.target.value }))}
-                                        className={clsx("w-full rounded-lg border px-2 py-2", preferences.theme === 'dark' ? 'bg-transparent border-white/10 text-neutral-200' : 'border-gray-200')}
-                                    >
-                                        <option value="default">{t('editor.styleDefault')}</option>
-                                        <option value="tight">{t('editor.styleTight')}</option>
-                                        <option value="lyrical">{t('editor.styleLyrical')}</option>
-                                        <option value="cinematic">{t('editor.styleCinematic')}</option>
-                                    </select>
-                                </label>
-                                <label className="text-xs">
-                                    <div className={clsx("mb-1", preferences.theme === 'dark' ? 'text-neutral-400' : 'text-gray-500')}>
-                                        {t('editor.continueTone')}
-                                    </div>
-                                    <select
-                                        value={continueConfig.tone}
-                                        onChange={(e) => setContinueConfig((prev) => ({ ...prev, tone: e.target.value }))}
-                                        className={clsx("w-full rounded-lg border px-2 py-2", preferences.theme === 'dark' ? 'bg-transparent border-white/10 text-neutral-200' : 'border-gray-200')}
-                                    >
-                                        <option value="balanced">{t('editor.toneBalanced')}</option>
-                                        <option value="calm">{t('editor.toneCalm')}</option>
-                                        <option value="tense">{t('editor.toneTense')}</option>
-                                        <option value="warm">{t('editor.toneWarm')}</option>
-                                    </select>
-                                </label>
-                            </div>
-
-                            <label className="text-xs block">
-                                <div className={clsx("mb-1", preferences.theme === 'dark' ? 'text-neutral-400' : 'text-gray-500')}>
-                                    {t('editor.contextChapterCount')}
-                                </div>
-                                <input
-                                    type="number"
-                                    min={1}
-                                    max={8}
-                                    value={continueConfig.contextChapterCount}
-                                    onChange={(e) => setContinueConfig((prev) => ({ ...prev, contextChapterCount: Math.max(1, Math.min(8, Number(e.target.value) || 3)) }))}
-                                    className={clsx("w-full rounded-lg border px-2 py-2", preferences.theme === 'dark' ? 'bg-transparent border-white/10 text-neutral-200' : 'border-gray-200')}
-                                />
-                            </label>
-
-                            <div>
-                                <div className={clsx("text-xs mb-2", preferences.theme === 'dark' ? 'text-neutral-400' : 'text-gray-500')}>
-                                    {t('editor.selectIdeas')}
-                                </div>
-                                <div className={clsx(
-                                    "max-h-44 overflow-y-auto rounded-lg border p-2 space-y-1",
-                                    preferences.theme === 'dark' ? 'border-white/10' : 'border-gray-200'
-                                )}>
-                                    {ideas.length === 0 && (
-                                        <div className={clsx("text-xs", preferences.theme === 'dark' ? 'text-neutral-500' : 'text-gray-400')}>
-                                            {t('editor.noIdeas')}
-                                        </div>
-                                    )}
-                                    {ideas.map((idea) => (
-                                        <label key={idea.id} className={clsx(
-                                            "flex items-start gap-2 rounded px-2 py-1 text-xs",
-                                            preferences.theme === 'dark' ? 'hover:bg-white/5' : 'hover:bg-gray-50'
-                                        )}>
-                                            <input
-                                                type="checkbox"
-                                                checked={continueConfig.ideaIds.includes(idea.id)}
-                                                onChange={(e) => {
-                                                    setContinueConfig((prev) => ({
-                                                        ...prev,
-                                                        ideaIds: e.target.checked
-                                                            ? [...prev.ideaIds, idea.id]
-                                                            : prev.ideaIds.filter((id) => id !== idea.id),
-                                                    }));
-                                                }}
-                                            />
-                                            <span className={clsx("line-clamp-2", preferences.theme === 'dark' ? 'text-neutral-300' : 'text-gray-700')}>
-                                                {idea.content}
-                                            </span>
-                                        </label>
-                                    ))}
-                                </div>
-                            </div>
-                            <label className="text-xs block">
-                                <div className={clsx("mb-1", preferences.theme === 'dark' ? 'text-neutral-400' : 'text-gray-500')}>
-                                    {t('editor.continueUserIntentLabel')}
-                                </div>
-                                <textarea
-                                    value={continueConfig.userIntent}
-                                    onChange={(e) => setContinueConfig((prev) => ({ ...prev, userIntent: e.target.value }))}
-                                    onBlur={() => void refreshContinuePromptPreview()}
-                                    rows={3}
-                                    placeholder={t('editor.continueUserIntentPlaceholder')}
-                                    className={clsx(
-                                        "w-full rounded-lg border px-2 py-2 text-xs resize-y",
-                                        preferences.theme === 'dark' ? 'bg-transparent border-white/10 text-neutral-200 placeholder:text-neutral-500' : 'border-gray-200 text-gray-700 placeholder:text-gray-400'
-                                    )}
-                                />
-                                <div className={clsx("mt-1", preferences.theme === 'dark' ? 'text-neutral-500' : 'text-gray-400')}>
-                                    {t('editor.continueUserIntentHint')}
-                                </div>
-                            </label>
-                            <label className="text-xs block">
-                                <div className={clsx("mb-1", preferences.theme === 'dark' ? 'text-neutral-400' : 'text-gray-500')}>
-                                    {t('editor.continueCurrentLocationLabel')}
-                                </div>
-                                <input
-                                    value={continueConfig.currentLocation}
-                                    onChange={(e) => setContinueConfig((prev) => ({ ...prev, currentLocation: e.target.value }))}
-                                    placeholder={t('editor.continueCurrentLocationPlaceholder')}
-                                    className={clsx(
-                                        "w-full rounded-lg border px-2 py-2 text-xs",
-                                        preferences.theme === 'dark' ? 'bg-transparent border-white/10 text-neutral-200 placeholder:text-neutral-500' : 'border-gray-200 text-gray-700 placeholder:text-gray-400'
-                                    )}
-                                />
-                                <div className={clsx("mt-1", preferences.theme === 'dark' ? 'text-neutral-500' : 'text-gray-400')}>
-                                    {t('editor.continueCurrentLocationHint')}
-                                </div>
-                            </label>
-                            <PromptInlinePanel
-                                theme={preferences.theme}
-                                title={t('editor.promptPreview')}
-                                loading={continuePromptLoading}
-                                error={continuePromptError}
-                                data={continuePromptPreview}
-                                editablePrompt={continuePromptOverride}
-                                baselinePrompt={continuePromptDefault}
-                                onEditablePromptChange={(value) => {
-                                    setContinuePromptOverride(value);
-                                    setContinuePromptDirty(value.trim() !== continuePromptDefault.trim());
-                                }}
-                                onRefresh={() => void refreshContinuePromptPreview()}
-                            />
-                        </div>
-
-                        <div className={clsx(
-                            "px-5 py-3 border-t flex items-center justify-end gap-2",
-                            preferences.theme === 'dark' ? 'border-white/10' : 'border-gray-100'
-                        )}>
-                            <button
-                                onClick={closeContinueModal}
-                                className={clsx("text-xs px-3 py-1.5 rounded border", preferences.theme === 'dark' ? 'border-white/10 text-neutral-300' : 'border-gray-200 text-gray-600')}
-                            >
-                                {t('common.cancel')}
-                            </button>
-                            <button
-                                onClick={() => void handleStartContinueWriting()}
-                                disabled={isContinuing}
-                                className={clsx(
-                                    "text-xs px-3 py-1.5 rounded border inline-flex items-center gap-1.5",
-                                    preferences.theme === 'dark' ? 'border-white/20 text-neutral-100 hover:bg-white/10 disabled:opacity-40' : 'border-gray-300 text-gray-800 hover:bg-gray-50 disabled:opacity-40'
-                                )}
-                            >
-                                {isContinuing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
-                                {t('editor.startContinue')}
-                            </button>
-                        </div>
-                    </div>
-                </div>
+                <ContinueWritingModal
+                    isOpen={isContinueModalOpen}
+                    theme={preferences.theme}
+                    onClose={closeContinueModal}
+                    blocked={
+                        currentChapter.order === 1 && 
+                        !plotLines.some((line) => (line.points?.length || 0) > 0) && plotLines.length === 0 &&
+                        extractPlainTextFromLexical(contentRef.current || '').length < 120
+                    }
+                    onNavigateToOutline={() => {
+                        setActiveTab('outline');
+                        setIsSidePanelOpen(true);
+                        closeContinueModal();
+                    }}
+                    onNavigateToAiWorkbench={() => {
+                        setActiveTab('ai_workbench');
+                        setIsSidePanelOpen(true);
+                        closeContinueModal();
+                    }}
+                    config={continueConfig}
+                    setConfig={setContinueConfig}
+                    normalizeTargetLength={normalizeContinueTargetLength}
+                    ideas={ideas}
+                    isContinuing={isContinuing}
+                    onStartContinueWriting={() => void handleStartContinueWriting()}
+                    promptLoading={continuePromptLoading}
+                    promptError={continuePromptError || ''}
+                    promptPreview={continuePromptPreview}
+                    promptOverride={continuePromptOverride}
+                    promptDefault={continuePromptDefault}
+                    onPromptOverrideChange={(value) => {
+                        setContinuePromptOverride(value);
+                        setContinuePromptDirty(value.trim() !== continuePromptDefault.trim());
+                    }}
+                    onRefreshPromptPreview={() => void refreshContinuePromptPreview()}
+                />
             )}
 
             {isContinuePreviewOpen && (

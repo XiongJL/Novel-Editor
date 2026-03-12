@@ -1,57 +1,73 @@
-var $t = Object.defineProperty;
-var Rt = (r, t, e) => t in r ? $t(r, t, { enumerable: !0, configurable: !0, writable: !0, value: e }) : r[t] = e;
-var ee = (r, t, e) => (Rt(r, typeof t != "symbol" ? t + "" : t, e), e);
-import { app as b, dialog as Ce, ipcMain as S, nativeImage as Ft, BrowserWindow as wt, protocol as Ut, net as Bt, session as _e } from "electron";
-import { db as h, initDb as Ze, ensureDbSchema as zt } from "@novel-editor/core";
-import { fileURLToPath as jt } from "node:url";
-import L from "node:path";
-import { execSync as Ht } from "child_process";
-import x from "fs";
-import z from "node:fs";
-import { createHash as vt, randomUUID as qt } from "node:crypto";
-import { spawn as Vt } from "node:child_process";
+var Ut = Object.defineProperty;
+var Bt = (r, t, e) => t in r ? Ut(r, t, { enumerable: !0, configurable: !0, writable: !0, value: e }) : r[t] = e;
+var ee = (r, t, e) => (Bt(r, typeof t != "symbol" ? t + "" : t, e), e);
+import { app as b, dialog as Ie, ipcMain as A, nativeImage as jt, BrowserWindow as wt, protocol as zt, net as Ht, session as Ee } from "electron";
+import { db as h, initDb as Ge, ensureDbSchema as qt } from "@novel-editor/core";
+import { fileURLToPath as Vt } from "node:url";
+import N from "node:path";
+import { execSync as Wt } from "child_process";
+import P from "fs";
+import j from "node:fs";
+import { createHash as vt, randomUUID as Gt } from "node:crypto";
+import { spawn as Zt } from "node:child_process";
 import ne from "path";
 import It from "zlib";
-import fe from "crypto";
-async function Wt() {
+import pe from "crypto";
+const Jt = [
+  "content",
+  "entity_type",
+  "entity_id",
+  "novel_id",
+  "chapter_id",
+  "title",
+  "volume_title",
+  "chapter_order",
+  "volume_order",
+  "volume_id"
+];
+async function Ze() {
+  await h.$executeRaw`
+        CREATE VIRTUAL TABLE search_index USING fts5(
+            content,
+            entity_type,
+            entity_id UNINDEXED,
+            novel_id UNINDEXED,
+            chapter_id UNINDEXED,
+            title,
+            volume_title,
+            chapter_order UNINDEXED,
+            volume_order UNINDEXED,
+            volume_id UNINDEXED,
+            tokenize='unicode61'
+        );
+    `;
+}
+async function Kt() {
+  return (await h.$queryRawUnsafe("PRAGMA table_info(search_index);")).map((t) => t.name);
+}
+async function Je() {
+  const r = await h.novel.findMany({
+    where: { deleted: !1 },
+    select: { id: !0 }
+  });
+  for (const t of r)
+    await Ct(t.id);
+}
+async function Xt() {
   try {
     if ((await h.$queryRaw`
             SELECT name FROM sqlite_master WHERE type='table' AND name='search_index';
         `).length === 0)
-      await h.$executeRaw`
-                CREATE VIRTUAL TABLE search_index USING fts5(
-                    content,
-                    entity_type,
-                    entity_id UNINDEXED,
-                    novel_id UNINDEXED,
-                    chapter_id UNINDEXED,
-                    title,
-                    volume_title,
-                    chapter_order UNINDEXED,
-                    volume_order UNINDEXED,
-                    volume_id UNINDEXED,
-                    tokenize='unicode61'
-                );
-            `, console.log("[SearchIndex] FTS5 table created successfully");
+      await Ze(), console.log("[SearchIndex] FTS5 table created successfully"), await Je(), console.log("[SearchIndex] FTS5 index rebuilt from source data");
     else {
-      const t = ["volume_title", "chapter_order", "volume_order", "volume_id"];
-      for (const e of t)
-        try {
-          await h.$executeRawUnsafe(`SELECT ${e} FROM search_index LIMIT 1;`);
-        } catch {
-          console.warn(`[SearchIndex] Schema mismatch (missing ${e}). Attempting to add column...`);
-          try {
-            await h.$executeRawUnsafe(`ALTER TABLE search_index ADD COLUMN ${e};`), console.log(`[SearchIndex] Added ${e} column successfully`);
-          } catch (a) {
-            console.error(`[SearchIndex] Failed to add column ${e}:`, a);
-          }
-        }
+      const t = await Kt(), e = Jt.filter((n) => !t.includes(n));
+      e.length > 0 && (console.warn(`[SearchIndex] Schema mismatch detected. Rebuilding FTS5 table. Missing columns: ${e.join(", ")}`), await h.$executeRawUnsafe("DROP TABLE IF EXISTS search_index;"), await Ze(), await Je(), console.log("[SearchIndex] FTS5 table rebuilt successfully"));
     }
   } catch (r) {
     console.error("[SearchIndex] Failed to initialize FTS5 table:", r);
   }
 }
-function Gt(r) {
+function Yt(r) {
   if (!r)
     return "";
   try {
@@ -63,10 +79,10 @@ function Gt(r) {
     return r;
   }
 }
-async function Ee(r) {
-  const t = Gt(r.content);
-  let e = r.novelId, n = r.volumeTitle, a = r.order, o = r.volumeOrder;
-  if (!e || !n || a === void 0 || o === void 0) {
+async function Se(r) {
+  const t = Yt(r.content);
+  let e = r.novelId, n = r.volumeTitle, a = r.order, i = r.volumeOrder;
+  if (!e || !n || a === void 0 || i === void 0) {
     const c = await h.chapter.findUnique({
       where: { id: r.id },
       select: {
@@ -74,7 +90,7 @@ async function Ee(r) {
         volume: { select: { id: !0, novelId: !0, title: !0, order: !0 } }
       }
     });
-    c && (a === void 0 && (a = c.order), c.volume && (e || (e = c.volume.novelId), n || (n = c.volume.title), o === void 0 && (o = c.volume.order)));
+    c && (a === void 0 && (a = c.order), c.volume && (e || (e = c.volume.novelId), n || (n = c.volume.title), i === void 0 && (i = c.volume.order)));
   }
   if (e)
     try {
@@ -82,13 +98,13 @@ async function Ee(r) {
             DELETE FROM search_index WHERE entity_type = 'chapter' AND entity_id = ${r.id};
         `, await h.$executeRaw`
             INSERT INTO search_index (content, entity_type, entity_id, novel_id, chapter_id, title, volume_title, chapter_order, volume_order, volume_id)
-            VALUES (${t}, 'chapter', ${r.id}, ${e}, ${r.id}, ${r.title}, ${n || ""}, ${a || 0}, ${o || 0}, ${r.volumeId});
+            VALUES (${t}, 'chapter', ${r.id}, ${e}, ${r.id}, ${r.title}, ${n || ""}, ${a || 0}, ${i || 0}, ${r.volumeId});
         `;
     } catch (c) {
       console.error("[SearchIndex] Failed to index chapter:", c);
     }
 }
-async function Ve(r) {
+async function qe(r) {
   const t = [r.content, r.quote].filter(Boolean).join(" ");
   try {
     await h.$executeRaw`
@@ -101,7 +117,7 @@ async function Ve(r) {
     console.error("[SearchIndex] Failed to index idea:", e);
   }
 }
-async function Zt(r, t) {
+async function Qt(r, t) {
   try {
     await h.$executeRaw`
             DELETE FROM search_index WHERE entity_type = ${r} AND entity_id = ${t};
@@ -110,21 +126,21 @@ async function Zt(r, t) {
     console.error("[SearchIndex] Failed to remove from index:", e);
   }
 }
-async function Ct(r, t, e = 20, n = 0) {
+async function St(r, t, e = 20, n = 0) {
   if (!t.trim())
     return [];
   try {
-    const o = `%${t.replace(/[%_]/g, "\\$&")}%`, c = await h.$queryRaw`
+    const i = `%${t.replace(/[%_]/g, "\\$&")}%`, c = await h.$queryRaw`
             SELECT entity_type, entity_id, chapter_id, novel_id, title, volume_title, content, chapter_order, volume_order, volume_id
             FROM search_index
             WHERE novel_id = ${r} 
-            AND (content LIKE ${o} OR title LIKE ${o} OR volume_title LIKE ${o})
+            AND (content LIKE ${i} OR title LIKE ${i} OR volume_title LIKE ${i})
             ORDER BY volume_order ASC, chapter_order ASC
             LIMIT ${e} OFFSET ${n};
-        `, i = [], l = t.toLowerCase(), I = /* @__PURE__ */ new Set();
+        `, s = [], d = t.toLowerCase(), v = /* @__PURE__ */ new Set();
     for (const w of c) {
-      const E = w.content || "", C = w.title || "", p = w.volume_title || "", g = Number(w.chapter_order || 0), f = Number(w.volume_order || 0);
-      w.entity_type === "chapter" && p && p.toLowerCase().includes(l) && (I.has(p) || (i.push({
+      const C = w.content || "", S = w.title || "", p = w.volume_title || "", g = Number(w.chapter_order || 0), f = Number(w.volume_order || 0);
+      w.entity_type === "chapter" && p && p.toLowerCase().includes(d) && (v.has(p) || (s.push({
         entityType: "chapter",
         entityId: w.entity_id,
         chapterId: w.chapter_id,
@@ -138,14 +154,14 @@ async function Ct(r, t, e = 20, n = 0) {
         volumeTitle: p,
         volumeOrder: f,
         volumeId: w.volume_id
-      }), I.add(p))), w.entity_type === "chapter" && C.toLowerCase().includes(l) && i.push({
+      }), v.add(p))), w.entity_type === "chapter" && S.toLowerCase().includes(d) && s.push({
         entityType: "chapter",
         entityId: w.entity_id,
         chapterId: w.chapter_id,
         novelId: w.novel_id,
         title: w.title,
-        snippet: `Title match: <mark>${C}</mark>`,
-        preview: `Found in Title: ${C}`,
+        snippet: `Title match: <mark>${S}</mark>`,
+        preview: `Found in Title: ${S}`,
         keyword: t,
         matchType: "title",
         chapterOrder: g,
@@ -153,26 +169,26 @@ async function Ct(r, t, e = 20, n = 0) {
         volumeOrder: f,
         volumeId: w.volume_id
       });
-      const m = E.toLowerCase(), u = [];
-      let s = 0;
-      for (; s < m.length && u.length < 200; ) {
-        const v = m.indexOf(l, s);
-        if (v === -1)
+      const m = C.toLowerCase(), u = [];
+      let o = 0;
+      for (; o < m.length && u.length < 200; ) {
+        const I = m.indexOf(d, o);
+        if (I === -1)
           break;
-        u.push(v), s = v + l.length;
+        u.push(I), o = I + d.length;
       }
-      const d = 60, y = [];
-      for (const v of u)
-        (y.length === 0 || v - y[y.length - 1] > d) && y.push(v);
-      for (const v of y)
-        i.push({
+      const l = 60, y = [];
+      for (const I of u)
+        (y.length === 0 || I - y[y.length - 1] > l) && y.push(I);
+      for (const I of y)
+        s.push({
           entityType: w.entity_type,
           entityId: w.entity_id,
           chapterId: w.chapter_id,
           novelId: w.novel_id,
           title: w.title,
-          snippet: Je(E, t, v, 10, !0),
-          preview: Je(E, t, v, 25, !1),
+          snippet: Ke(C, t, I, 10, !0),
+          preview: Ke(C, t, I, 25, !1),
           keyword: t,
           matchType: "content",
           chapterOrder: g,
@@ -181,26 +197,26 @@ async function Ct(r, t, e = 20, n = 0) {
           volumeId: w.volume_id
         });
     }
-    return i;
+    return s;
   } catch (a) {
     return console.error("[SearchIndex] Search failed:", a), [];
   }
 }
-function Je(r, t, e, n = 30, a = !0) {
+function Ke(r, t, e, n = 30, a = !0) {
   if (!r)
     return "";
-  const o = Math.max(0, e - n), c = Math.min(r.length, e + t.length + n * 2);
-  let i = "";
-  o > 0 && (i += "...");
-  const l = r.substring(o, e), I = r.substring(e, e + t.length), w = r.substring(e + t.length, c);
-  return a ? i += l + "<mark>" + I + "</mark>" + w : i += l + I + w, c < r.length && (i += "..."), i;
+  const i = Math.max(0, e - n), c = Math.min(r.length, e + t.length + n * 2);
+  let s = "";
+  i > 0 && (s += "...");
+  const d = r.substring(i, e), v = r.substring(e, e + t.length), w = r.substring(e + t.length, c);
+  return a ? s += d + "<mark>" + v + "</mark>" + w : s += d + v + w, c < r.length && (s += "..."), s;
 }
-async function Jt(r) {
+async function Ct(r) {
   var n, a;
   let t = 0, e = 0;
   try {
     await h.$executeRaw`DELETE FROM search_index WHERE novel_id = ${r};`;
-    const o = await h.chapter.findMany({
+    const i = await h.chapter.findMany({
       where: { volume: { novelId: r } },
       select: {
         id: !0,
@@ -211,25 +227,25 @@ async function Jt(r) {
         volume: { select: { title: !0, order: !0 } }
       }
     });
-    for (const i of o)
-      await Ee({
-        ...i,
+    for (const s of i)
+      await Se({
+        ...s,
         novelId: r,
-        volumeTitle: (n = i.volume) == null ? void 0 : n.title,
-        volumeOrder: (a = i.volume) == null ? void 0 : a.order
+        volumeTitle: (n = s.volume) == null ? void 0 : n.title,
+        volumeOrder: (a = s.volume) == null ? void 0 : a.order
       }), t++;
     const c = await h.idea.findMany({
       where: { novelId: r },
       select: { id: !0, content: !0, quote: !0, novelId: !0, chapterId: !0 }
     });
-    for (const i of c)
-      await Ve(i), e++;
-  } catch (o) {
-    console.error("[SearchIndex] Rebuild failed:", o);
+    for (const s of c)
+      await qe(s), e++;
+  } catch (i) {
+    console.error("[SearchIndex] Rebuild failed:", i);
   }
   return { chapters: t, ideas: e };
 }
-async function Kt(r) {
+async function er(r) {
   try {
     const t = await h.$queryRaw`
             SELECT entity_type, COUNT(*) as count FROM search_index WHERE novel_id = ${r} GROUP BY entity_type;
@@ -242,7 +258,7 @@ async function Kt(r) {
     return console.error("[SearchIndex] Failed to get stats:", t), { chapters: 0, ideas: 0 };
   }
 }
-class j extends Error {
+class z extends Error {
   constructor(e, n, a) {
     super(n);
     ee(this, "code");
@@ -250,17 +266,17 @@ class j extends Error {
     this.code = e, this.detail = a, this.name = "AiActionError";
   }
 }
-function Xt(r) {
+function tr(r) {
   const t = r.toLowerCase();
-  return t.includes("timed out") || t.includes("timeout") || t.includes("aborterror") || t.includes("aborted") ? new j("PROVIDER_TIMEOUT", r) : t.includes("401") || t.includes("403") || t.includes("unauthorized") || t.includes("forbidden") || t.includes("api key") ? new j("PROVIDER_AUTH", r) : t.includes("content_filter") || t.includes("safety") || t.includes("filtered") ? new j("PROVIDER_FILTERED", r) : t.includes("429") || t.includes("503") || t.includes("model") || t.includes("unavailable") ? new j("PROVIDER_UNAVAILABLE", r) : t.includes("fetch") || t.includes("network") || t.includes("econn") ? new j("NETWORK_ERROR", r) : new j("UNKNOWN", r);
+  return t.includes("timed out") || t.includes("timeout") || t.includes("aborterror") || t.includes("aborted") ? new z("PROVIDER_TIMEOUT", r) : t.includes("401") || t.includes("403") || t.includes("unauthorized") || t.includes("forbidden") || t.includes("api key") ? new z("PROVIDER_AUTH", r) : t.includes("content_filter") || t.includes("safety") || t.includes("filtered") ? new z("PROVIDER_FILTERED", r) : t.includes("429") || t.includes("503") || t.includes("model") || t.includes("unavailable") ? new z("PROVIDER_UNAVAILABLE", r) : t.includes("fetch") || t.includes("network") || t.includes("econn") ? new z("NETWORK_ERROR", r) : new z("UNKNOWN", r);
 }
 function te(r) {
-  if (r instanceof j)
+  if (r instanceof z)
     return r;
   const t = r instanceof Error ? r.message : String(r ?? "unknown error");
-  return Xt(t);
+  return tr(t);
 }
-function ge(r, t) {
+function he(r, t) {
   switch (r) {
     case "INVALID_INPUT":
       return "参数不完整或格式错误，请检查输入。";
@@ -285,7 +301,7 @@ function ge(r, t) {
       return t || "未知错误，请稍后重试。";
   }
 }
-const Yt = "debug-dev.log", Qt = 15 * 1024 * 1024, er = "***REDACTED***", tr = /* @__PURE__ */ new Set([
+const rr = "debug-dev.log", nr = 15 * 1024 * 1024, ar = "***REDACTED***", ir = /* @__PURE__ */ new Set([
   "authorization",
   "apikey",
   "api_key",
@@ -295,30 +311,30 @@ const Yt = "debug-dev.log", Qt = 15 * 1024 * 1024, er = "***REDACTED***", tr = /
   "refresh_token"
 ]);
 let ae = null;
-function We() {
+function Ve() {
   return process.env.NODE_ENV !== "production";
 }
-function Ke(r) {
-  We() && (ae = L.join(r, Yt), Et());
+function Xe(r) {
+  Ve() && (ae = N.join(r, rr), Et());
 }
-function oe(r) {
-  return je(r, /* @__PURE__ */ new WeakSet());
+function ie(r) {
+  return ze(r, /* @__PURE__ */ new WeakSet());
 }
-function M(r, t, e, n) {
-  if (!We())
+function O(r, t, e, n) {
+  if (!Ve())
     return;
   const a = [
     `[${(/* @__PURE__ */ new Date()).toISOString()}] [${r}] [${t}]`,
     `message=${e}`,
-    n === void 0 ? "" : `extra=${nr(oe(n))}`,
+    n === void 0 ? "" : `extra=${or(ie(n))}`,
     ""
   ].filter(Boolean);
-  rr(a.join(`
+  sr(a.join(`
 `));
 }
-function ie(r, t, e) {
-  const n = St(t);
-  M("ERROR", r, n.message, {
+function se(r, t, e) {
+  const n = _t(t);
+  O("ERROR", r, n.message, {
     error: n,
     ...e === void 0 ? {} : { extra: e }
   });
@@ -326,25 +342,25 @@ function ie(r, t, e) {
 function Et() {
   if (!ae)
     return;
-  const r = L.dirname(ae);
-  z.existsSync(r) || z.mkdirSync(r, { recursive: !0 }), z.existsSync(ae) || z.writeFileSync(ae, "", "utf8");
+  const r = N.dirname(ae);
+  j.existsSync(r) || j.mkdirSync(r, { recursive: !0 }), j.existsSync(ae) || j.writeFileSync(ae, "", "utf8");
 }
-function rr(r) {
+function sr(r) {
   if (ae)
     try {
-      Et(), (z.existsSync(ae) ? z.statSync(ae).size : 0) >= Qt && z.writeFileSync(ae, "", "utf8"), z.appendFileSync(ae, `${r}
+      Et(), (j.existsSync(ae) ? j.statSync(ae).size : 0) >= nr && j.writeFileSync(ae, "", "utf8"), j.appendFileSync(ae, `${r}
 `, "utf8");
     } catch {
     }
 }
-function nr(r) {
+function or(r) {
   try {
     return JSON.stringify(r, null, 2);
   } catch {
     return String(r);
   }
 }
-function St(r) {
+function _t(r) {
   return r instanceof Error ? {
     name: r.name,
     message: r.message,
@@ -354,27 +370,27 @@ function St(r) {
     message: String(r)
   };
 }
-function je(r, t) {
+function ze(r, t) {
   if (r == null || typeof r == "string" || typeof r == "number" || typeof r == "boolean")
     return r;
   if (typeof r == "bigint")
     return r.toString();
   if (r instanceof Error)
-    return St(r);
+    return _t(r);
   if (Array.isArray(r))
-    return r.map((e) => je(e, t));
+    return r.map((e) => ze(e, t));
   if (typeof r == "object") {
     const e = r;
     if (t.has(e))
       return "[Circular]";
     t.add(e);
     const n = {};
-    for (const [a, o] of Object.entries(e)) {
-      if (tr.has(a.toLowerCase())) {
-        n[a] = er;
+    for (const [a, i] of Object.entries(e)) {
+      if (ir.has(a.toLowerCase())) {
+        n[a] = ar;
         continue;
       }
-      n[a] = je(o, t);
+      n[a] = ze(i, t);
     }
     return t.delete(e), n;
   }
@@ -383,14 +399,14 @@ function je(r, t) {
 function be(r, t) {
   return `${r.replace(/\/+$/, "")}/${t.replace(/^\/+/, "")}`;
 }
-function Xe(r) {
+function Ye(r) {
   try {
     return JSON.parse(r);
   } catch {
     return null;
   }
 }
-class _t {
+class At {
   constructor(t) {
     ee(this, "name", "http");
     this.settings = t;
@@ -407,52 +423,52 @@ class _t {
     if (!e.trim())
       return { ok: !1, detail: "API key is empty" };
     const a = new AbortController();
-    let o = !1;
-    const c = Math.max(1e3, n), i = setTimeout(() => {
-      o = !0, a.abort();
-    }, c), l = be(t, "models"), I = Date.now();
+    let i = !1;
+    const c = Math.max(1e3, n), s = setTimeout(() => {
+      i = !0, a.abort();
+    }, c), d = be(t, "models"), v = Date.now();
     try {
-      M("INFO", "HttpProvider.healthCheck.request", "HTTP health check request", {
-        url: l,
+      O("INFO", "HttpProvider.healthCheck.request", "HTTP health check request", {
+        url: d,
         timeoutMs: c,
         headers: { Authorization: `Bearer ${e}` }
       });
-      const w = await fetch(l, {
+      const w = await fetch(d, {
         method: "GET",
         headers: {
           Authorization: `Bearer ${e}`
         },
         signal: a.signal
       });
-      return w.ok ? (M("INFO", "HttpProvider.healthCheck.response", "HTTP health check ok", {
-        url: l,
+      return w.ok ? (O("INFO", "HttpProvider.healthCheck.response", "HTTP health check ok", {
+        url: d,
         status: w.status,
-        elapsedMs: Date.now() - I
-      }), { ok: !0, detail: "HTTP provider is reachable" }) : (M("WARN", "HttpProvider.healthCheck.response", "HTTP health check rejected", {
-        url: l,
+        elapsedMs: Date.now() - v
+      }), { ok: !0, detail: "HTTP provider is reachable" }) : (O("WARN", "HttpProvider.healthCheck.response", "HTTP health check rejected", {
+        url: d,
         status: w.status,
-        elapsedMs: Date.now() - I
+        elapsedMs: Date.now() - v
       }), { ok: !1, detail: `HTTP provider rejected: ${w.status}` });
     } catch (w) {
-      return ie("HttpProvider.healthCheck.error", w, {
-        url: l,
-        elapsedMs: Date.now() - I,
-        didTimeout: o
-      }), o ? { ok: !1, detail: `HTTP health check timed out after ${c}ms` } : { ok: !1, detail: `HTTP health check failed: ${(w == null ? void 0 : w.message) || "unknown error"}` };
+      return se("HttpProvider.healthCheck.error", w, {
+        url: d,
+        elapsedMs: Date.now() - v,
+        didTimeout: i
+      }), i ? { ok: !1, detail: `HTTP health check timed out after ${c}ms` } : { ok: !1, detail: `HTTP health check failed: ${(w == null ? void 0 : w.message) || "unknown error"}` };
     } finally {
-      clearTimeout(i);
+      clearTimeout(s);
     }
   }
   async generate(t) {
-    var w, E, C, p, g, f;
+    var w, C, S, p, g, f;
     const e = t.prompt.trim();
     if (!e)
       return { text: "", model: this.settings.http.model };
     const n = new AbortController();
     let a = !1;
-    const o = Math.max(1e3, this.settings.http.timeoutMs), c = setTimeout(() => {
+    const i = Math.max(1e3, t.timeoutMs ?? this.settings.http.timeoutMs), c = setTimeout(() => {
       a = !0, n.abort();
-    }, o), i = {
+    }, i), s = {
       model: this.settings.http.model,
       messages: [
         ...t.systemPrompt ? [{ role: "system", content: t.systemPrompt }] : [],
@@ -460,102 +476,102 @@ class _t {
       ],
       max_tokens: t.maxTokens ?? this.settings.http.maxTokens,
       temperature: t.temperature ?? this.settings.http.temperature
-    }, l = be(this.settings.http.baseUrl, "chat/completions"), I = Date.now();
+    }, d = be(this.settings.http.baseUrl, "chat/completions"), v = Date.now();
     try {
-      M("INFO", "HttpProvider.generate.request", "AI text generation request", {
-        url: l,
-        timeoutMs: o,
-        body: oe(i)
+      O("INFO", "HttpProvider.generate.request", "AI text generation request", {
+        url: d,
+        timeoutMs: i,
+        body: ie(s)
       });
-      const m = await fetch(l, {
+      const m = await fetch(d, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${this.settings.http.apiKey}`,
           "Content-Type": "application/json"
         },
-        body: JSON.stringify(i),
+        body: JSON.stringify(s),
         signal: n.signal
-      }), u = await m.text(), s = Xe(u);
-      if (M("INFO", "HttpProvider.generate.response", "AI text generation response", {
-        url: l,
+      }), u = await m.text(), o = Ye(u);
+      if (O("INFO", "HttpProvider.generate.response", "AI text generation response", {
+        url: d,
         status: m.status,
-        elapsedMs: Date.now() - I,
+        elapsedMs: Date.now() - v,
         text: u
       }), !m.ok)
-        throw new Error(((w = s == null ? void 0 : s.error) == null ? void 0 : w.message) || `HTTP ${m.status}: ${u.slice(0, 300)}`);
-      const d = ((p = (C = (E = s == null ? void 0 : s.choices) == null ? void 0 : E[0]) == null ? void 0 : C.message) == null ? void 0 : p.content) || (s == null ? void 0 : s.output_text) || ((f = (g = s == null ? void 0 : s.content) == null ? void 0 : g[0]) == null ? void 0 : f.text) || "";
+        throw new Error(((w = o == null ? void 0 : o.error) == null ? void 0 : w.message) || `HTTP ${m.status}: ${u.slice(0, 300)}`);
+      const l = ((p = (S = (C = o == null ? void 0 : o.choices) == null ? void 0 : C[0]) == null ? void 0 : S.message) == null ? void 0 : p.content) || (o == null ? void 0 : o.output_text) || ((f = (g = o == null ? void 0 : o.content) == null ? void 0 : g[0]) == null ? void 0 : f.text) || "";
       return {
-        text: typeof d == "string" ? d : JSON.stringify(d),
-        model: (s == null ? void 0 : s.model) || this.settings.http.model
+        text: typeof l == "string" ? l : JSON.stringify(l),
+        model: (o == null ? void 0 : o.model) || this.settings.http.model
       };
     } catch (m) {
-      throw ie("HttpProvider.generate.error", m, {
-        url: l,
-        elapsedMs: Date.now() - I,
+      throw se("HttpProvider.generate.error", m, {
+        url: d,
+        elapsedMs: Date.now() - v,
         didTimeout: a,
-        requestBody: oe(i)
-      }), a || (m == null ? void 0 : m.name) === "AbortError" ? new Error(`HTTP request timeout after ${o}ms`) : m;
+        requestBody: ie(s)
+      }), a || (m == null ? void 0 : m.name) === "AbortError" ? new Error(`HTTP request timeout after ${i}ms`) : m;
     } finally {
       clearTimeout(c);
     }
   }
   async generateImage(t) {
-    var w, E;
+    var w, C;
     const e = t.prompt.trim();
     if (!e)
       return {};
     const n = new AbortController();
     let a = !1;
-    const o = Math.max(1e3, this.settings.http.timeoutMs), c = setTimeout(() => {
+    const i = Math.max(1e3, this.settings.http.timeoutMs), c = setTimeout(() => {
       a = !0, n.abort();
-    }, o), i = {
+    }, i), s = {
       model: t.model || this.settings.http.model,
       prompt: e,
       size: t.size || "1024x1024",
       output_format: t.outputFormat || "png",
       watermark: t.watermark ?? !0
-    }, l = be(this.settings.http.baseUrl, "images/generations"), I = Date.now();
+    }, d = be(this.settings.http.baseUrl, "images/generations"), v = Date.now();
     try {
-      M("INFO", "HttpProvider.generateImage.request", "AI image generation request", {
-        url: l,
-        timeoutMs: o,
-        body: oe(i)
+      O("INFO", "HttpProvider.generateImage.request", "AI image generation request", {
+        url: d,
+        timeoutMs: i,
+        body: ie(s)
       });
-      const C = await fetch(l, {
+      const S = await fetch(d, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${this.settings.http.apiKey}`,
           "Content-Type": "application/json"
         },
-        body: JSON.stringify(i),
+        body: JSON.stringify(s),
         signal: n.signal
-      }), p = await C.text(), g = Xe(p);
-      if (M("INFO", "HttpProvider.generateImage.response", "AI image generation response", {
-        url: l,
-        status: C.status,
-        elapsedMs: Date.now() - I,
+      }), p = await S.text(), g = Ye(p);
+      if (O("INFO", "HttpProvider.generateImage.response", "AI image generation response", {
+        url: d,
+        status: S.status,
+        elapsedMs: Date.now() - v,
         text: p
-      }), !C.ok)
-        throw new Error(((w = g == null ? void 0 : g.error) == null ? void 0 : w.message) || `HTTP ${C.status}: ${p.slice(0, 300)}`);
-      const f = ((E = g == null ? void 0 : g.data) == null ? void 0 : E[0]) || {};
+      }), !S.ok)
+        throw new Error(((w = g == null ? void 0 : g.error) == null ? void 0 : w.message) || `HTTP ${S.status}: ${p.slice(0, 300)}`);
+      const f = ((C = g == null ? void 0 : g.data) == null ? void 0 : C[0]) || {};
       return {
         imageUrl: f.url,
         imageBase64: f.b64_json,
         mimeType: "image/png"
       };
-    } catch (C) {
-      throw ie("HttpProvider.generateImage.error", C, {
-        url: l,
-        elapsedMs: Date.now() - I,
+    } catch (S) {
+      throw se("HttpProvider.generateImage.error", S, {
+        url: d,
+        elapsedMs: Date.now() - v,
         didTimeout: a,
-        requestBody: oe(i)
-      }), a || (C == null ? void 0 : C.name) === "AbortError" ? new Error(`HTTP request timeout after ${o}ms`) : C;
+        requestBody: ie(s)
+      }), a || (S == null ? void 0 : S.name) === "AbortError" ? new Error(`HTTP request timeout after ${i}ms`) : S;
     } finally {
       clearTimeout(c);
     }
   }
 }
-const B = "[Summary]", At = {
+const B = "[Summary]", Dt = {
   summaryMode: "local",
   summaryTriggerPolicy: "manual",
   summaryDebounceMs: 3e4,
@@ -564,7 +580,7 @@ const B = "[Summary]", At = {
   summaryFinalizeStableMs: 6e5,
   summaryFinalizeMinWords: 1200,
   recentChapterRawCount: 2
-}, pe = {
+}, me = {
   providerType: "http",
   http: {
     baseUrl: "",
@@ -575,7 +591,7 @@ const B = "[Summary]", At = {
     imageOutputFormat: "png",
     imageWatermark: !1,
     timeoutMs: 6e4,
-    maxTokens: 2048,
+    maxTokens: 4096,
     temperature: 0.7
   },
   mcpCli: {
@@ -592,10 +608,10 @@ const B = "[Summary]", At = {
     allProxy: "",
     noProxy: ""
   },
-  summary: At
-}, xe = /* @__PURE__ */ new Map(), we = /* @__PURE__ */ new Map(), ke = /* @__PURE__ */ new Map(), Oe = /* @__PURE__ */ new Map();
-let Ye = !1;
-function ar(r) {
+  summary: Dt
+}, ke = /* @__PURE__ */ new Map(), ye = /* @__PURE__ */ new Map(), Me = /* @__PURE__ */ new Map(), Oe = /* @__PURE__ */ new Map();
+let Qe = !1;
+function cr(r) {
   if (!(r != null && r.trim()))
     return "";
   try {
@@ -607,18 +623,18 @@ function ar(r) {
     return r.replace(/\s+/g, " ").trim();
   }
 }
-function or(r) {
+function lr(r) {
   return r ? r.split(/[。！？!?]/).map((e) => e.trim()).filter(Boolean).slice(0, 5).map((e, n) => `fact_${n + 1}: ${e.slice(0, 80)}`) : [];
 }
-function ir(r) {
+function dr(r) {
   return r ? r.split(/[。！？!?]/).map((t) => t.trim()).filter((t) => t.includes("？") || t.includes("?")).slice(0, 5) : [];
 }
-function sr(r, t, e, n) {
-  const a = Number.isFinite(t) ? `第${t}章` : "章节", o = n.length > 0 ? n.join(" | ") : "无明显关键事实";
+function ur(r, t, e, n) {
+  const a = Number.isFinite(t) ? `第${t}章` : "章节", i = n.length > 0 ? n.join(" | ") : "无明显关键事实";
   return `${a}《${r || "未命名章节"}》摘要：${e}
-关键事实：${o}`;
+关键事实：${i}`;
 }
-function Qe(r) {
+function et(r) {
   if (typeof r != "string" || !r.trim())
     return [];
   try {
@@ -628,41 +644,41 @@ function Qe(r) {
     return [];
   }
 }
-function cr(r) {
+function mr(r) {
   return vt("sha256").update(r.join("|")).digest("hex");
 }
-function lr(r, t, e) {
-  const n = r === "volume" ? `卷级摘要（覆盖${t}章）` : `全书摘要（覆盖${t}章）`, a = e.map((o, c) => `${c + 1}. ${o}`).join(`
+function pr(r, t, e) {
+  const n = r === "volume" ? `卷级摘要（覆盖${t}章）` : `全书摘要（覆盖${t}章）`, a = e.map((i, c) => `${c + 1}. ${i}`).join(`
 `);
   return `${n}
 ${a}`.slice(0, 2400);
 }
-function dr() {
-  return L.join(b.getPath("userData"), "ai-settings.json");
+function fr() {
+  return N.join(b.getPath("userData"), "ai-settings.json");
 }
-function Dt() {
+function Lt() {
   try {
-    const r = dr();
-    if (!z.existsSync(r))
-      return pe;
-    const t = z.readFileSync(r, "utf8"), e = JSON.parse(t);
+    const r = fr();
+    if (!j.existsSync(r))
+      return me;
+    const t = j.readFileSync(r, "utf8"), e = JSON.parse(t);
     return {
-      ...pe,
+      ...me,
       ...e,
-      http: { ...pe.http, ...e.http ?? {} },
-      mcpCli: { ...pe.mcpCli, ...e.mcpCli ?? {} },
-      proxy: { ...pe.proxy, ...e.proxy ?? {} },
-      summary: { ...At, ...e.summary ?? {} }
+      http: { ...me.http, ...e.http ?? {} },
+      mcpCli: { ...me.mcpCli, ...e.mcpCli ?? {} },
+      proxy: { ...me.proxy, ...e.proxy ?? {} },
+      summary: { ...Dt, ...e.summary ?? {} }
     };
   } catch (r) {
-    return console.warn(`${B} failed to load ai-settings.json, fallback to defaults:`, r), pe;
+    return console.warn(`${B} failed to load ai-settings.json, fallback to defaults:`, r), me;
   }
 }
-async function et(r, t) {
+async function tt(r, t) {
   return {
     summaryText: r.slice(0, 220) || "章节内容为空，暂无可提炼摘要。",
-    keyFacts: or(r),
-    openQuestions: ir(r),
+    keyFacts: lr(r),
+    openQuestions: dr(r),
     timelineHints: [`chapter_order:${t ?? "unknown"}`],
     provider: "local",
     model: "heuristic-v1",
@@ -674,12 +690,12 @@ async function et(r, t) {
     latencyMs: 0
   };
 }
-async function ur(r, t, e, n) {
-  var E, C;
-  if (!(e.providerType === "http" && !!((E = e.http.baseUrl) != null && E.trim()) && !!((C = e.http.apiKey) != null && C.trim())))
+async function hr(r, t, e, n) {
+  var C, S;
+  if (!(e.providerType === "http" && !!((C = e.http.baseUrl) != null && C.trim()) && !!((S = e.http.apiKey) != null && S.trim())))
     throw new Error("AI summary mode requires HTTP provider with baseUrl and apiKey");
   console.log(`${B} [${r}] AI summary start (model=${e.http.model})`);
-  const o = new _t(e), c = Date.now(), i = await o.generate({
+  const i = new At(e), c = Date.now(), s = await i.generate({
     systemPrompt: [
       "You summarize novel chapters for continuity memory.",
       "Return strict JSON only.",
@@ -697,15 +713,15 @@ async function ur(r, t, e, n) {
     }),
     maxTokens: Math.min(1024, e.http.maxTokens),
     temperature: Math.min(0.3, e.http.temperature)
-  }), l = JSON.parse(i.text || "{}"), I = String(l.summaryText || "").trim();
-  if (!I)
+  }), d = JSON.parse(s.text || "{}"), v = String(d.summaryText || "").trim();
+  if (!v)
     throw new Error("AI summary returned empty summaryText");
   const w = Date.now() - c;
   return console.log(`${B} [${r}] AI summary success (${w}ms)`), {
-    summaryText: I.slice(0, 400),
-    keyFacts: Array.isArray(l.keyFacts) ? l.keyFacts.map((p) => String(p).trim()).filter(Boolean).slice(0, 6) : [],
-    openQuestions: Array.isArray(l.openQuestions) ? l.openQuestions.map((p) => String(p).trim()).filter(Boolean).slice(0, 4) : [],
-    timelineHints: Array.isArray(l.timelineHints) ? l.timelineHints.map((p) => String(p).trim()).filter(Boolean).slice(0, 6) : [`chapter_order:${n ?? "unknown"}`],
+    summaryText: v.slice(0, 400),
+    keyFacts: Array.isArray(d.keyFacts) ? d.keyFacts.map((p) => String(p).trim()).filter(Boolean).slice(0, 6) : [],
+    openQuestions: Array.isArray(d.openQuestions) ? d.openQuestions.map((p) => String(p).trim()).filter(Boolean).slice(0, 4) : [],
+    timelineHints: Array.isArray(d.timelineHints) ? d.timelineHints.map((p) => String(p).trim()).filter(Boolean).slice(0, 6) : [`chapter_order:${n ?? "unknown"}`],
     provider: "http",
     model: e.http.model,
     promptVersion: "chapter-summary-ai-v1",
@@ -716,7 +732,7 @@ async function ur(r, t, e, n) {
     latencyMs: w
   };
 }
-async function tt(r, t, e) {
+async function rt(r, t, e) {
   const n = r === "volume" ? { novelId: t, volumeId: e || "", isLatest: !0, status: "active" } : { novelId: t, isLatest: !0, status: "active" }, a = await h.chapterSummary.findMany({
     where: n,
     select: {
@@ -736,17 +752,17 @@ async function tt(r, t, e) {
   });
   if (a.length === 0)
     return null;
-  const o = a.map((m) => m.chapterId), c = a.map((m) => Number(m.chapterOrder)).filter((m) => Number.isFinite(m)), i = c.length > 0 ? Math.min(...c) : null, l = c.length > 0 ? Math.max(...c) : null, I = a.map((m) => String(m.summaryText || "").trim()).filter(Boolean).slice(-10), w = [...new Set(
-    a.flatMap((m) => Qe(m.keyFacts))
-  )].map((m) => String(m || "").slice(0, 120)).filter(Boolean).slice(0, 24), E = [...new Set(
-    a.flatMap((m) => Qe(m.openQuestions))
-  )].map((m) => String(m || "").slice(0, 120)).filter(Boolean).slice(0, 20), C = [
+  const i = a.map((m) => m.chapterId), c = a.map((m) => Number(m.chapterOrder)).filter((m) => Number.isFinite(m)), s = c.length > 0 ? Math.min(...c) : null, d = c.length > 0 ? Math.max(...c) : null, v = a.map((m) => String(m.summaryText || "").trim()).filter(Boolean).slice(-10), w = [...new Set(
+    a.flatMap((m) => et(m.keyFacts))
+  )].map((m) => String(m || "").slice(0, 120)).filter(Boolean).slice(0, 24), C = [...new Set(
+    a.flatMap((m) => et(m.openQuestions))
+  )].map((m) => String(m || "").slice(0, 120)).filter(Boolean).slice(0, 20), S = [
     r === "volume" ? "保持本卷叙事风格一致" : "保持全书叙事风格一致",
     "优先遵循现有大纲与关键事实"
   ], p = [
     "不得与已确认关键事实冲突",
     "保持角色动机与关系连续"
-  ], g = cr(
+  ], g = mr(
     a.map((m) => `${m.id}:${new Date(m.updatedAt).toISOString()}`)
   );
   let f = null;
@@ -759,18 +775,18 @@ async function tt(r, t, e) {
   }
   return {
     title: f,
-    summaryText: lr(r, o.length, I),
+    summaryText: pr(r, i.length, v),
     keyFacts: w,
-    unresolvedThreads: E,
-    styleGuide: C,
+    unresolvedThreads: C,
+    styleGuide: S,
     hardConstraints: p,
-    coverageChapterIds: o,
-    chapterRangeStart: i,
-    chapterRangeEnd: l,
+    coverageChapterIds: i,
+    chapterRangeStart: s,
+    chapterRangeEnd: d,
     sourceFingerprint: g
   };
 }
-async function rt(r, t, e, n) {
+async function nt(r, t, e, n) {
   await h.$transaction(async (a) => {
     await a.narrativeSummary.updateMany({
       where: {
@@ -784,7 +800,7 @@ async function rt(r, t, e, n) {
         status: "stale"
       }
     });
-    const o = await a.narrativeSummary.findFirst({
+    const i = await a.narrativeSummary.findFirst({
       where: {
         novelId: t,
         level: r,
@@ -819,34 +835,34 @@ async function rt(r, t, e, n) {
       errorDetail: null,
       isLatest: !0
     };
-    o != null && o.id ? await a.narrativeSummary.update({
-      where: { id: o.id },
+    i != null && i.id ? await a.narrativeSummary.update({
+      where: { id: i.id },
       data: c
     }) : await a.narrativeSummary.create({ data: c });
   });
 }
-async function mr(r, t) {
+async function gr(r, t) {
   try {
     const [e, n] = await Promise.all([
-      tt("volume", r, t),
-      tt("novel", r, null)
+      rt("volume", r, t),
+      rt("novel", r, null)
     ]);
-    e && (await rt("volume", r, e, t), console.log(`${B} [novel=${r}] narrative summary updated (level=volume, volume=${t})`)), n && (await rt("novel", r, n, null), console.log(`${B} [novel=${r}] narrative summary updated (level=novel)`));
+    e && (await nt("volume", r, e, t), console.log(`${B} [novel=${r}] narrative summary updated (level=volume, volume=${t})`)), n && (await nt("novel", r, n, null), console.log(`${B} [novel=${r}] narrative summary updated (level=novel)`));
   } catch (e) {
     console.error(`${B} [novel=${r}] narrative summary rebuild failed:`, e);
   }
 }
-function pr(r, t) {
+function yr(r, t) {
   const e = `${r}:${t}`, n = Oe.get(e);
   n && clearTimeout(n);
   const a = setTimeout(() => {
-    Oe.delete(e), mr(r, t);
+    Oe.delete(e), gr(r, t);
   }, 15e3);
   Oe.set(e, a);
 }
-async function $e(r, t) {
-  var s;
-  const e = Dt(), n = !!(t != null && t.force), a = (t == null ? void 0 : t.reason) || "save", o = e.summary.summaryMode === "ai", c = o ? Math.max(18e5, e.summary.summaryMinIntervalMs) : e.summary.summaryMinIntervalMs, i = o ? Math.max(800, e.summary.summaryMinWordDelta) : e.summary.summaryMinWordDelta, l = await h.chapter.findUnique({
+async function Re(r, t) {
+  var o;
+  const e = Lt(), n = !!(t != null && t.force), a = (t == null ? void 0 : t.reason) || "save", i = e.summary.summaryMode === "ai", c = i ? Math.max(18e5, e.summary.summaryMinIntervalMs) : e.summary.summaryMinIntervalMs, s = i ? Math.max(800, e.summary.summaryMinWordDelta) : e.summary.summaryMinWordDelta, d = await h.chapter.findUnique({
     where: { id: r },
     select: {
       id: !0,
@@ -859,80 +875,80 @@ async function $e(r, t) {
       volume: { select: { novelId: !0 } }
     }
   });
-  if (!((s = l == null ? void 0 : l.volume) != null && s.novelId)) {
+  if (!((o = d == null ? void 0 : d.volume) != null && o.novelId)) {
     console.log(`${B} [${r}] skip: chapter or novel relation missing`);
     return;
   }
-  if (!Ye)
+  if (!Qe)
     try {
-      const d = await h.$queryRawUnsafe("PRAGMA database_list;"), y = Array.isArray(d) ? d.find((v) => (v == null ? void 0 : v.name) === "main") : null;
+      const l = await h.$queryRawUnsafe("PRAGMA database_list;"), y = Array.isArray(l) ? l.find((I) => (I == null ? void 0 : I.name) === "main") : null;
       console.log(`${B} sqlite main db path: ${(y == null ? void 0 : y.file) || "unknown"}`);
     } catch {
       console.warn(`${B} failed to read sqlite db path via PRAGMA database_list`);
     } finally {
-      Ye = !0;
+      Qe = !0;
     }
-  const I = l.content || "", w = vt("sha256").update(I).digest("hex"), E = Date.now(), C = await h.chapterSummary.findFirst({
+  const v = d.content || "", w = vt("sha256").update(v).digest("hex"), C = Date.now(), S = await h.chapterSummary.findFirst({
     where: {
-      chapterId: l.id,
+      chapterId: d.id,
       isLatest: !0,
       status: "active",
       summaryType: "standard"
     },
     orderBy: { updatedAt: "desc" }
   });
-  if (!n && (C == null ? void 0 : C.sourceContentHash) === w) {
+  if (!n && (S == null ? void 0 : S.sourceContentHash) === w) {
     console.log(`${B} [${r}] skip: same content hash`);
     return;
   }
-  const p = Math.abs((l.wordCount || 0) - Number((C == null ? void 0 : C.sourceWordCount) || 0)), g = C != null && C.updatedAt ? new Date(C.updatedAt).getTime() : 0, f = g > 0 ? E - g : Number.MAX_SAFE_INTEGER;
-  if (!n && g > 0 && f < c && p < i) {
+  const p = Math.abs((d.wordCount || 0) - Number((S == null ? void 0 : S.sourceWordCount) || 0)), g = S != null && S.updatedAt ? new Date(S.updatedAt).getTime() : 0, f = g > 0 ? C - g : Number.MAX_SAFE_INTEGER;
+  if (!n && g > 0 && f < c && p < s) {
     console.log(
-      `${B} [${r}] skip: throttled (deltaWords=${p}, sinceLastMs=${f}, minIntervalMs=${c}, minWordDelta=${i})`
+      `${B} [${r}] skip: throttled (deltaWords=${p}, sinceLastMs=${f}, minIntervalMs=${c}, minWordDelta=${s})`
     );
     return;
   }
-  const m = ar(I);
+  const m = cr(v);
   console.log(
-    `${B} [${r}] start rebuild (reason=${a}, mode=${e.summary.summaryMode}, words=${l.wordCount || m.length}, deltaWords=${p}, force=${n})`
+    `${B} [${r}] start rebuild (reason=${a}, mode=${e.summary.summaryMode}, words=${d.wordCount || m.length}, deltaWords=${p}, force=${n})`
   );
-  let u = await et(m, l.order ?? null);
+  let u = await tt(m, d.order ?? null);
   if (e.summary.summaryMode === "ai")
     try {
-      u = await ur(r, m, e, l.order ?? null);
-    } catch (d) {
-      console.warn(`${B} [${r}] AI summary failed, fallback to local: ${(d == null ? void 0 : d.message) || "unknown error"}`), u = {
-        ...await et(m, l.order ?? null),
+      u = await hr(r, m, e, d.order ?? null);
+    } catch (l) {
+      console.warn(`${B} [${r}] AI summary failed, fallback to local: ${(l == null ? void 0 : l.message) || "unknown error"}`), u = {
+        ...await tt(m, d.order ?? null),
         errorCode: "AI_SUMMARY_FALLBACK",
-        errorDetail: (d == null ? void 0 : d.message) || "unknown ai summary error"
+        errorDetail: (l == null ? void 0 : l.message) || "unknown ai summary error"
       };
     }
-  await h.$transaction(async (d) => {
-    await d.chapterSummary.updateMany({
-      where: { chapterId: l.id, isLatest: !0 },
+  await h.$transaction(async (l) => {
+    await l.chapterSummary.updateMany({
+      where: { chapterId: d.id, isLatest: !0 },
       data: { isLatest: !1, status: "stale" }
     });
-    const y = await d.chapterSummary.findFirst({
+    const y = await l.chapterSummary.findFirst({
       where: {
-        chapterId: l.id,
+        chapterId: d.id,
         sourceContentHash: w,
         summaryType: "standard"
       }
-    }), v = {
-      novelId: l.volume.novelId,
-      volumeId: l.volumeId,
-      chapterId: l.id,
+    }), I = {
+      novelId: d.volume.novelId,
+      volumeId: d.volumeId,
+      chapterId: d.id,
       summaryType: "standard",
       summaryText: u.summaryText,
-      compressedMemory: sr(l.title || "", l.order ?? null, u.summaryText, u.keyFacts),
+      compressedMemory: ur(d.title || "", d.order ?? null, u.summaryText, u.keyFacts),
       keyFacts: JSON.stringify(u.keyFacts),
       entitiesSnapshot: JSON.stringify({}),
       timelineHints: JSON.stringify(u.timelineHints),
       openQuestions: JSON.stringify(u.openQuestions),
       sourceContentHash: w,
-      sourceWordCount: l.wordCount || m.length,
-      sourceUpdatedAt: l.updatedAt,
-      chapterOrder: l.order ?? null,
+      sourceWordCount: d.wordCount || m.length,
+      sourceUpdatedAt: d.updatedAt,
+      chapterOrder: d.order ?? null,
       provider: u.provider,
       model: u.model,
       promptVersion: u.promptVersion,
@@ -948,22 +964,22 @@ async function $e(r, t) {
       isLatest: !0
     };
     if (y != null && y.id) {
-      await d.chapterSummary.update({
+      await l.chapterSummary.update({
         where: { id: y.id },
-        data: v
+        data: I
       }), console.log(`${B} [${r}] done: updated existing summary`);
       return;
     }
-    await d.chapterSummary.create({
-      data: v
+    await l.chapterSummary.create({
+      data: I
     }), console.log(`${B} [${r}] done: created new summary`);
-  }), pr(l.volume.novelId, l.volumeId);
+  }), yr(d.volume.novelId, d.volumeId);
 }
-function Ge(r, t = "save") {
-  const e = Dt();
+function We(r, t = "save") {
+  const e = Lt();
   if (t === "manual") {
-    console.log(`${B} [${r}] manual trigger received`), $e(r, { force: !0, reason: "manual" }).catch((i) => {
-      console.error(`${B} [${r}] manual rebuild failed:`, i);
+    console.log(`${B} [${r}] manual trigger received`), Re(r, { force: !0, reason: "manual" }).catch((s) => {
+      console.error(`${B} [${r}] manual rebuild failed:`, s);
     });
     return;
   }
@@ -972,47 +988,47 @@ function Ge(r, t = "save") {
     return;
   }
   if (e.summary.summaryMode === "ai" && e.summary.summaryTriggerPolicy === "finalized") {
-    const i = Math.max(6e4, e.summary.summaryFinalizeStableMs), l = ke.get(r);
-    l && clearTimeout(l);
-    const I = setTimeout(async () => {
-      ke.delete(r);
+    const s = Math.max(6e4, e.summary.summaryFinalizeStableMs), d = Me.get(r);
+    d && clearTimeout(d);
+    const v = setTimeout(async () => {
+      Me.delete(r);
       const w = await h.chapter.findUnique({
         where: { id: r },
         select: { wordCount: !0 }
-      }), E = (w == null ? void 0 : w.wordCount) || 0;
-      if (E < e.summary.summaryFinalizeMinWords) {
+      }), C = (w == null ? void 0 : w.wordCount) || 0;
+      if (C < e.summary.summaryFinalizeMinWords) {
         console.log(
-          `${B} [${r}] finalized trigger skipped (wordCount=${E}, min=${e.summary.summaryFinalizeMinWords})`
+          `${B} [${r}] finalized trigger skipped (wordCount=${C}, min=${e.summary.summaryFinalizeMinWords})`
         );
         return;
       }
-      console.log(`${B} [${r}] finalized trigger fired after stable window ${i}ms`), $e(r, { force: !0, reason: "finalized" }).catch((C) => {
-        console.error(`${B} [${r}] finalized rebuild failed:`, C);
+      console.log(`${B} [${r}] finalized trigger fired after stable window ${s}ms`), Re(r, { force: !0, reason: "finalized" }).catch((S) => {
+        console.error(`${B} [${r}] finalized rebuild failed:`, S);
       });
-    }, i);
-    ke.set(r, I), console.log(`${B} [${r}] finalized trigger scheduled (${i}ms stable window)`);
+    }, s);
+    Me.set(r, v), console.log(`${B} [${r}] finalized trigger scheduled (${s}ms stable window)`);
     return;
   }
-  const n = e.summary.summaryMode === "ai", a = Math.max(n ? 3e5 : 1e3, e.summary.summaryDebounceMs), o = xe.get(r);
+  const n = e.summary.summaryMode === "ai", a = Math.max(n ? 3e5 : 1e3, e.summary.summaryDebounceMs), i = ke.get(r);
   if (n) {
-    if (o) {
-      const i = (we.get(r) || 0) + 1;
-      we.set(r, i), i % 10 === 0 && console.log(`${B} [${r}] ai mode coalescing saves (${i} updates queued, timer unchanged)`);
+    if (i) {
+      const s = (ye.get(r) || 0) + 1;
+      ye.set(r, s), s % 10 === 0 && console.log(`${B} [${r}] ai mode coalescing saves (${s} updates queued, timer unchanged)`);
       return;
     }
-    we.set(r, 1), console.log(`${B} [${r}] ai mode scheduled (${a}ms, fixed window)`);
+    ye.set(r, 1), console.log(`${B} [${r}] ai mode scheduled (${a}ms, fixed window)`);
   } else
-    o ? (clearTimeout(o), console.log(`${B} [${r}] debounce reset (${a}ms)`)) : console.log(`${B} [${r}] debounce scheduled (${a}ms)`);
+    i ? (clearTimeout(i), console.log(`${B} [${r}] debounce reset (${a}ms)`)) : console.log(`${B} [${r}] debounce scheduled (${a}ms)`);
   const c = setTimeout(() => {
-    xe.delete(r);
-    const i = we.get(r) || 0;
-    we.delete(r), console.log(n ? `${B} [${r}] ai mode fired after coalescing ${i} saves` : `${B} [${r}] debounce fired, evaluating rebuild`), $e(r).catch((l) => {
-      console.error(`${B} [${r}] rebuild failed:`, l);
+    ke.delete(r);
+    const s = ye.get(r) || 0;
+    ye.delete(r), console.log(n ? `${B} [${r}] ai mode fired after coalescing ${s} saves` : `${B} [${r}] debounce fired, evaluating rebuild`), Re(r).catch((d) => {
+      console.error(`${B} [${r}] rebuild failed:`, d);
     });
   }, a);
-  xe.set(r, c);
+  ke.set(r, c);
 }
-function fr(r) {
+function wr(r) {
   return [
     {
       actionId: "novel.list",
@@ -1039,7 +1055,7 @@ function fr(r) {
       handler: async (t) => {
         const e = t;
         if (!(e != null && e.novelId))
-          throw new j("INVALID_INPUT", "novelId is required");
+          throw new z("INVALID_INPUT", "novelId is required");
         return h.volume.findMany({
           where: { novelId: e.novelId },
           include: {
@@ -1106,7 +1122,7 @@ function fr(r) {
       handler: async (t) => {
         const e = t;
         if (!(e != null && e.volumeId))
-          throw new j("INVALID_INPUT", "volumeId is required");
+          throw new z("INVALID_INPUT", "volumeId is required");
         return h.chapter.findMany({
           where: { volumeId: e.volumeId },
           orderBy: { order: "asc" }
@@ -1132,14 +1148,14 @@ function fr(r) {
         var a;
         const e = t;
         if (!(e != null && e.volumeId))
-          throw new j("INVALID_INPUT", "volumeId is required");
+          throw new z("INVALID_INPUT", "volumeId is required");
         let n = e.order;
         if (!Number.isFinite(n)) {
-          const o = await h.chapter.findFirst({
+          const i = await h.chapter.findFirst({
             where: { volumeId: e.volumeId },
             orderBy: { order: "desc" }
           });
-          n = ((o == null ? void 0 : o.order) || 0) + 1;
+          n = ((i == null ? void 0 : i.order) || 0) + 1;
         }
         return h.chapter.create({
           data: {
@@ -1168,7 +1184,7 @@ function fr(r) {
       handler: async (t) => {
         const e = t;
         if (!(e != null && e.chapterId))
-          throw new j("INVALID_INPUT", "chapterId is required");
+          throw new z("INVALID_INPUT", "chapterId is required");
         return h.chapter.findUnique({
           where: { id: e.chapterId },
           include: { volume: { select: { novelId: !0 } } }
@@ -1196,29 +1212,29 @@ function fr(r) {
       handler: async (t) => {
         const e = t;
         if (!(e != null && e.chapterId))
-          throw new j("INVALID_INPUT", "chapterId is required");
+          throw new z("INVALID_INPUT", "chapterId is required");
         if (typeof e.content != "string")
-          throw new j("INVALID_INPUT", "content is required");
+          throw new z("INVALID_INPUT", "content is required");
         const n = e.source === "ai_ui" ? "ai_ui" : "ai_agent", a = await h.chapter.findUnique({
           where: { id: e.chapterId },
           select: { id: !0, content: !0, updatedAt: !0, wordCount: !0, volume: { select: { novelId: !0 } } }
         });
         if (!a || !a.volume)
-          throw new j("NOT_FOUND", "Chapter or volume not found");
-        const o = e.content.length, c = o - a.wordCount;
+          throw new z("NOT_FOUND", "Chapter or volume not found");
+        const i = e.content.length, c = i - a.wordCount;
         try {
-          const [, i] = await h.$transaction([
+          const [, s] = await h.$transaction([
             h.novel.update({
               where: { id: a.volume.novelId },
               data: { wordCount: { increment: c }, updatedAt: /* @__PURE__ */ new Date() }
             }),
             h.chapter.update({
               where: { id: e.chapterId },
-              data: { content: e.content, wordCount: o, updatedAt: /* @__PURE__ */ new Date() }
+              data: { content: e.content, wordCount: i, updatedAt: /* @__PURE__ */ new Date() }
             })
           ]);
-          return Ge(e.chapterId), {
-            chapter: i,
+          return We(e.chapterId), {
+            chapter: s,
             saveMeta: {
               source: n,
               rollbackPoint: {
@@ -1228,9 +1244,9 @@ function fr(r) {
               }
             }
           };
-        } catch (i) {
-          const l = te(i);
-          throw new j("PERSISTENCE_ERROR", l.message);
+        } catch (s) {
+          const d = te(s);
+          throw new z("PERSISTENCE_ERROR", d.message);
         }
       }
     },
@@ -1271,7 +1287,7 @@ function fr(r) {
       handler: async (t) => {
         const e = t;
         if (!(e != null && e.novelId) || !e.chapterId || typeof e.currentContent != "string")
-          throw new j("INVALID_INPUT", "novelId, chapterId, currentContent are required");
+          throw new z("INVALID_INPUT", "novelId, chapterId, currentContent are required");
         try {
           return await r.continueWriting({
             locale: e.locale,
@@ -1312,7 +1328,7 @@ function fr(r) {
       handler: async (t) => {
         const e = t;
         if (!(e != null && e.novelId))
-          throw new j("INVALID_INPUT", "novelId is required");
+          throw new z("INVALID_INPUT", "novelId is required");
         return h.plotLine.findMany({
           where: { novelId: e.novelId },
           include: {
@@ -1341,7 +1357,7 @@ function fr(r) {
       handler: async (t) => {
         const e = t;
         if (!(e != null && e.novelId))
-          throw new j("INVALID_INPUT", "novelId is required");
+          throw new z("INVALID_INPUT", "novelId is required");
         return h.worldSetting.findMany({
           where: { novelId: e.novelId },
           orderBy: { sortOrder: "asc" }
@@ -1364,7 +1380,7 @@ function fr(r) {
       handler: async (t) => {
         const e = t;
         if (!(e != null && e.novelId))
-          throw new j("INVALID_INPUT", "novelId is required");
+          throw new z("INVALID_INPUT", "novelId is required");
         return h.character.findMany({
           where: { novelId: e.novelId },
           orderBy: { sortOrder: "asc" }
@@ -1387,7 +1403,7 @@ function fr(r) {
       handler: async (t) => {
         const e = t;
         if (!(e != null && e.novelId))
-          throw new j("INVALID_INPUT", "novelId is required");
+          throw new z("INVALID_INPUT", "novelId is required");
         return h.item.findMany({
           where: { novelId: e.novelId },
           orderBy: { sortOrder: "asc" }
@@ -1436,16 +1452,16 @@ function fr(r) {
       handler: async (t) => {
         const e = t;
         if (!(e != null && e.novelId) || !(e != null && e.keyword))
-          throw new j("INVALID_INPUT", "novelId and keyword are required");
-        return Ct(e.novelId, e.keyword, e.limit ?? 20, e.offset ?? 0);
+          throw new z("INVALID_INPUT", "novelId and keyword are required");
+        return St(e.novelId, e.keyword, e.limit ?? 20, e.offset ?? 0);
       }
     }
   ];
 }
-function hr(r) {
+function vr(r) {
   return r.trim() ? (r.match(/"[^"]*"|'[^']*'|\S+/g) || []).map((e) => e.replace(/^['"]|['"]$/g, "")) : [];
 }
-class nt {
+class at {
   constructor(t) {
     ee(this, "name", "mcp-cli");
     this.settings = t;
@@ -1454,35 +1470,35 @@ class nt {
     const { cliPath: t } = this.settings.mcpCli;
     if (!t.trim())
       return { ok: !1, detail: "MCP CLI path is empty" };
-    if (!z.existsSync(t))
+    if (!j.existsSync(t))
       return { ok: !1, detail: "MCP CLI path does not exist" };
     try {
-      M("INFO", "McpCliProvider.healthCheck.request", "MCP CLI health check request", {
+      O("INFO", "McpCliProvider.healthCheck.request", "MCP CLI health check request", {
         cliPath: t,
         timeoutMs: this.settings.mcpCli.startupTimeoutMs
       });
       const { stdout: e } = await this.runProcess(["--version"], "", this.settings.mcpCli.startupTimeoutMs);
-      return M("INFO", "McpCliProvider.healthCheck.response", "MCP CLI health check response", {
+      return O("INFO", "McpCliProvider.healthCheck.response", "MCP CLI health check response", {
         cliPath: t,
         stdout: e
       }), { ok: !0, detail: (e || "MCP CLI is executable").slice(0, 200) };
     } catch (e) {
-      return ie("McpCliProvider.healthCheck.error", e, { cliPath: t }), { ok: !1, detail: `MCP CLI check failed: ${(e == null ? void 0 : e.message) || "unknown error"}` };
+      return se("McpCliProvider.healthCheck.error", e, { cliPath: t }), { ok: !1, detail: `MCP CLI check failed: ${(e == null ? void 0 : e.message) || "unknown error"}` };
     }
   }
   async generate(t) {
     const e = t.prompt.trim();
     if (!e)
       return { text: "", model: "mcp-cli" };
-    const n = this.settings.mcpCli.argsTemplate || "", a = n.includes("{prompt}"), o = hr(n.replace("{prompt}", e));
-    M("INFO", "McpCliProvider.generate.request", "MCP CLI generate request", {
+    const n = this.settings.mcpCli.argsTemplate || "", a = n.includes("{prompt}"), i = vr(n.replace("{prompt}", e));
+    O("INFO", "McpCliProvider.generate.request", "MCP CLI generate request", {
       cliPath: this.settings.mcpCli.cliPath,
-      args: o,
+      args: i,
       prompt: a ? "" : e,
       promptEmbeddedInArgs: a
     });
-    const { stdout: c } = await this.runProcess(o, a ? "" : e, this.settings.mcpCli.startupTimeoutMs);
-    return M("INFO", "McpCliProvider.generate.response", "MCP CLI generate response", {
+    const { stdout: c } = await this.runProcess(i, a ? "" : e, this.settings.mcpCli.startupTimeoutMs);
+    return O("INFO", "McpCliProvider.generate.response", "MCP CLI generate response", {
       cliPath: this.settings.mcpCli.cliPath,
       stdout: c
     }), {
@@ -1491,54 +1507,54 @@ class nt {
     };
   }
   async runProcess(t, e, n) {
-    const { cliPath: a, workingDir: o, envJson: c } = this.settings.mcpCli, i = this.parseEnvJson(c), l = Date.now();
-    return new Promise((I, w) => {
-      const E = Vt(a, t, {
-        cwd: o || process.cwd(),
-        env: { ...process.env, ...i },
+    const { cliPath: a, workingDir: i, envJson: c } = this.settings.mcpCli, s = this.parseEnvJson(c), d = Date.now();
+    return new Promise((v, w) => {
+      const C = Zt(a, t, {
+        cwd: i || process.cwd(),
+        env: { ...process.env, ...s },
         stdio: ["pipe", "pipe", "pipe"],
         windowsHide: !0
       });
-      let C = "", p = "", g = !1;
+      let S = "", p = "", g = !1;
       const f = setTimeout(() => {
-        g || (g = !0, E.kill("SIGTERM"), M("ERROR", "McpCliProvider.runProcess.timeout", "MCP CLI process timeout", {
+        g || (g = !0, C.kill("SIGTERM"), O("ERROR", "McpCliProvider.runProcess.timeout", "MCP CLI process timeout", {
           cliPath: a,
           args: t,
-          elapsedMs: Date.now() - l
+          elapsedMs: Date.now() - d
         }), w(new Error("MCP CLI process timeout")));
       }, Math.max(1e3, n));
-      E.stdout.on("data", (m) => {
-        C += m.toString();
-      }), E.stderr.on("data", (m) => {
+      C.stdout.on("data", (m) => {
+        S += m.toString();
+      }), C.stderr.on("data", (m) => {
         p += m.toString();
-      }), E.on("error", (m) => {
-        g || (g = !0, clearTimeout(f), ie("McpCliProvider.runProcess.error", m, {
+      }), C.on("error", (m) => {
+        g || (g = !0, clearTimeout(f), se("McpCliProvider.runProcess.error", m, {
           cliPath: a,
           args: t,
-          elapsedMs: Date.now() - l,
-          env: oe(i)
+          elapsedMs: Date.now() - d,
+          env: ie(s)
         }), w(m));
-      }), E.on("close", (m) => {
+      }), C.on("close", (m) => {
         if (!g) {
           if (g = !0, clearTimeout(f), m !== 0) {
-            M("ERROR", "McpCliProvider.runProcess.exit", "MCP CLI exited with non-zero code", {
+            O("ERROR", "McpCliProvider.runProcess.exit", "MCP CLI exited with non-zero code", {
               cliPath: a,
               args: t,
               code: m,
-              elapsedMs: Date.now() - l,
+              elapsedMs: Date.now() - d,
               stderr: p
             }), w(new Error(`MCP CLI exited with code ${m}: ${p.slice(0, 300)}`));
             return;
           }
-          M("INFO", "McpCliProvider.runProcess.exit", "MCP CLI process completed", {
+          O("INFO", "McpCliProvider.runProcess.exit", "MCP CLI process completed", {
             cliPath: a,
             args: t,
             code: m,
-            elapsedMs: Date.now() - l,
+            elapsedMs: Date.now() - d,
             stderr: p
-          }), I({ stdout: C, stderr: p });
+          }), v({ stdout: S, stderr: p });
         }
-      }), e && E.stdin.write(e), E.stdin.end();
+      }), e && C.stdin.write(e), C.stdin.end();
     });
   }
   parseEnvJson(t) {
@@ -1549,26 +1565,26 @@ class nt {
       if (!e || typeof e != "object")
         return {};
       const n = {};
-      for (const [a, o] of Object.entries(e))
-        n[a] = String(o ?? "");
+      for (const [a, i] of Object.entries(e))
+        n[a] = String(i ?? "");
       return n;
     } catch {
       return {};
     }
   }
 }
-function at(r) {
+function $e(r) {
   const t = /* @__PURE__ */ new Set(), e = [];
   for (const n of r) {
     const a = String(n || "").trim();
     if (!a)
       continue;
-    const o = a.toLowerCase();
-    t.has(o) || (t.add(o), e.push(a));
+    const i = a.toLowerCase();
+    t.has(i) || (t.add(i), e.push(a));
   }
   return e;
 }
-function Re(r) {
+function _e(r) {
   if (!(r != null && r.trim()))
     return "";
   try {
@@ -1580,9 +1596,132 @@ function Re(r) {
     return r.replace(/\s+/g, " ").trim();
   }
 }
-class gr {
+function Ir(r) {
+  const t = (r.match(/[\u4e00-\u9fff\u3400-\u4dbf]/g) || []).length, e = r.length - t;
+  return Math.ceil(t * 1.5 + e * 0.4);
+}
+class Sr {
+  async buildForCreativeAssets(t) {
+    const e = t.includeExistingEntities !== !1, n = Math.max(0, Math.min(8, t.contextChapterCount ?? 0)), a = t.filterCompletedPlotLines !== !1, i = [], [c, s, d, v, w, C] = await Promise.all([
+      e ? h.character.findMany({
+        where: { novelId: t.novelId },
+        select: { name: !0, role: !0, description: !0 },
+        orderBy: { updatedAt: "desc" },
+        take: 30
+      }) : [],
+      e ? h.item.findMany({
+        where: { novelId: t.novelId },
+        select: { name: !0, type: !0, description: !0 },
+        orderBy: { updatedAt: "desc" },
+        take: 30
+      }) : [],
+      e ? h.plotLine.findMany({
+        where: { novelId: t.novelId },
+        include: {
+          points: {
+            select: { title: !0, status: !0, description: !0 },
+            orderBy: { order: "asc" }
+          }
+        },
+        orderBy: { sortOrder: "asc" }
+      }) : [],
+      // 世界观始终全量传递
+      h.worldSetting.findMany({
+        where: { novelId: t.novelId },
+        select: { name: !0, content: !0, type: !0 },
+        orderBy: { sortOrder: "asc" }
+      }),
+      n > 0 ? h.chapter.findMany({
+        where: { volume: { novelId: t.novelId } },
+        select: { id: !0, title: !0, content: !0, updatedAt: !0 },
+        orderBy: { updatedAt: "desc" },
+        take: n
+      }) : [],
+      h.narrativeSummary.findMany({
+        where: {
+          novelId: t.novelId,
+          isLatest: !0,
+          status: "active",
+          level: "novel"
+        },
+        orderBy: { updatedAt: "desc" },
+        take: 1
+      })
+    ]), S = d.map((_) => {
+      const x = Array.isArray(_.points) ? _.points : [], T = a ? x.filter((M) => M.status !== "resolved") : x;
+      return {
+        name: String(_.name || ""),
+        description: _.description ? String(_.description) : void 0,
+        points: T.map((M) => ({
+          title: String(M.title || ""),
+          status: String(M.status || "active")
+        }))
+      };
+    }), p = w.map((_) => _.id), g = p.length > 0 ? await h.chapterSummary.findMany({
+      where: {
+        chapterId: { in: p },
+        isLatest: !0,
+        status: "active"
+      },
+      orderBy: { updatedAt: "desc" }
+    }) : [], f = /* @__PURE__ */ new Map();
+    for (const _ of g)
+      f.has(_.chapterId) || f.set(_.chapterId, _);
+    let m = 0;
+    const u = w.map((_) => {
+      const x = f.get(_.id), T = (x == null ? void 0 : x.compressedMemory) || (x == null ? void 0 : x.summaryText);
+      return typeof T == "string" && T.trim() ? { chapterId: _.id, title: _.title || "", summary: T.slice(0, 800) } : (m++, {
+        chapterId: _.id,
+        title: _.title || "",
+        summary: _e(_.content || "").slice(0, 600)
+      });
+    });
+    m > 0 && i.push(`${m} 个章节缺少摘要，已使用原文摘录替代。`);
+    const o = C.map((_) => {
+      let x = [];
+      if (typeof _.keyFacts == "string" && _.keyFacts.trim())
+        try {
+          const T = JSON.parse(_.keyFacts);
+          Array.isArray(T) && (x = $e(
+            T.map((M) => String(M || "").trim()).filter(Boolean).slice(0, 12)
+          ).slice(0, 8));
+        } catch {
+        }
+      return {
+        level: _.level === "volume" ? "volume" : "novel",
+        title: String(_.title || ""),
+        summaryText: String(_.summaryText || "").slice(0, 1500),
+        keyFacts: x
+      };
+    }), l = {
+      characters: c.map((_) => ({
+        name: String(_.name || ""),
+        role: _.role ? String(_.role) : void 0,
+        description: _.description ? String(_.description).slice(0, 200) : void 0
+      })),
+      items: s.map((_) => ({
+        name: String(_.name || ""),
+        type: _.type ? String(_.type) : void 0,
+        description: _.description ? String(_.description).slice(0, 200) : void 0
+      })),
+      plotLines: S,
+      worldSettings: v.map((_) => ({
+        name: String(_.name || ""),
+        content: String(_.content || ""),
+        type: String(_.type || "other")
+      }))
+    }, y = JSON.stringify({ existingEntities: l, recentSummaries: u, narrativeSummaries: o }), I = Ir(y), E = [];
+    return l.characters.length > 0 && E.push(`characters_${l.characters.length}`), l.items.length > 0 && E.push(`items_${l.items.length}`), l.plotLines.length > 0 && E.push(`plotLines_${l.plotLines.length}`), E.push(`worldSettings_${l.worldSettings.length}`), u.length > 0 && E.push(`recentChapterSummaries_${u.length}`), o.length > 0 && E.push(`narrativeSummaries_${o.length}`), E.push(`estimatedTokens_${I}`), {
+      existingEntities: l,
+      recentSummaries: u,
+      narrativeSummaries: o,
+      usedContext: E,
+      warnings: i,
+      estimatedTokens: I
+    };
+  }
   async buildForContinueWriting(t) {
-    const e = Math.max(1, Math.min(8, t.contextChapterCount ?? 3)), n = Math.max(0, Math.min(e, t.recentRawChapterCount ?? 2)), [a, o, c, i, l, I, w] = await Promise.all([
+    const e = Math.max(1, Math.min(8, t.contextChapterCount ?? 3)), n = Math.max(0, Math.min(e, t.recentRawChapterCount ?? 2)), [a, i, c, s, d, v, w] = await Promise.all([
       h.worldSetting.findMany({
         where: { novelId: t.novelId },
         orderBy: { updatedAt: "desc" }
@@ -1628,15 +1767,15 @@ class gr {
         where: { id: t.chapterId },
         select: { volumeId: !0 }
       })
-    ]), E = Array.isArray(t.ideaIds) ? t.ideaIds.map((N) => String(N)).filter(Boolean) : [], C = E.length > 0 ? await h.idea.findMany({
+    ]), C = Array.isArray(t.ideaIds) ? t.ideaIds.map((L) => String(L)).filter(Boolean) : [], S = C.length > 0 ? await h.idea.findMany({
       where: {
         novelId: t.novelId,
-        id: { in: E }
+        id: { in: C }
       },
       include: { tags: !0 },
       orderBy: { updatedAt: "desc" },
       take: 20
-    }) : [], p = I.map((N) => N.id), g = p.length > 0 ? await h.chapterSummary.findMany({
+    }) : [], p = v.map((L) => L.id), g = p.length > 0 ? await h.chapterSummary.findMany({
       where: {
         chapterId: { in: p },
         isLatest: !0,
@@ -1644,9 +1783,9 @@ class gr {
       },
       orderBy: { updatedAt: "desc" }
     }) : [], f = /* @__PURE__ */ new Map();
-    for (const N of g)
-      f.has(N.chapterId) || f.set(N.chapterId, N);
-    const m = { value: 0 }, s = (await h.narrativeSummary.findMany({
+    for (const L of g)
+      f.has(L.chapterId) || f.set(L.chapterId, L);
+    const m = { value: 0 }, o = (await h.narrativeSummary.findMany({
       where: {
         novelId: t.novelId,
         isLatest: !0,
@@ -1658,78 +1797,78 @@ class gr {
       },
       orderBy: { updatedAt: "desc" },
       take: 2
-    })).map((N) => {
+    })).map((L) => {
       let Z = [];
-      if (typeof N.keyFacts == "string" && N.keyFacts.trim())
+      if (typeof L.keyFacts == "string" && L.keyFacts.trim())
         try {
-          const X = JSON.parse(N.keyFacts);
-          Array.isArray(X) && (Z = at(
-            X.map((ce) => String(ce || "").trim()).filter(Boolean).slice(0, 12)
+          const X = JSON.parse(L.keyFacts);
+          Array.isArray(X) && (Z = $e(
+            X.map((oe) => String(oe || "").trim()).filter(Boolean).slice(0, 12)
           ).slice(0, 5));
         } catch {
           Z = [];
         }
       return {
-        level: N.level === "volume" ? "volume" : "novel",
-        title: String(N.title || ""),
-        summaryText: String(N.summaryText || "").slice(0, 1200),
+        level: L.level === "volume" ? "volume" : "novel",
+        title: String(L.title || ""),
+        summaryText: String(L.summaryText || "").slice(0, 1200),
         keyFacts: Z
       };
-    }), d = I.map((N, Z) => ({
-      chapterId: N.id,
-      title: N.title || "",
+    }), l = v.map((L, Z) => ({
+      chapterId: L.id,
+      title: L.title || "",
       excerpt: (() => {
         if (Z < n)
-          return Re(N.content || "").slice(-1200);
-        const X = f.get(N.id), ce = (X == null ? void 0 : X.compressedMemory) || (X == null ? void 0 : X.summaryText);
-        return typeof ce == "string" && ce.trim() ? ce.slice(-1200) : (m.value += 1, Re(N.content || "").slice(-1200));
+          return _e(L.content || "").slice(-1200);
+        const X = f.get(L.id), oe = (X == null ? void 0 : X.compressedMemory) || (X == null ? void 0 : X.summaryText);
+        return typeof oe == "string" && oe.trim() ? oe.slice(-1200) : (m.value += 1, _e(L.content || "").slice(-1200));
       })()
-    })), y = Re(t.currentContent || "").slice(-2400), v = C.map((N) => ({
-      ideaId: N.id,
-      content: (N.content || "").slice(0, 800),
-      quote: typeof N.quote == "string" ? N.quote.slice(0, 300) : void 0,
-      tags: Array.isArray(N.tags) ? N.tags.map((Z) => String(Z.name || "").trim()).filter(Boolean).slice(0, 12) : []
-    })), _ = {
+    })), y = _e(t.currentContent || "").slice(-2400), I = S.map((L) => ({
+      ideaId: L.id,
+      content: (L.content || "").slice(0, 800),
+      quote: typeof L.quote == "string" ? L.quote.slice(0, 300) : void 0,
+      tags: Array.isArray(L.tags) ? L.tags.map((Z) => String(Z.name || "").trim()).filter(Boolean).slice(0, 12) : []
+    })), E = {
       characters: new Set(
-        c.map((N) => String((N == null ? void 0 : N.name) || "").trim()).filter(Boolean)
+        c.map((L) => String((L == null ? void 0 : L.name) || "").trim()).filter(Boolean)
       ),
       items: new Set(
-        i.map((N) => String((N == null ? void 0 : N.name) || "").trim()).filter(Boolean)
+        s.map((L) => String((L == null ? void 0 : L.name) || "").trim()).filter(Boolean)
       ),
       worldSettings: new Set(
-        a.map((N) => String((N == null ? void 0 : N.name) || "").trim()).filter(Boolean)
+        a.map((L) => String((L == null ? void 0 : L.name) || "").trim()).filter(Boolean)
       )
-    }, D = [], k = /@([^\s@，。！？,!.;；:："'“”‘’()[\]{}<>]+)/g;
-    for (const N of v) {
-      const Z = `${N.content || ""}
-${N.quote || ""}`, X = Array.from(Z.matchAll(k));
-      for (const ce of X) {
-        const de = String(ce[1] || "").trim();
-        de && (_.characters.has(de) ? D.push({ name: de, kind: "character" }) : _.items.has(de) ? D.push({ name: de, kind: "item" }) : _.worldSettings.has(de) && D.push({ name: de, kind: "worldSetting" }));
+    }, _ = [], x = /@([^\s@，。！？,!.;；:："'""''()\[\]{}<>]+)/g;
+    for (const L of I) {
+      const Z = `${L.content || ""}
+${L.quote || ""}`, X = Array.from(Z.matchAll(x));
+      for (const oe of X) {
+        const le = String(oe[1] || "").trim();
+        le && (E.characters.has(le) ? _.push({ name: le, kind: "character" }) : E.items.has(le) ? _.push({ name: le, kind: "item" }) : E.worldSettings.has(le) && _.push({ name: le, kind: "worldSetting" }));
       }
     }
-    const P = at(D.map((N) => `${N.kind}:${N.name}`)).map((N) => {
-      const [Z, ...X] = N.split(":");
+    const T = $e(_.map((L) => `${L.kind}:${L.name}`)).map((L) => {
+      const [Z, ...X] = L.split(":");
       return {
         name: X.join(":"),
         kind: Z === "character" || Z === "item" || Z === "worldSetting" ? Z : "character"
       };
-    }).slice(0, 20), $ = String(t.currentLocation || "").trim().slice(0, 120), K = Math.max(0, E.length - v.length), Q = [];
+    }).slice(0, 20), M = String(t.currentLocation || "").trim().slice(0, 120), K = Math.max(0, C.length - I.length), Q = [];
     return m.value > 0 && Q.push(`${m.value} chapter summaries missing; fell back to chapter text excerpts.`), K > 0 && Q.push(`${K} selected ideas not found; ignored.`), {
       hardContext: {
         worldSettings: a,
-        plotLines: o,
+        plotLines: i,
         characters: c,
-        items: i,
-        maps: l
+        items: s,
+        maps: d
       },
       dynamicContext: {
-        recentChapters: d,
-        selectedIdeas: v,
-        selectedIdeaEntities: P,
+        recentChapters: l,
+        selectedIdeas: I,
+        selectedIdeaEntities: T,
         currentChapterBeforeCursor: y,
-        ...$ ? { currentLocation: $ } : {},
-        narrativeSummaries: s
+        ...M ? { currentLocation: M } : {},
+        narrativeSummaries: o
       },
       params: {
         mode: t.mode === "new_chapter" ? "new_chapter" : "continue_chapter",
@@ -1745,17 +1884,17 @@ ${N.quote || ""}`, X = Array.from(Z.matchAll(k));
         "characters_items_maps_snapshot",
         `recent_chapter_summary_memory_preferred_${e}`,
         `recent_chapter_raw_text_${n}`,
-        s.length > 0 ? `narrative_summaries_${s.length}` : "narrative_summaries_0",
-        v.length > 0 ? `selected_ideas_${v.length}` : "selected_ideas_0",
-        P.length > 0 ? `selected_idea_entities_${P.length}` : "selected_idea_entities_0",
-        ...$ ? ["current_location"] : [],
+        o.length > 0 ? `narrative_summaries_${o.length}` : "narrative_summaries_0",
+        I.length > 0 ? `selected_ideas_${I.length}` : "selected_ideas_0",
+        T.length > 0 ? `selected_idea_entities_${T.length}` : "selected_idea_entities_0",
+        ...M ? ["current_location"] : [],
         "current_chapter_before_cursor"
       ],
       warnings: Q
     };
   }
 }
-const Fe = 10 * 1024 * 1024, yr = 2e3, ot = /* @__PURE__ */ new Set(["foreshadowing", "mystery", "promise", "event"]), it = /* @__PURE__ */ new Set(["active", "resolved"]), wr = /* @__PURE__ */ new Set(["item", "skill", "location"]), vr = /* @__PURE__ */ new Set(["world", "region", "scene"]), Ae = ["plotLines", "plotPoints", "characters", "items", "skills", "maps"], Ir = {
+const Fe = 10 * 1024 * 1024, Cr = 2e3, it = /* @__PURE__ */ new Set(["foreshadowing", "mystery", "promise", "event"]), st = /* @__PURE__ */ new Set(["active", "resolved"]), Er = /* @__PURE__ */ new Set(["item", "skill", "location"]), _r = /* @__PURE__ */ new Set(["world", "region", "scene"]), Ae = ["plotLines", "plotPoints", "characters", "items", "skills", "maps"], Ar = {
   plotLines: ["主线", "支线", "故事线", "剧情线", "plot line", "story line"],
   plotPoints: ["要点", "情节点", "剧情点", "事件", "桥段", "转折", "冲突", "plot point", "scene beat"],
   characters: ["角色", "龙套", "配角", "人物", "反派", "主角", "npc", "character"],
@@ -1769,7 +1908,7 @@ const Fe = 10 * 1024 * 1024, yr = 2e3, ot = /* @__PURE__ */ new Set(["foreshadow
   "chapter.create",
   "chapter.save",
   "chapter.generate"
-], Cr = [
+], Dr = [
   {
     moduleId: "novel_volume_chapter",
     title: "小说/卷章管理",
@@ -1819,7 +1958,7 @@ const Fe = 10 * 1024 * 1024, yr = 2e3, ot = /* @__PURE__ */ new Set(["foreshadow
     title: "备份恢复",
     requiredActions: []
   }
-], ue = {
+], de = {
   providerType: "http",
   http: {
     baseUrl: "",
@@ -1830,7 +1969,7 @@ const Fe = 10 * 1024 * 1024, yr = 2e3, ot = /* @__PURE__ */ new Set(["foreshadow
     imageOutputFormat: "png",
     imageWatermark: !1,
     timeoutMs: 6e4,
-    maxTokens: 2048,
+    maxTokens: 4096,
     temperature: 0.7
   },
   mcpCli: {
@@ -1861,14 +2000,14 @@ const Fe = 10 * 1024 * 1024, yr = 2e3, ot = /* @__PURE__ */ new Set(["foreshadow
 function Be(r) {
   return JSON.stringify(r ?? {});
 }
-function Er(r) {
+function Lr(r) {
   const t = (r || "").toLowerCase();
   return t.includes("jpeg") || t.includes("jpg") ? "jpg" : t.includes("webp") ? "webp" : t.includes("gif") ? "gif" : t.includes("bmp") ? "bmp" : "png";
 }
-function Sr(r) {
+function Nr(r) {
   return r.replace(/[^a-zA-Z0-9._-]/g, "_");
 }
-function _r(r) {
+function Pr(r) {
   if (!(r != null && r.trim()))
     return "";
   try {
@@ -1880,7 +2019,7 @@ function _r(r) {
     return r.replace(/\s+/g, " ").trim();
   }
 }
-function Ar(r) {
+function Tr(r) {
   switch (r) {
     case "realistic":
       return "Style: realistic cartography, natural terrain textures, high geographic plausibility.";
@@ -1894,7 +2033,7 @@ function Ar(r) {
       return "";
   }
 }
-function st(r, t) {
+function ot(r, t) {
   const e = [];
   return r != null && r.trim() && e.push(`[System Prompt]
 ${r.trim()}`), e.push(`[User Prompt]
@@ -1902,23 +2041,23 @@ ${t.trim()}`), e.join(`
 
 `);
 }
-function O(r, t) {
+function R(r, t) {
   const e = typeof r == "string" ? r.trim() : "";
   return e ? e.length > t ? e.slice(0, t) : e : "";
 }
-function Dr(r, t) {
+function xr(r, t) {
   const e = /* @__PURE__ */ new Set(), n = [];
   for (const a of r) {
-    const o = String(a || "").trim();
-    if (!o)
+    const i = String(a || "").trim();
+    if (!i)
       continue;
-    const c = o.toLowerCase();
-    if (!e.has(c) && (e.add(c), n.push(o), n.length >= t))
+    const c = i.toLowerCase();
+    if (!e.has(c) && (e.add(c), n.push(i), n.length >= t))
       break;
   }
   return n;
 }
-class Nr {
+class br {
   constructor(t) {
     ee(this, "userDataPath");
     ee(this, "settingsFilePath");
@@ -1928,7 +2067,7 @@ class Nr {
     ee(this, "capabilityDefinitions");
     ee(this, "capabilityRegistry");
     ee(this, "contextBuilder");
-    this.userDataPath = t(), this.settingsFilePath = L.join(this.userDataPath, "ai-settings.json"), this.mapImageStatsPath = L.join(this.userDataPath, "ai-map-image-stats.json"), this.settingsCache = this.loadSettings(), this.mapImageStatsCache = this.loadMapImageStats(), this.contextBuilder = new gr(), this.capabilityDefinitions = fr({
+    this.userDataPath = t(), this.settingsFilePath = N.join(this.userDataPath, "ai-settings.json"), this.mapImageStatsPath = N.join(this.userDataPath, "ai-map-image-stats.json"), this.settingsCache = this.loadSettings(), this.mapImageStatsCache = this.loadMapImageStats(), this.contextBuilder = new Sr(), this.capabilityDefinitions = wr({
       continueWriting: (e) => this.continueWriting(e)
     }), this.capabilityRegistry = new Map(
       this.capabilityDefinitions.map((e) => [e.actionId, e.handler])
@@ -1945,17 +2084,17 @@ class Nr {
     }));
   }
   getCapabilityCoverage() {
-    const t = new Set(this.capabilityDefinitions.map((c) => c.actionId)), e = Cr.map((c) => {
-      const i = c.requiredActions.filter((w) => !t.has(w)), l = c.requiredActions.filter((w) => t.has(w)), I = c.requiredActions.length === 0 ? 0 : Math.round(l.length / c.requiredActions.length * 100);
+    const t = new Set(this.capabilityDefinitions.map((c) => c.actionId)), e = Dr.map((c) => {
+      const s = c.requiredActions.filter((w) => !t.has(w)), d = c.requiredActions.filter((w) => t.has(w)), v = c.requiredActions.length === 0 ? 0 : Math.round(d.length / c.requiredActions.length * 100);
       return {
         moduleId: c.moduleId,
         title: c.title,
         requiredActions: [...c.requiredActions],
-        supportedActions: l,
-        missingActions: i,
-        coverage: I
+        supportedActions: d,
+        missingActions: s,
+        coverage: v
       };
-    }), n = e.reduce((c, i) => c + i.requiredActions.length, 0), a = e.reduce((c, i) => c + i.supportedActions.length, 0);
+    }), n = e.reduce((c, s) => c + s.requiredActions.length, 0), a = e.reduce((c, s) => c + s.supportedActions.length, 0);
     return {
       overallCoverage: n === 0 ? 0 : Math.round(a / n * 100),
       totalRequired: n,
@@ -2011,7 +2150,7 @@ class Nr {
     return this.getProvider().healthCheck();
   }
   async testMcp() {
-    return new nt(this.settingsCache).healthCheck();
+    return new at(this.settingsCache).healthCheck();
   }
   async testOpenClawMcp() {
     const t = await this.testOpenClawSmoke({ kind: "mcp" });
@@ -2023,7 +2162,7 @@ class Nr {
   }
   async testOpenClawSmoke(t) {
     var m, u;
-    const e = t.kind === "skill" ? "skill" : "mcp", n = e === "mcp" ? this.getOpenClawManifest().tools.map((s) => s.name) : this.getOpenClawSkillManifest().skills.map((s) => s.name);
+    const e = t.kind === "skill" ? "skill" : "mcp", n = e === "mcp" ? this.getOpenClawManifest().tools.map((o) => o.name) : this.getOpenClawSkillManifest().skills.map((o) => o.name);
     if (!n.length)
       return {
         ok: !1,
@@ -2032,62 +2171,62 @@ class Nr {
         missingActions: [...Ue],
         checks: []
       };
-    const a = Ue.filter((s) => !n.includes(s)), o = [], c = (s, d, y, v) => {
-      o.push({ actionId: s, ok: d, detail: y, ...v ? { skipped: !0 } : {} });
+    const a = Ue.filter((o) => !n.includes(o)), i = [], c = (o, l, y, I) => {
+      i.push({ actionId: o, ok: l, detail: y, ...I ? { skipped: !0 } : {} });
     };
     a.length ? c("manifest.coverage", !1, `Missing required actions: ${a.join(", ")}`) : c("manifest.coverage", !0, `All required actions are covered (${Ue.length})`);
-    const i = (s, d) => e === "mcp" ? this.invokeOpenClawTool({ name: s, arguments: d }) : this.invokeOpenClawSkill({ name: s, input: d }), l = await i("novel.list");
-    if (!l.ok)
-      return c("novel.list", !1, l.error || "invoke failed"), {
+    const s = (o, l) => e === "mcp" ? this.invokeOpenClawTool({ name: o, arguments: l }) : this.invokeOpenClawSkill({ name: o, input: l }), d = await s("novel.list");
+    if (!d.ok)
+      return c("novel.list", !1, d.error || "invoke failed"), {
         ok: !1,
         kind: e,
-        detail: `OpenClaw ${e.toUpperCase()} smoke failed at novel.list: ${l.error || "unknown error"}`,
+        detail: `OpenClaw ${e.toUpperCase()} smoke failed at novel.list: ${d.error || "unknown error"}`,
         missingActions: a,
-        checks: o
+        checks: i
       };
     c("novel.list", !0, "invoke ok");
-    const w = (m = (Array.isArray(l.data) ? l.data : []).find((s) => typeof (s == null ? void 0 : s.id) == "string")) == null ? void 0 : m.id;
+    const w = (m = (Array.isArray(d.data) ? d.data : []).find((o) => typeof (o == null ? void 0 : o.id) == "string")) == null ? void 0 : m.id;
     if (!w) {
       c("volume.list", !0, "no novels in database; skipped", !0), c("chapter.list", !0, "no novels in database; skipped", !0);
-      const s = a.length === 0;
+      const o = a.length === 0;
       return {
-        ok: s,
+        ok: o,
         kind: e,
-        detail: s ? `OpenClaw ${e.toUpperCase()} smoke passed (manifest coverage ok, invoke ok, nested checks skipped due to empty data)` : `OpenClaw ${e.toUpperCase()} smoke partial pass (invoke ok, but manifest missing required actions: ${a.join(", ")})`,
+        detail: o ? `OpenClaw ${e.toUpperCase()} smoke passed (manifest coverage ok, invoke ok, nested checks skipped due to empty data)` : `OpenClaw ${e.toUpperCase()} smoke partial pass (invoke ok, but manifest missing required actions: ${a.join(", ")})`,
         missingActions: a,
-        checks: o
+        checks: i
       };
     }
-    const E = await i("volume.list", { novelId: w });
-    if (!E.ok)
-      return c("volume.list", !1, E.error || "invoke failed"), {
+    const C = await s("volume.list", { novelId: w });
+    if (!C.ok)
+      return c("volume.list", !1, C.error || "invoke failed"), {
         ok: !1,
         kind: e,
-        detail: `OpenClaw ${e.toUpperCase()} smoke failed at volume.list: ${E.error || "unknown error"}`,
+        detail: `OpenClaw ${e.toUpperCase()} smoke failed at volume.list: ${C.error || "unknown error"}`,
         missingActions: a,
-        checks: o
+        checks: i
       };
     c("volume.list", !0, "invoke ok");
-    const p = (u = (Array.isArray(E.data) ? E.data : []).find((s) => typeof (s == null ? void 0 : s.id) == "string")) == null ? void 0 : u.id;
+    const p = (u = (Array.isArray(C.data) ? C.data : []).find((o) => typeof (o == null ? void 0 : o.id) == "string")) == null ? void 0 : u.id;
     if (!p) {
       c("chapter.list", !0, "no volumes under first novel; skipped", !0);
-      const s = a.length === 0;
+      const o = a.length === 0;
       return {
-        ok: s,
+        ok: o,
         kind: e,
-        detail: s ? `OpenClaw ${e.toUpperCase()} smoke passed (manifest coverage ok, read-chain invoke ok)` : `OpenClaw ${e.toUpperCase()} smoke partial pass (read-chain ok, but manifest missing required actions: ${a.join(", ")})`,
+        detail: o ? `OpenClaw ${e.toUpperCase()} smoke passed (manifest coverage ok, read-chain invoke ok)` : `OpenClaw ${e.toUpperCase()} smoke partial pass (read-chain ok, but manifest missing required actions: ${a.join(", ")})`,
         missingActions: a,
-        checks: o
+        checks: i
       };
     }
-    const g = await i("chapter.list", { volumeId: p });
+    const g = await s("chapter.list", { volumeId: p });
     if (!g.ok)
       return c("chapter.list", !1, g.error || "invoke failed"), {
         ok: !1,
         kind: e,
         detail: `OpenClaw ${e.toUpperCase()} smoke failed at chapter.list: ${g.error || "unknown error"}`,
         missingActions: a,
-        checks: o
+        checks: i
       };
     c("chapter.list", !0, "invoke ok");
     const f = a.length === 0;
@@ -2096,7 +2235,7 @@ class Nr {
       kind: e,
       detail: f ? `OpenClaw ${e.toUpperCase()} smoke passed (manifest coverage + read-chain invoke all ok)` : `OpenClaw ${e.toUpperCase()} smoke partial pass (invoke ok, but manifest missing required actions: ${a.join(", ")})`,
       missingActions: a,
-      checks: o
+      checks: i
     };
   }
   async testProxy() {
@@ -2118,15 +2257,15 @@ class Nr {
   }
   async generateTitle(t) {
     var m, u;
-    M("INFO", "AiService.generateTitle.start", "Generate title start", {
+    O("INFO", "AiService.generateTitle.start", "Generate title start", {
       chapterId: t.chapterId,
       novelId: t.novelId,
       providerType: this.settingsCache.providerType
     });
-    const e = this.getProvider(), n = Math.max(5, Math.min(10, t.count ?? 6)), o = _r(t.content).slice(0, 4e3), c = await h.novel.findUnique({
+    const e = this.getProvider(), n = Math.max(5, Math.min(10, t.count ?? 6)), i = Pr(t.content).slice(0, 4e3), c = await h.novel.findUnique({
       where: { id: t.novelId },
       select: { title: !0, description: !0 }
-    }), i = await h.chapter.findUnique({
+    }), s = await h.chapter.findUnique({
       where: { id: t.chapterId },
       select: {
         id: !0,
@@ -2141,7 +2280,7 @@ class Nr {
           }
         }
       }
-    }), I = (await h.chapter.findMany({
+    }), v = (await h.chapter.findMany({
       where: {
         volume: { novelId: t.novelId },
         id: { not: t.chapterId }
@@ -2161,14 +2300,14 @@ class Nr {
         { order: "desc" }
       ],
       take: 30
-    })).map((s, d) => {
-      var y, v;
+    })).map((o, l) => {
+      var y, I;
       return {
-        index: d + 1,
-        volumeTitle: ((y = s.volume) == null ? void 0 : y.title) || "",
-        volumeOrder: ((v = s.volume) == null ? void 0 : v.order) || 0,
-        chapterOrder: s.order || 0,
-        title: s.title || `Chapter-${d + 1}`
+        index: l + 1,
+        volumeTitle: ((y = o.volume) == null ? void 0 : y.title) || "",
+        volumeOrder: ((I = o.volume) == null ? void 0 : I.order) || 0,
+        chapterOrder: o.order || 0,
+        title: o.title || `Chapter-${l + 1}`
       };
     }), w = [
       "You are a Chinese novel title assistant.",
@@ -2176,7 +2315,7 @@ class Nr {
       "Return STRICT JSON only. No markdown.",
       'JSON shape: {"candidates":[{"title":"...","styleTag":"..."}]}',
       "Each styleTag must be short Chinese phrase like: 稳健推进, 悬念强化, 意象抒情."
-    ].join(" "), E = await e.generate({
+    ].join(" "), C = await e.generate({
       systemPrompt: w,
       prompt: JSON.stringify({
         task: "chapter_title_generation",
@@ -2186,13 +2325,13 @@ class Nr {
           description: (c == null ? void 0 : c.description) || ""
         },
         chapter: {
-          title: (i == null ? void 0 : i.title) || "",
-          order: (i == null ? void 0 : i.order) || 0,
-          volumeTitle: ((m = i == null ? void 0 : i.volume) == null ? void 0 : m.title) || "",
-          volumeOrder: ((u = i == null ? void 0 : i.volume) == null ? void 0 : u.order) || 0
+          title: (s == null ? void 0 : s.title) || "",
+          order: (s == null ? void 0 : s.order) || 0,
+          volumeTitle: ((m = s == null ? void 0 : s.volume) == null ? void 0 : m.title) || "",
+          volumeOrder: ((u = s == null ? void 0 : s.volume) == null ? void 0 : u.order) || 0
         },
-        recentChapterTitles: I,
-        currentChapterFullText: o,
+        recentChapterTitles: v,
+        currentChapterFullText: i,
         constraints: [
           "title length <= 16 Chinese characters preferred",
           "avoid spoilers and proper nouns overuse",
@@ -2201,83 +2340,83 @@ class Nr {
       }),
       maxTokens: this.settingsCache.http.maxTokens,
       temperature: this.settingsCache.http.temperature
-    }), C = (() => {
+    }), S = (() => {
       try {
-        return JSON.parse(E.text);
+        return JSON.parse(C.text);
       } catch {
         return null;
       }
-    })(), p = Array.isArray(C == null ? void 0 : C.candidates) ? C.candidates.map((s) => ({
-      title: String((s == null ? void 0 : s.title) || "").trim(),
-      styleTag: String((s == null ? void 0 : s.styleTag) || "").trim() || "稳健推进"
-    })).filter((s) => !!s.title).slice(0, n) : [];
+    })(), p = Array.isArray(S == null ? void 0 : S.candidates) ? S.candidates.map((o) => ({
+      title: String((o == null ? void 0 : o.title) || "").trim(),
+      styleTag: String((o == null ? void 0 : o.styleTag) || "").trim() || "稳健推进"
+    })).filter((o) => !!o.title).slice(0, n) : [];
     if (p.length > 0)
-      return M("INFO", "AiService.generateTitle.success", "Generate title success", {
+      return O("INFO", "AiService.generateTitle.success", "Generate title success", {
         chapterId: t.chapterId,
         candidateCount: p.length
       }), { candidates: p };
-    const g = E.text.split(`
-`).map((s) => s.replace(/^[-\d.\s]+/, "").trim()).filter(Boolean).slice(0, n).map((s) => ({ title: s, styleTag: "稳健推进" }));
+    const g = C.text.split(`
+`).map((o) => o.replace(/^[-\d.\s]+/, "").trim()).filter(Boolean).slice(0, n).map((o) => ({ title: o, styleTag: "稳健推进" }));
     if (g.length > 0)
-      return M("INFO", "AiService.generateTitle.success", "Generate title success", {
+      return O("INFO", "AiService.generateTitle.success", "Generate title success", {
         chapterId: t.chapterId,
         candidateCount: g.length
       }), { candidates: g };
-    const f = ((i == null ? void 0 : i.title) || o.slice(0, 12) || "新章节").trim();
-    return M("INFO", "AiService.generateTitle.success", "Generate title success", {
+    const f = ((s == null ? void 0 : s.title) || i.slice(0, 12) || "新章节").trim();
+    return O("INFO", "AiService.generateTitle.success", "Generate title success", {
       chapterId: t.chapterId,
       candidateCount: n
     }), {
-      candidates: Array.from({ length: n }, (s, d) => ({
-        title: `${f} · ${d + 1}`,
+      candidates: Array.from({ length: n }, (o, l) => ({
+        title: `${f} · ${l + 1}`,
         styleTag: "稳健推进"
       }))
     };
   }
   async previewContinuePrompt(t) {
-    M("INFO", "AiService.previewContinuePrompt.start", "Preview continue prompt start", {
+    O("INFO", "AiService.previewContinuePrompt.start", "Preview continue prompt start", {
       chapterId: t.chapterId,
       novelId: t.novelId,
       contextChapterCount: t.contextChapterCount
     });
     const e = await this.buildContinuePromptBundle(t);
-    return M("INFO", "AiService.previewContinuePrompt.success", "Preview continue prompt success", {
+    return O("INFO", "AiService.previewContinuePrompt.success", "Preview continue prompt success", {
       chapterId: t.chapterId
     }), {
       structured: e.structured,
-      rawPrompt: st(e.systemPrompt, e.effectiveUserPrompt),
+      rawPrompt: ot(e.systemPrompt, e.effectiveUserPrompt),
       editableUserPrompt: e.defaultUserPrompt,
       usedContext: e.usedContext,
       warnings: e.warnings
     };
   }
   async continueWriting(t) {
-    M("INFO", "AiService.continueWriting.start", "Continue writing start", {
+    O("INFO", "AiService.continueWriting.start", "Continue writing start", {
       chapterId: t.chapterId,
       novelId: t.novelId,
       providerType: this.settingsCache.providerType,
       targetLength: t.targetLength,
       contextChapterCount: t.contextChapterCount
     });
-    const e = this.getProvider(), n = await this.buildContinuePromptBundle(t), a = Number.isFinite(t.temperature) ? Math.max(0, Math.min(2, Number(t.temperature))) : this.settingsCache.http.temperature, o = await e.generate({
+    const e = this.getProvider(), n = await this.buildContinuePromptBundle(t), a = Number.isFinite(t.temperature) ? Math.max(0, Math.min(2, Number(t.temperature))) : this.settingsCache.http.temperature, i = await e.generate({
       systemPrompt: n.systemPrompt,
       prompt: n.effectiveUserPrompt,
       maxTokens: this.settingsCache.http.maxTokens,
       temperature: a
     }), c = await this.checkConsistency({
       novelId: t.novelId,
-      text: o.text
-    }), i = {
-      text: o.text,
+      text: i.text
+    }), s = {
+      text: i.text,
       usedContext: n.usedContext,
       warnings: n.warnings,
       consistency: c
     };
-    return M("INFO", "AiService.continueWriting.success", "Continue writing success", {
+    return O("INFO", "AiService.continueWriting.success", "Continue writing success", {
       chapterId: t.chapterId,
       warningCount: n.warnings.length,
-      generatedLength: i.text.length
-    }), i;
+      generatedLength: s.text.length
+    }), s;
   }
   async checkConsistency(t) {
     const e = [];
@@ -2285,17 +2424,17 @@ class Nr {
   }
   async previewCreativeAssetsPrompt(t) {
     var n;
-    M("INFO", "AiService.previewCreativeAssetsPrompt.start", "Preview creative assets prompt start", {
+    O("INFO", "AiService.previewCreativeAssetsPrompt.start", "Preview creative assets prompt start", {
       novelId: t.novelId,
       briefLength: ((n = t.brief) == null ? void 0 : n.length) ?? 0,
       targetSections: t.targetSections
     });
     const e = await this.buildCreativeAssetsPromptBundle(t);
-    return M("INFO", "AiService.previewCreativeAssetsPrompt.success", "Preview creative assets prompt success", {
+    return O("INFO", "AiService.previewCreativeAssetsPrompt.success", "Preview creative assets prompt success", {
       novelId: t.novelId
     }), {
       structured: e.structured,
-      rawPrompt: st(e.systemPrompt, e.effectiveUserPrompt),
+      rawPrompt: ot(e.systemPrompt, e.effectiveUserPrompt),
       editableUserPrompt: e.defaultUserPrompt,
       usedContext: e.usedContext
     };
@@ -2306,7 +2445,7 @@ class Nr {
       return [...Ae];
     const n = [];
     for (const a of Ae)
-      Ir[a].some((c) => e.includes(c.toLowerCase())) && n.push(a);
+      Ar[a].some((c) => e.includes(c.toLowerCase())) && n.push(a);
     return n.length > 0 ? n : [...Ae];
   }
   resolveCreativeTargetSections(t) {
@@ -2320,42 +2459,44 @@ class Nr {
     return e;
   }
   async generateCreativeAssets(t) {
-    var I, w, E, C, p, g, f, m, u, s, d, y, v;
-    M("INFO", "AiService.generateCreativeAssets.start", "Generate creative assets start", {
+    var v, w, C, S, p, g, f, m, u, o, l, y, I;
+    O("INFO", "AiService.generateCreativeAssets.start", "Generate creative assets start", {
       novelId: t.novelId,
-      briefLength: ((I = t.brief) == null ? void 0 : I.length) ?? 0,
+      briefLength: ((v = t.brief) == null ? void 0 : v.length) ?? 0,
       providerType: this.settingsCache.providerType,
       targetSections: t.targetSections
     });
-    const e = this.getProvider(), n = await this.buildCreativeAssetsPromptBundle(t), a = this.resolveCreativeTargetSections(t), o = await e.generate({
+    const e = this.getProvider(), n = await this.buildCreativeAssetsPromptBundle(t), a = this.resolveCreativeTargetSections(t), i = await e.generate({
       systemPrompt: n.systemPrompt,
       prompt: n.effectiveUserPrompt,
       maxTokens: this.settingsCache.http.maxTokens,
-      temperature: this.settingsCache.http.temperature
+      temperature: this.settingsCache.http.temperature,
+      // 创作工坊需要生成多个板块的结构化 JSON，内容量大，使用更宽裕的超时
+      timeoutMs: Math.max(this.settingsCache.http.timeoutMs, 18e4)
     });
     try {
-      const _ = JSON.parse(o.text);
-      if (_ && typeof _ == "object") {
-        const D = this.buildEmptyCreativeDraft(a);
-        for (const k of a) {
-          const P = _ == null ? void 0 : _[k];
-          D[k] = Array.isArray(P) ? P : [];
+      const E = JSON.parse(i.text);
+      if (E && typeof E == "object") {
+        const _ = this.buildEmptyCreativeDraft(a);
+        for (const x of a) {
+          const T = E == null ? void 0 : E[x];
+          _[x] = Array.isArray(T) ? T : [];
         }
-        return M("INFO", "AiService.generateCreativeAssets.success", "Generate creative assets success", {
+        return O("INFO", "AiService.generateCreativeAssets.success", "Generate creative assets success", {
           novelId: t.novelId,
           counts: {
-            plotLines: ((w = D.plotLines) == null ? void 0 : w.length) ?? 0,
-            plotPoints: ((E = D.plotPoints) == null ? void 0 : E.length) ?? 0,
-            characters: ((C = D.characters) == null ? void 0 : C.length) ?? 0,
-            items: ((p = D.items) == null ? void 0 : p.length) ?? 0,
-            skills: ((g = D.skills) == null ? void 0 : g.length) ?? 0,
-            maps: ((f = D.maps) == null ? void 0 : f.length) ?? 0
+            plotLines: ((w = _.plotLines) == null ? void 0 : w.length) ?? 0,
+            plotPoints: ((C = _.plotPoints) == null ? void 0 : C.length) ?? 0,
+            characters: ((S = _.characters) == null ? void 0 : S.length) ?? 0,
+            items: ((p = _.items) == null ? void 0 : p.length) ?? 0,
+            skills: ((g = _.skills) == null ? void 0 : g.length) ?? 0,
+            maps: ((f = _.maps) == null ? void 0 : f.length) ?? 0
           }
-        }), { draft: D };
+        }), { draft: _ };
       }
     } catch {
     }
-    const c = qt().slice(0, 6), i = {
+    const c = Gt().slice(0, 6), s = {
       plotLines: [{
         name: `主线-${c}`,
         description: "AI 生成的主线草稿",
@@ -2372,198 +2513,198 @@ class Nr {
       items: [{ name: `物品-${c}`, type: "item", description: "AI 生成物品草稿", profile: { rarity: "rare" } }],
       skills: [{ name: `技能-${c}`, description: "AI 生成技能草稿", profile: { rank: "A" } }],
       maps: [{ name: `世界地图-${c}`, type: "world", description: "AI 生成地图草稿", imagePrompt: "fantasy world map" }]
-    }, l = this.buildEmptyCreativeDraft(a);
-    for (const _ of a)
-      l[_] = i[_] ?? [];
-    return M("INFO", "AiService.generateCreativeAssets.success", "Generate creative assets success", {
+    }, d = this.buildEmptyCreativeDraft(a);
+    for (const E of a)
+      d[E] = s[E] ?? [];
+    return O("INFO", "AiService.generateCreativeAssets.success", "Generate creative assets success", {
       novelId: t.novelId,
       counts: {
-        plotLines: ((m = l.plotLines) == null ? void 0 : m.length) ?? 0,
-        plotPoints: ((u = l.plotPoints) == null ? void 0 : u.length) ?? 0,
-        characters: ((s = l.characters) == null ? void 0 : s.length) ?? 0,
-        items: ((d = l.items) == null ? void 0 : d.length) ?? 0,
-        skills: ((y = l.skills) == null ? void 0 : y.length) ?? 0,
-        maps: ((v = l.maps) == null ? void 0 : v.length) ?? 0
+        plotLines: ((m = d.plotLines) == null ? void 0 : m.length) ?? 0,
+        plotPoints: ((u = d.plotPoints) == null ? void 0 : u.length) ?? 0,
+        characters: ((o = d.characters) == null ? void 0 : o.length) ?? 0,
+        items: ((l = d.items) == null ? void 0 : l.length) ?? 0,
+        skills: ((y = d.skills) == null ? void 0 : y.length) ?? 0,
+        maps: ((I = d.maps) == null ? void 0 : I.length) ?? 0
       }
     }), {
-      draft: l
+      draft: d
     };
   }
   async validateCreativeAssetsDraft(t) {
     var f, m;
-    const e = [], n = [], a = (u) => e.push(u), o = (u, s, d = yr) => {
+    const e = [], n = [], a = (u) => e.push(u), i = (u, o, l = Cr) => {
       const y = typeof u == "string" ? u.trim() : "";
-      return y ? y.length <= d ? y : (n.push(`${s} exceeds ${d} chars and was truncated`), y.slice(0, d)) : "";
-    }, c = (u, s) => {
+      return y ? y.length <= l ? y : (n.push(`${o} exceeds ${l} chars and was truncated`), y.slice(0, l)) : "";
+    }, c = (u, o) => {
       if (!u || typeof u != "object" || Array.isArray(u))
         return {};
-      const d = {};
-      for (const [y, v] of Object.entries(u)) {
-        const _ = o(y, `${s}.key`, 64), D = o(v, `${s}.${y}`, 500);
-        _ && D && (d[_] = D);
+      const l = {};
+      for (const [y, I] of Object.entries(u)) {
+        const E = i(y, `${o}.key`, 64), _ = i(I, `${o}.${y}`, 500);
+        E && _ && (l[E] = _);
       }
-      return d;
-    }, i = {
-      plotLines: (t.draft.plotLines ?? []).map((u, s) => ({
-        name: o(u.name, `plotLines[${s}].name`, 120),
-        description: o(u.description, `plotLines[${s}].description`),
-        color: o(u.color, `plotLines[${s}].color`, 16) || "#6366f1",
-        points: (u.points ?? []).map((d, y) => {
-          const v = o(d.type, `plotLines[${s}].points[${y}].type`, 32) || "event", _ = o(d.status, `plotLines[${s}].points[${y}].status`, 32) || "active";
+      return l;
+    }, s = {
+      plotLines: (t.draft.plotLines ?? []).map((u, o) => ({
+        name: i(u.name, `plotLines[${o}].name`, 120),
+        description: i(u.description, `plotLines[${o}].description`),
+        color: i(u.color, `plotLines[${o}].color`, 16) || "#6366f1",
+        points: (u.points ?? []).map((l, y) => {
+          const I = i(l.type, `plotLines[${o}].points[${y}].type`, 32) || "event", E = i(l.status, `plotLines[${o}].points[${y}].status`, 32) || "active";
           return {
-            title: o(d.title, `plotLines[${s}].points[${y}].title`, 120),
-            description: o(d.description, `plotLines[${s}].points[${y}].description`),
-            type: ot.has(v) ? v : "event",
-            status: it.has(_) ? _ : "active"
+            title: i(l.title, `plotLines[${o}].points[${y}].title`, 120),
+            description: i(l.description, `plotLines[${o}].points[${y}].description`),
+            type: it.has(I) ? I : "event",
+            status: st.has(E) ? E : "active"
           };
         })
       })),
-      plotPoints: (t.draft.plotPoints ?? []).map((u, s) => {
-        const d = o(u.type, `plotPoints[${s}].type`, 32) || "event", y = o(u.status, `plotPoints[${s}].status`, 32) || "active";
+      plotPoints: (t.draft.plotPoints ?? []).map((u, o) => {
+        const l = i(u.type, `plotPoints[${o}].type`, 32) || "event", y = i(u.status, `plotPoints[${o}].status`, 32) || "active";
         return {
-          title: o(u.title, `plotPoints[${s}].title`, 120),
-          description: o(u.description, `plotPoints[${s}].description`),
-          type: ot.has(d) ? d : "event",
-          status: it.has(y) ? y : "active",
-          plotLineName: o(u.plotLineName, `plotPoints[${s}].plotLineName`, 120)
+          title: i(u.title, `plotPoints[${o}].title`, 120),
+          description: i(u.description, `plotPoints[${o}].description`),
+          type: it.has(l) ? l : "event",
+          status: st.has(y) ? y : "active",
+          plotLineName: i(u.plotLineName, `plotPoints[${o}].plotLineName`, 120)
         };
       }),
-      characters: (t.draft.characters ?? []).map((u, s) => ({
-        name: o(u.name, `characters[${s}].name`, 120),
-        role: o(u.role, `characters[${s}].role`, 64),
-        description: o(u.description, `characters[${s}].description`),
-        profile: c(u.profile, `characters[${s}].profile`)
+      characters: (t.draft.characters ?? []).map((u, o) => ({
+        name: i(u.name, `characters[${o}].name`, 120),
+        role: i(u.role, `characters[${o}].role`, 64),
+        description: i(u.description, `characters[${o}].description`),
+        profile: c(u.profile, `characters[${o}].profile`)
       })),
-      items: (t.draft.items ?? []).map((u, s) => {
-        const d = o(u.type, `items[${s}].type`, 32) || "item";
+      items: (t.draft.items ?? []).map((u, o) => {
+        const l = i(u.type, `items[${o}].type`, 32) || "item";
         return {
-          name: o(u.name, `items[${s}].name`, 120),
-          type: wr.has(d) ? d : "item",
-          description: o(u.description, `items[${s}].description`),
-          profile: c(u.profile, `items[${s}].profile`)
+          name: i(u.name, `items[${o}].name`, 120),
+          type: Er.has(l) ? l : "item",
+          description: i(u.description, `items[${o}].description`),
+          profile: c(u.profile, `items[${o}].profile`)
         };
       }),
-      skills: (t.draft.skills ?? []).map((u, s) => ({
-        name: o(u.name, `skills[${s}].name`, 120),
-        description: o(u.description, `skills[${s}].description`),
-        profile: c(u.profile, `skills[${s}].profile`)
+      skills: (t.draft.skills ?? []).map((u, o) => ({
+        name: i(u.name, `skills[${o}].name`, 120),
+        description: i(u.description, `skills[${o}].description`),
+        profile: c(u.profile, `skills[${o}].profile`)
       })),
-      maps: (t.draft.maps ?? []).map((u, s) => {
-        const d = o(u.type, `maps[${s}].type`, 32) || "world";
+      maps: (t.draft.maps ?? []).map((u, o) => {
+        const l = i(u.type, `maps[${o}].type`, 32) || "world";
         return {
-          name: o(u.name, `maps[${s}].name`, 120),
-          type: vr.has(d) ? d : "world",
-          description: o(u.description, `maps[${s}].description`),
-          imagePrompt: o(u.imagePrompt, `maps[${s}].imagePrompt`),
-          imageUrl: o(u.imageUrl, `maps[${s}].imageUrl`, 2048),
-          imageBase64: o(u.imageBase64, `maps[${s}].imageBase64`, 4194304),
-          mimeType: o(u.mimeType, `maps[${s}].mimeType`, 64)
+          name: i(u.name, `maps[${o}].name`, 120),
+          type: _r.has(l) ? l : "world",
+          description: i(u.description, `maps[${o}].description`),
+          imagePrompt: i(u.imagePrompt, `maps[${o}].imagePrompt`),
+          imageUrl: i(u.imageUrl, `maps[${o}].imageUrl`, 2048),
+          imageBase64: i(u.imageBase64, `maps[${o}].imageBase64`, 4194304),
+          mimeType: i(u.mimeType, `maps[${o}].mimeType`, 64)
         };
       })
     };
-    for (const [u, s] of (i.plotLines ?? []).entries()) {
-      s.name || a({ scope: `plotLines[${u}]`, code: "INVALID_INPUT", detail: "Plot line name is required" });
-      for (const [d, y] of (s.points ?? []).entries())
-        y.title || a({ scope: `plotLines[${u}].points[${d}]`, code: "INVALID_INPUT", detail: "Plot point title is required" });
+    for (const [u, o] of (s.plotLines ?? []).entries()) {
+      o.name || a({ scope: `plotLines[${u}]`, code: "INVALID_INPUT", detail: "Plot line name is required" });
+      for (const [l, y] of (o.points ?? []).entries())
+        y.title || a({ scope: `plotLines[${u}].points[${l}]`, code: "INVALID_INPUT", detail: "Plot point title is required" });
     }
-    for (const [u, s] of (i.plotPoints ?? []).entries())
-      s.title || a({ scope: `plotPoints[${u}]`, code: "INVALID_INPUT", detail: "Plot point title is required" });
-    for (const [u, s] of (i.characters ?? []).entries())
-      s.name || a({ scope: `characters[${u}]`, code: "INVALID_INPUT", detail: "Character name is required" });
-    for (const [u, s] of (i.items ?? []).entries())
-      s.name || a({ scope: `items[${u}]`, code: "INVALID_INPUT", detail: "Item name is required" });
-    for (const [u, s] of (i.skills ?? []).entries())
-      s.name || a({ scope: `skills[${u}]`, code: "INVALID_INPUT", detail: "Skill name is required" });
-    for (const [u, s] of (i.maps ?? []).entries())
-      if (s.name || a({ scope: `maps[${u}]`, code: "INVALID_INPUT", detail: "Map name is required" }), +!!s.imageBase64 + +!!s.imageUrl + +!!s.imagePrompt > 1 && a({
+    for (const [u, o] of (s.plotPoints ?? []).entries())
+      o.title || a({ scope: `plotPoints[${u}]`, code: "INVALID_INPUT", detail: "Plot point title is required" });
+    for (const [u, o] of (s.characters ?? []).entries())
+      o.name || a({ scope: `characters[${u}]`, code: "INVALID_INPUT", detail: "Character name is required" });
+    for (const [u, o] of (s.items ?? []).entries())
+      o.name || a({ scope: `items[${u}]`, code: "INVALID_INPUT", detail: "Item name is required" });
+    for (const [u, o] of (s.skills ?? []).entries())
+      o.name || a({ scope: `skills[${u}]`, code: "INVALID_INPUT", detail: "Skill name is required" });
+    for (const [u, o] of (s.maps ?? []).entries())
+      if (o.name || a({ scope: `maps[${u}]`, code: "INVALID_INPUT", detail: "Map name is required" }), +!!o.imageBase64 + +!!o.imageUrl + +!!o.imagePrompt > 1 && a({
         scope: `maps[${u}]`,
-        name: s.name,
+        name: o.name,
         code: "INVALID_INPUT",
         detail: "Map image input must use only one source: imageBase64, imageUrl, or imagePrompt"
-      }), s.imageUrl && !/^https?:\/\//i.test(s.imageUrl) && a({
+      }), o.imageUrl && !/^https?:\/\//i.test(o.imageUrl) && a({
         scope: `maps[${u}].imageUrl`,
-        name: s.name,
+        name: o.name,
         code: "INVALID_INPUT",
         detail: "Map imageUrl must start with http:// or https://"
-      }), s.imageBase64)
+      }), o.imageBase64)
         try {
-          const y = Buffer.from(s.imageBase64, "base64").length;
+          const y = Buffer.from(o.imageBase64, "base64").length;
           y === 0 && a({
             scope: `maps[${u}].imageBase64`,
-            name: s.name,
+            name: o.name,
             code: "INVALID_INPUT",
             detail: "Map imageBase64 is invalid"
           }), y > Fe && a({
             scope: `maps[${u}].imageBase64`,
-            name: s.name,
+            name: o.name,
             code: "INVALID_INPUT",
             detail: `Map imageBase64 exceeds ${Fe} bytes`
           });
         } catch {
           a({
             scope: `maps[${u}].imageBase64`,
-            name: s.name,
+            name: o.name,
             code: "INVALID_INPUT",
             detail: "Map imageBase64 is invalid"
           });
         }
-    const l = (u, s) => {
-      const d = /* @__PURE__ */ new Set();
+    const d = (u, o) => {
+      const l = /* @__PURE__ */ new Set();
       for (const y of u) {
-        const v = (y.name || "").trim().toLowerCase();
-        if (v) {
-          if (d.has(v)) {
+        const I = (y.name || "").trim().toLowerCase();
+        if (I) {
+          if (l.has(I)) {
             a({
-              scope: s,
+              scope: o,
               name: y.name,
               code: "CONFLICT",
               detail: `Duplicate name in current draft: ${y.name}`
             });
             continue;
           }
-          d.add(v);
+          l.add(I);
         }
       }
     };
-    l(i.plotLines ?? [], "plotLines"), l(i.characters ?? [], "characters"), l(i.items ?? [], "items"), l(i.skills ?? [], "skills"), l(i.maps ?? [], "maps");
-    const [I, w, E, C] = await Promise.all([
+    d(s.plotLines ?? [], "plotLines"), d(s.characters ?? [], "characters"), d(s.items ?? [], "items"), d(s.skills ?? [], "skills"), d(s.maps ?? [], "maps");
+    const [v, w, C, S] = await Promise.all([
       h.plotLine.findMany({ where: { novelId: t.novelId }, select: { name: !0 } }),
       h.character.findMany({ where: { novelId: t.novelId }, select: { name: !0 } }),
       h.item.findMany({ where: { novelId: t.novelId }, select: { name: !0 } }),
       h.mapCanvas.findMany({ where: { novelId: t.novelId }, select: { name: !0 } })
     ]), p = {
-      plotLines: new Set(I.map((u) => u.name.trim().toLowerCase())),
+      plotLines: new Set(v.map((u) => u.name.trim().toLowerCase())),
       characters: new Set(w.map((u) => u.name.trim().toLowerCase())),
-      items: new Set(E.map((u) => u.name.trim().toLowerCase())),
-      maps: new Set(C.map((u) => u.name.trim().toLowerCase()))
-    }, g = (u, s, d) => {
+      items: new Set(C.map((u) => u.name.trim().toLowerCase())),
+      maps: new Set(S.map((u) => u.name.trim().toLowerCase()))
+    }, g = (u, o, l) => {
       for (const y of u) {
-        const v = (y.name || "").trim().toLowerCase();
-        v && p[s].has(v) && a({
-          scope: d,
+        const I = (y.name || "").trim().toLowerCase();
+        I && p[o].has(I) && a({
+          scope: l,
           name: y.name,
           code: "CONFLICT",
           detail: `Name already exists in novel: ${y.name}`
         });
       }
     };
-    return g(i.plotLines ?? [], "plotLines", "plotLines"), g(i.characters ?? [], "characters", "characters"), g(i.items ?? [], "items", "items"), g(i.skills ?? [], "items", "skills"), g(i.maps ?? [], "maps", "maps"), (((f = i.plotPoints) == null ? void 0 : f.length) ?? 0) > 0 && (((m = i.plotLines) == null ? void 0 : m.length) ?? 0) === 0 && n.push("Draft has plotPoints but no plotLines. System will create a default plot line when persisting."), {
+    return g(s.plotLines ?? [], "plotLines", "plotLines"), g(s.characters ?? [], "characters", "characters"), g(s.items ?? [], "items", "items"), g(s.skills ?? [], "items", "skills"), g(s.maps ?? [], "maps", "maps"), (((f = s.plotPoints) == null ? void 0 : f.length) ?? 0) > 0 && (((m = s.plotLines) == null ? void 0 : m.length) ?? 0) === 0 && n.push("Draft has plotPoints but no plotLines. System will create a default plot line when persisting."), {
       ok: e.length === 0,
       errors: e,
       warnings: n,
-      normalizedDraft: i
+      normalizedDraft: s
     };
   }
   async confirmCreativeAssets(t) {
-    var l, I, w, E, C, p;
-    M("INFO", "AiService.confirmCreativeAssets.start", "Confirm creative assets start", {
+    var d, v, w, C, S, p;
+    O("INFO", "AiService.confirmCreativeAssets.start", "Confirm creative assets start", {
       novelId: t.novelId,
-      draftCounts: oe({
-        plotLines: ((l = t.draft.plotLines) == null ? void 0 : l.length) ?? 0,
-        plotPoints: ((I = t.draft.plotPoints) == null ? void 0 : I.length) ?? 0,
+      draftCounts: ie({
+        plotLines: ((d = t.draft.plotLines) == null ? void 0 : d.length) ?? 0,
+        plotPoints: ((v = t.draft.plotPoints) == null ? void 0 : v.length) ?? 0,
         characters: ((w = t.draft.characters) == null ? void 0 : w.length) ?? 0,
-        items: ((E = t.draft.items) == null ? void 0 : E.length) ?? 0,
-        skills: ((C = t.draft.skills) == null ? void 0 : C.length) ?? 0,
+        items: ((C = t.draft.items) == null ? void 0 : C.length) ?? 0,
+        skills: ((S = t.draft.skills) == null ? void 0 : S.length) ?? 0,
         maps: ((p = t.draft.maps) == null ? void 0 : p.length) ?? 0
       })
     });
@@ -2577,7 +2718,7 @@ class Nr {
       mapImages: 0
     };
     if (!e.ok)
-      return M("WARN", "AiService.confirmCreativeAssets.validationFailed", "Confirm creative assets validation failed", {
+      return O("WARN", "AiService.confirmCreativeAssets.validationFailed", "Confirm creative assets validation failed", {
         novelId: t.novelId,
         errors: e.errors,
         warnings: e.warnings
@@ -2588,158 +2729,158 @@ class Nr {
         errors: e.errors,
         transactionMode: "atomic"
       };
-    const a = e.normalizedDraft, o = this.getProvider(), c = [];
-    let i = { ...n };
+    const a = e.normalizedDraft, i = this.getProvider(), c = [];
+    let s = { ...n };
     try {
       await h.$transaction(async (f) => {
         const m = { ...n }, u = /* @__PURE__ */ new Map();
-        for (const d of a.plotLines ?? []) {
+        for (const l of a.plotLines ?? []) {
           const y = await f.plotLine.create({
             data: {
               novelId: t.novelId,
-              name: d.name,
-              description: d.description || null,
-              color: d.color || "#6366f1",
+              name: l.name,
+              description: l.description || null,
+              color: l.color || "#6366f1",
               sortOrder: Date.now() + m.plotLines
             }
           });
-          u.set(d.name.toLowerCase(), y.id), m.plotLines += 1;
-          for (const v of d.points ?? [])
+          u.set(l.name.toLowerCase(), y.id), m.plotLines += 1;
+          for (const I of l.points ?? [])
             await f.plotPoint.create({
               data: {
                 novelId: t.novelId,
                 plotLineId: y.id,
-                title: v.title,
-                description: v.description || null,
-                type: v.type || "event",
-                status: v.status || "active",
+                title: I.title,
+                description: I.description || null,
+                type: I.type || "event",
+                status: I.status || "active",
                 order: Date.now() + m.plotPoints
               }
             }), m.plotPoints += 1;
         }
-        const s = async (d) => {
-          const y = (d || "").trim().toLowerCase();
+        const o = async (l) => {
+          const y = (l || "").trim().toLowerCase();
           if (y && u.has(y))
             return u.get(y);
-          const v = u.values().next().value;
-          if (v)
-            return v;
-          const _ = "AI 主线", D = await f.plotLine.create({
+          const I = u.values().next().value;
+          if (I)
+            return I;
+          const E = "AI 主线", _ = await f.plotLine.create({
             data: {
               novelId: t.novelId,
-              name: _,
+              name: E,
               description: "Auto-created for loose plot points",
               color: "#6366f1",
               sortOrder: Date.now() + m.plotLines
             }
           });
-          return u.set(_.toLowerCase(), D.id), m.plotLines += 1, D.id;
+          return u.set(E.toLowerCase(), _.id), m.plotLines += 1, _.id;
         };
-        for (const d of a.plotPoints ?? []) {
-          const y = await s(d.plotLineName);
+        for (const l of a.plotPoints ?? []) {
+          const y = await o(l.plotLineName);
           await f.plotPoint.create({
             data: {
               novelId: t.novelId,
               plotLineId: y,
-              title: d.title,
-              description: d.description || null,
-              type: d.type || "event",
-              status: d.status || "active",
+              title: l.title,
+              description: l.description || null,
+              type: l.type || "event",
+              status: l.status || "active",
               order: Date.now() + m.plotPoints
             }
           }), m.plotPoints += 1;
         }
-        for (const d of a.characters ?? [])
+        for (const l of a.characters ?? [])
           await f.character.create({
             data: {
               novelId: t.novelId,
-              name: d.name,
-              role: d.role || null,
-              description: d.description || null,
-              profile: Be(d.profile),
+              name: l.name,
+              role: l.role || null,
+              description: l.description || null,
+              profile: Be(l.profile),
               sortOrder: Date.now() + m.characters
             }
           }), m.characters += 1;
-        for (const d of a.items ?? [])
+        for (const l of a.items ?? [])
           await f.item.create({
             data: {
               novelId: t.novelId,
-              name: d.name,
-              type: d.type || "item",
-              description: d.description || null,
-              profile: Be(d.profile),
+              name: l.name,
+              type: l.type || "item",
+              description: l.description || null,
+              profile: Be(l.profile),
               sortOrder: Date.now() + m.items
             }
           }), m.items += 1;
-        for (const d of a.skills ?? [])
+        for (const l of a.skills ?? [])
           await f.item.create({
             data: {
               novelId: t.novelId,
-              name: d.name,
+              name: l.name,
               type: "skill",
-              description: d.description || null,
-              profile: Be(d.profile),
+              description: l.description || null,
+              profile: Be(l.profile),
               sortOrder: Date.now() + m.items + m.skills
             }
           }), m.skills += 1;
-        for (const d of a.maps ?? []) {
+        for (const l of a.maps ?? []) {
           const y = await f.mapCanvas.create({
             data: {
               novelId: t.novelId,
-              name: d.name,
-              type: d.type || "world",
-              description: d.description || null,
+              name: l.name,
+              type: l.type || "world",
+              description: l.description || null,
               sortOrder: Date.now() + m.maps
             }
           });
           m.maps += 1;
-          let v = null;
-          if (d.imageBase64 || d.imageUrl)
-            v = {
-              imageBase64: d.imageBase64,
-              imageUrl: d.imageUrl,
-              mimeType: d.mimeType
+          let I = null;
+          if (l.imageBase64 || l.imageUrl)
+            I = {
+              imageBase64: l.imageBase64,
+              imageUrl: l.imageUrl,
+              mimeType: l.mimeType
             };
-          else if (d.imagePrompt) {
-            if (!o.generateImage)
-              throw new j("INVALID_INPUT", `Provider ${o.name} does not support image generation`);
-            const _ = await o.generateImage({ prompt: d.imagePrompt });
-            if (!(_ != null && _.imageBase64) && !(_ != null && _.imageUrl))
-              throw new j("PROVIDER_UNAVAILABLE", `Map image generation returned empty data for ${d.name}`);
-            v = {
-              imageBase64: _.imageBase64,
-              imageUrl: _.imageUrl,
-              mimeType: _.mimeType
+          else if (l.imagePrompt) {
+            if (!i.generateImage)
+              throw new z("INVALID_INPUT", `Provider ${i.name} does not support image generation`);
+            const E = await i.generateImage({ prompt: l.imagePrompt });
+            if (!(E != null && E.imageBase64) && !(E != null && E.imageUrl))
+              throw new z("PROVIDER_UNAVAILABLE", `Map image generation returned empty data for ${l.name}`);
+            I = {
+              imageBase64: E.imageBase64,
+              imageUrl: E.imageUrl,
+              mimeType: E.mimeType
             };
           }
-          if (v) {
-            const _ = await this.saveImageAsset(t.novelId, y.id, v);
-            c.push(_.absolutePath), await f.mapCanvas.update({
+          if (I) {
+            const E = await this.saveImageAsset(t.novelId, y.id, I);
+            c.push(E.absolutePath), await f.mapCanvas.update({
               where: { id: y.id },
-              data: { background: _.relativePath }
+              data: { background: E.relativePath }
             }), m.mapImages += 1;
           }
         }
-        i = m;
+        s = m;
       });
       const g = {
         success: !0,
-        created: i,
+        created: s,
         warnings: e.warnings,
         transactionMode: "atomic"
       };
-      return M("INFO", "AiService.confirmCreativeAssets.success", "Confirm creative assets success", {
+      return O("INFO", "AiService.confirmCreativeAssets.success", "Confirm creative assets success", {
         novelId: t.novelId,
-        created: i,
+        created: s,
         warningCount: e.warnings.length
       }), g;
     } catch (g) {
-      ie("AiService.confirmCreativeAssets.error", g, {
+      se("AiService.confirmCreativeAssets.error", g, {
         novelId: t.novelId
       });
       for (const u of c)
         try {
-          z.existsSync(u) && z.unlinkSync(u);
+          j.existsSync(u) && j.unlinkSync(u);
         } catch {
         }
       const f = te(g), m = f.code === "INVALID_INPUT" ? "INVALID_INPUT" : f.code === "CONFLICT" ? "CONFLICT" : f.code === "UNKNOWN" ? "UNKNOWN" : "PERSISTENCE_ERROR";
@@ -2760,13 +2901,13 @@ class Nr {
   }
   async previewMapPrompt(t) {
     var n;
-    M("INFO", "AiService.previewMapPrompt.start", "Preview map prompt start", {
+    O("INFO", "AiService.previewMapPrompt.start", "Preview map prompt start", {
       novelId: t.novelId,
       mapId: t.mapId,
       promptLength: ((n = t.prompt) == null ? void 0 : n.length) ?? 0
     });
     const e = await this.buildMapPromptBundle(t);
-    return M("INFO", "AiService.previewMapPrompt.success", "Preview map prompt success", {
+    return O("INFO", "AiService.previewMapPrompt.success", "Preview map prompt success", {
       novelId: t.novelId,
       mapId: t.mapId
     }), {
@@ -2777,50 +2918,50 @@ class Nr {
     };
   }
   async generateMapImage(t) {
-    var a, o, c, i;
-    M("INFO", "AiService.generateMapImage.start", "Generate map image start", {
+    var a, i, c, s;
+    O("INFO", "AiService.generateMapImage.start", "Generate map image start", {
       novelId: t.novelId,
       mapId: t.mapId,
       promptLength: ((a = t.prompt) == null ? void 0 : a.length) ?? 0,
       providerType: this.settingsCache.providerType
     });
-    const e = Date.now(), n = (l) => (this.recordMapImageCall({
-      ok: l.ok,
-      code: l.code,
-      detail: l.detail,
+    const e = Date.now(), n = (d) => (this.recordMapImageCall({
+      ok: d.ok,
+      code: d.code,
+      detail: d.detail,
       latencyMs: Date.now() - e
-    }), l);
+    }), d);
     try {
-      const l = !!((o = t.prompt) != null && o.trim()), I = !!((c = t.overrideUserPrompt) != null && c.trim());
-      if (!l && !I)
+      const d = !!((i = t.prompt) != null && i.trim()), v = !!((c = t.overrideUserPrompt) != null && c.trim());
+      if (!d && !v)
         return n({ ok: !1, code: "INVALID_INPUT", detail: "Map prompt is empty" });
       const w = this.getProvider();
       if (!w.generateImage)
         return n({ ok: !1, code: "INVALID_INPUT", detail: `Provider ${w.name} does not support image generation` });
-      const E = await this.buildMapPromptBundle(t), C = await w.generateImage({
-        prompt: E.effectiveUserPrompt,
+      const C = await this.buildMapPromptBundle(t), S = await w.generateImage({
+        prompt: C.effectiveUserPrompt,
         model: this.settingsCache.http.imageModel || void 0,
         size: t.imageSize || this.settingsCache.http.imageSize || void 0,
         outputFormat: this.settingsCache.http.imageOutputFormat || void 0,
         watermark: this.settingsCache.http.imageWatermark
       });
-      if (!C.imageBase64 && !C.imageUrl)
+      if (!S.imageBase64 && !S.imageUrl)
         return n({ ok: !1, code: "PROVIDER_UNAVAILABLE", detail: "Provider did not return any image data" });
       let p = t.mapId;
       if (p || (p = (await h.mapCanvas.create({
         data: {
           novelId: t.novelId,
-          name: ((i = t.mapName) == null ? void 0 : i.trim()) || `AI 地图 ${(/* @__PURE__ */ new Date()).toLocaleString()}`,
+          name: ((s = t.mapName) == null ? void 0 : s.trim()) || `AI 地图 ${(/* @__PURE__ */ new Date()).toLocaleString()}`,
           type: t.mapType || "world",
           description: `Generated by AI with prompt: ${t.prompt}`,
           sortOrder: Date.now()
         }
       })).id), !p)
-        throw new j("PERSISTENCE_ERROR", "Map id is missing after map creation");
+        throw new z("PERSISTENCE_ERROR", "Map id is missing after map creation");
       const g = await this.saveImageAsset(t.novelId, p, {
-        imageBase64: C.imageBase64,
-        imageUrl: C.imageUrl,
-        mimeType: C.mimeType
+        imageBase64: S.imageBase64,
+        imageUrl: S.imageUrl,
+        mimeType: S.mimeType
       });
       await h.mapCanvas.update({
         where: { id: p },
@@ -2832,28 +2973,28 @@ class Nr {
         mapId: p,
         path: g.relativePath
       });
-      return M("INFO", "AiService.generateMapImage.success", "Generate map image success", {
+      return O("INFO", "AiService.generateMapImage.success", "Generate map image success", {
         novelId: t.novelId,
         mapId: p,
         imagePath: g.relativePath
       }), f;
-    } catch (l) {
-      ie("AiService.generateMapImage.error", l, {
+    } catch (d) {
+      se("AiService.generateMapImage.error", d, {
         novelId: t.novelId,
         mapId: t.mapId
       });
-      const I = te(l);
+      const v = te(d);
       return n({
         ok: !1,
-        code: I.code,
-        detail: I.message || "Map generation failed"
+        code: v.code,
+        detail: v.message || "Map generation failed"
       });
     }
   }
   async executeAction(t) {
     const e = this.capabilityRegistry.get(t.actionId);
     if (!e)
-      throw new j("INVALID_INPUT", `Unknown actionId: ${t.actionId}`);
+      throw new z("INVALID_INPUT", `Unknown actionId: ${t.actionId}`);
     try {
       return await e(t.payload);
     } catch (n) {
@@ -2870,7 +3011,7 @@ class Nr {
       const n = te(e);
       return {
         ok: !1,
-        error: ge(n.code, n.message || "OpenClaw invoke failed"),
+        error: he(n.code, n.message || "OpenClaw invoke failed"),
         code: n.code
       };
     }
@@ -2885,72 +3026,72 @@ class Nr {
       const n = te(e);
       return {
         ok: !1,
-        error: ge(n.code, n.message || "OpenClaw skill invoke failed"),
+        error: he(n.code, n.message || "OpenClaw skill invoke failed"),
         code: n.code
       };
     }
   }
   compactContinueHardContext(t) {
-    const e = Array.isArray(t.worldSettings) ? t.worldSettings : [], n = Array.isArray(t.plotLines) ? t.plotLines : [], a = Array.isArray(t.characters) ? t.characters : [], o = Array.isArray(t.items) ? t.items : [], c = Array.isArray(t.maps) ? t.maps : [];
+    const e = Array.isArray(t.worldSettings) ? t.worldSettings : [], n = Array.isArray(t.plotLines) ? t.plotLines : [], a = Array.isArray(t.characters) ? t.characters : [], i = Array.isArray(t.items) ? t.items : [], c = Array.isArray(t.maps) ? t.maps : [];
     return {
-      worldSettings: e.slice(0, 60).map((i) => ({
-        name: O(i == null ? void 0 : i.name, 80),
-        type: O(i == null ? void 0 : i.type, 32) || "other",
-        content: O(i == null ? void 0 : i.content, 300) || O(i == null ? void 0 : i.description, 300)
-      })).filter((i) => i.content),
-      plotLines: n.slice(0, 40).map((i) => ({
-        name: O(i == null ? void 0 : i.name, 100),
-        description: O(i == null ? void 0 : i.description, 260),
-        points: Array.isArray(i == null ? void 0 : i.points) ? i.points.filter((l) => String((l == null ? void 0 : l.status) || "").trim().toLowerCase() !== "resolved").slice(0, 12).map((l) => ({
-          title: O(l == null ? void 0 : l.title, 100),
-          description: O(l == null ? void 0 : l.description, 220),
-          type: O(l == null ? void 0 : l.type, 24) || "event",
-          status: O(l == null ? void 0 : l.status, 24) || "active"
-        })).filter((l) => l.title || l.description) : []
-      })).filter((i) => {
-        var l;
-        return i.name || (((l = i.points) == null ? void 0 : l.length) ?? 0) > 0;
+      worldSettings: e.slice(0, 60).map((s) => ({
+        name: R(s == null ? void 0 : s.name, 80),
+        type: R(s == null ? void 0 : s.type, 32) || "other",
+        content: R(s == null ? void 0 : s.content, 300) || R(s == null ? void 0 : s.description, 300)
+      })).filter((s) => s.content),
+      plotLines: n.slice(0, 40).map((s) => ({
+        name: R(s == null ? void 0 : s.name, 100),
+        description: R(s == null ? void 0 : s.description, 260),
+        points: Array.isArray(s == null ? void 0 : s.points) ? s.points.filter((d) => String((d == null ? void 0 : d.status) || "").trim().toLowerCase() !== "resolved").slice(0, 12).map((d) => ({
+          title: R(d == null ? void 0 : d.title, 100),
+          description: R(d == null ? void 0 : d.description, 220),
+          type: R(d == null ? void 0 : d.type, 24) || "event",
+          status: R(d == null ? void 0 : d.status, 24) || "active"
+        })).filter((d) => d.title || d.description) : []
+      })).filter((s) => {
+        var d;
+        return s.name || (((d = s.points) == null ? void 0 : d.length) ?? 0) > 0;
       }),
-      characters: a.slice(0, 120).map((i) => ({
-        name: O(i == null ? void 0 : i.name, 80),
-        role: O(i == null ? void 0 : i.role, 32),
-        description: O(i == null ? void 0 : i.description, 220)
-      })).filter((i) => i.name && (i.role || i.description)),
-      items: o.slice(0, 120).map((i) => ({
-        name: O(i == null ? void 0 : i.name, 80),
-        type: O(i == null ? void 0 : i.type, 32) || "item",
-        description: O(i == null ? void 0 : i.description, 220)
-      })).filter((i) => i.name && i.description),
-      maps: c.slice(0, 60).map((i) => ({
-        name: O(i == null ? void 0 : i.name, 80),
-        type: O(i == null ? void 0 : i.type, 24) || "world",
-        description: O(i == null ? void 0 : i.description, 220)
-      })).filter((i) => i.name && i.description)
+      characters: a.slice(0, 120).map((s) => ({
+        name: R(s == null ? void 0 : s.name, 80),
+        role: R(s == null ? void 0 : s.role, 32),
+        description: R(s == null ? void 0 : s.description, 220)
+      })).filter((s) => s.name && (s.role || s.description)),
+      items: i.slice(0, 120).map((s) => ({
+        name: R(s == null ? void 0 : s.name, 80),
+        type: R(s == null ? void 0 : s.type, 32) || "item",
+        description: R(s == null ? void 0 : s.description, 220)
+      })).filter((s) => s.name && s.description),
+      maps: c.slice(0, 60).map((s) => ({
+        name: R(s == null ? void 0 : s.name, 80),
+        type: R(s == null ? void 0 : s.type, 24) || "world",
+        description: R(s == null ? void 0 : s.description, 220)
+      })).filter((s) => s.name && s.description)
     };
   }
   compactContinueDynamicContext(t) {
-    const e = Array.isArray(t.recentChapters) ? t.recentChapters : [], n = Array.isArray(t.selectedIdeas) ? t.selectedIdeas : [], a = Array.isArray(t.selectedIdeaEntities) ? t.selectedIdeaEntities : [], o = Array.isArray(t.narrativeSummaries) ? t.narrativeSummaries : [], c = O(t.currentLocation, 120);
+    const e = Array.isArray(t.recentChapters) ? t.recentChapters : [], n = Array.isArray(t.selectedIdeas) ? t.selectedIdeas : [], a = Array.isArray(t.selectedIdeaEntities) ? t.selectedIdeaEntities : [], i = Array.isArray(t.narrativeSummaries) ? t.narrativeSummaries : [], c = R(t.currentLocation, 120);
     return {
-      recentChapters: e.slice(0, 8).map((i) => ({
-        title: O(i == null ? void 0 : i.title, 120),
-        excerpt: O(i == null ? void 0 : i.excerpt, 1200)
-      })).filter((i) => i.title || i.excerpt),
-      selectedIdeas: n.slice(0, 20).map((i) => ({
-        content: O(i == null ? void 0 : i.content, 800),
-        quote: O(i == null ? void 0 : i.quote, 300),
-        tags: Array.isArray(i == null ? void 0 : i.tags) ? i.tags.slice(0, 12).map((l) => O(l, 32)).filter(Boolean) : []
-      })).filter((i) => i.content || i.quote),
-      selectedIdeaEntities: a.slice(0, 20).map((i) => ({
-        name: O(i == null ? void 0 : i.name, 80),
-        kind: O(i == null ? void 0 : i.kind, 24)
-      })).filter((i) => i.name && i.kind),
-      currentChapterBeforeCursor: O(t.currentChapterBeforeCursor, 2600),
+      recentChapters: e.slice(0, 8).map((s) => ({
+        title: R(s == null ? void 0 : s.title, 120),
+        excerpt: R(s == null ? void 0 : s.excerpt, 1200)
+      })).filter((s) => s.title || s.excerpt),
+      selectedIdeas: n.slice(0, 20).map((s) => ({
+        content: R(s == null ? void 0 : s.content, 800),
+        quote: R(s == null ? void 0 : s.quote, 300),
+        tags: Array.isArray(s == null ? void 0 : s.tags) ? s.tags.slice(0, 12).map((d) => R(d, 32)).filter(Boolean) : []
+      })).filter((s) => s.content || s.quote),
+      selectedIdeaEntities: a.slice(0, 20).map((s) => ({
+        name: R(s == null ? void 0 : s.name, 80),
+        kind: R(s == null ? void 0 : s.kind, 24)
+      })).filter((s) => s.name && s.kind),
+      currentChapterBeforeCursor: R(t.currentChapterBeforeCursor, 2600),
       ...c ? { currentLocation: c } : {},
-      narrativeSummaries: o.slice(0, 4).map((i) => ({
-        level: (i == null ? void 0 : i.level) === "volume" ? "volume" : "novel",
-        title: O(i == null ? void 0 : i.title, 100),
-        summaryText: O(i == null ? void 0 : i.summaryText, 1200),
-        keyFacts: Array.isArray(i == null ? void 0 : i.keyFacts) ? Dr(i.keyFacts.map((l) => O(l, 160)).filter(Boolean), 5) : []
+      narrativeSummaries: i.slice(0, 4).map((s) => ({
+        level: (s == null ? void 0 : s.level) === "volume" ? "volume" : "novel",
+        title: R(s == null ? void 0 : s.title, 100),
+        summaryText: R(s == null ? void 0 : s.summaryText, 1200),
+        keyFacts: Array.isArray(s == null ? void 0 : s.keyFacts) ? xr(s.keyFacts.map((d) => R(d, 160)).filter(Boolean), 5) : []
       }))
     };
   }
@@ -2960,34 +3101,34 @@ class Nr {
       ...t,
       mode: n,
       recentRawChapterCount: t.recentRawChapterCount ?? this.settingsCache.summary.recentChapterRawCount
-    }), o = this.compactContinueHardContext(a.hardContext), c = this.compactContinueDynamicContext(a.dynamicContext), i = O(t.userIntent, 800), l = O(t.currentLocation, 120), I = {
+    }), i = this.compactContinueHardContext(a.hardContext), c = this.compactContinueDynamicContext(a.dynamicContext), s = R(t.userIntent, 800), d = R(t.currentLocation, 120), v = {
       ...a.params,
       targetLength: e ? `约${Math.max(100, Math.min(4e3, Number(a.params.targetLength || 500)))}汉字` : `about ${Math.max(100, Math.min(4e3, Number(a.params.targetLength || 500)))} Chinese characters`
-    }, w = e ? "你是中文小说续写助手。严格遵守世界观和大纲，不得破坏既有设定与人物行为逻辑。" : "Continue writing with strict consistency to world settings and plot outline. Do not break established lore.", C = [
+    }, w = e ? "你是中文小说续写助手。严格遵守世界观和大纲，不得破坏既有设定与人物行为逻辑。" : "Continue writing with strict consistency to world settings and plot outline. Do not break established lore.", S = [
       `WriteMode=${n}`,
       `HardContext=
-${JSON.stringify(o, null, 2).slice(0, 18e3)}`,
+${JSON.stringify(i, null, 2).slice(0, 18e3)}`,
       `DynamicContext=
 ${JSON.stringify(c, null, 2).slice(0, 12e3)}`,
       `WriteParams=
-${JSON.stringify(I, null, 2)}`,
-      ...i ? [`UserIntent=${i}`] : [],
-      ...l ? [`CurrentLocation=${l}`] : [],
+${JSON.stringify(v, null, 2)}`,
+      ...s ? [`UserIntent=${s}`] : [],
+      ...d ? [`CurrentLocation=${d}`] : [],
       n === "new_chapter" ? e ? "Constraint=基于大纲与世界观写出新章节开场，不得复述已有段落。" : "Constraint=Start a fresh chapter opening based on outline and world context. Do not echo prior chapter paragraphs." : e ? "Constraint=仅输出新增续写内容，不得重复当前章节或上下文已出现段落。" : "Constraint=Output must be NEW continuation content only. Do not restate prior paragraphs from current chapter or context.",
       e ? "Constraint=@实体名 表示对上下文中同名角色/物品/地点/设定的引用，续写时应保持实体设定一致。" : "Constraint=@EntityName means referencing the same named entity from context; keep entity traits consistent.",
-      ...i ? [e ? "Constraint=尽量满足用户意图，但不得违反世界观与主线大纲。" : "Constraint=Prioritize the user intent when possible, but never violate established world settings and plot outline."] : [],
+      ...s ? [e ? "Constraint=尽量满足用户意图，但不得违反世界观与主线大纲。" : "Constraint=Prioritize the user intent when possible, but never violate established world settings and plot outline."] : [],
       e ? "Constraint=请严格遵守 HardContext 中的世界观、角色性格和物品设定；情节推进需与已有情节点保持一致。" : "Constraint=Strictly follow HardContext lore, character traits, and item settings; keep progression aligned with existing plot points.",
       e ? "Constraint=你的任务是续写光标后的新内容，不要重复 currentChapterBeforeCursor 里的任何句子。" : "Constraint=Write only the continuation after cursor; do not repeat any sentence from currentChapterBeforeCursor."
     ].join(`
 
-`), p = (f = t.overrideUserPrompt) != null && f.trim() ? t.overrideUserPrompt.trim() : C, g = {
+`), p = (f = t.overrideUserPrompt) != null && f.trim() ? t.overrideUserPrompt.trim() : S, g = {
       ...a.params,
-      ...i ? { userIntent: i } : {},
-      ...l ? { currentLocation: l } : {}
+      ...s ? { userIntent: s } : {},
+      ...d ? { currentLocation: d } : {}
     };
     return {
       systemPrompt: w,
-      defaultUserPrompt: C,
+      defaultUserPrompt: S,
       effectiveUserPrompt: p,
       structured: {
         goal: n === "new_chapter" ? e ? "生成新章节开场内容。" : "Generate opening content for a new chapter." : e ? "仅生成续写新增内容。" : "Generate continuation content only.",
@@ -2995,7 +3136,7 @@ ${JSON.stringify(I, null, 2)}`,
         params: g,
         constraints: [
           ...e ? ["严格遵守世界观与大纲一致性。"] : ["Keep strict consistency with world settings and outline."],
-          ...i ? [e ? "在不冲突时优先满足用户意图。" : "Respect user intent when it does not conflict with hard context."] : [],
+          ...s ? [e ? "在不冲突时优先满足用户意图。" : "Respect user intent when it does not conflict with hard context."] : [],
           ...e ? ["不得重复已有段落。", "只输出生成的续写正文。"] : ["Do not repeat existing paragraphs.", "Output only generated chapter text."]
         ]
       },
@@ -3005,104 +3146,98 @@ ${JSON.stringify(I, null, 2)}`,
   }
   async buildCreativeAssetsPromptBundle(t) {
     var f;
-    const e = this.resolveCreativeTargetSections(t), [n, a, o] = await Promise.all([
-      h.novel.findUnique({
-        where: { id: t.novelId },
-        select: { id: !0, title: !0, description: !0 }
-      }),
-      h.worldSetting.findMany({
-        where: { novelId: t.novelId },
-        orderBy: { updatedAt: "desc" },
-        take: 8,
-        select: { name: !0, content: !0 }
-      }),
-      Promise.all([
-        h.plotLine.count({ where: { novelId: t.novelId } }),
-        h.character.count({ where: { novelId: t.novelId } }),
-        h.item.count({ where: { novelId: t.novelId } }),
-        h.mapCanvas.count({ where: { novelId: t.novelId } })
-      ])
-    ]), [c, i, l, I] = o, w = [
-      `Novel: ${(n == null ? void 0 : n.title) || t.novelId}`,
-      `World settings referenced: ${a.length}`,
-      `Existing entities: plotLines=${c}, characters=${i}, items=${l}, maps=${I}`
-    ], E = "Generate structured creative assets in strict JSON format. Output only requested sections.", C = {
+    const e = this.resolveCreativeTargetSections(t), n = (t.locale || "zh").startsWith("zh"), a = await h.novel.findUnique({
+      where: { id: t.novelId },
+      select: { id: !0, title: !0, description: !0 }
+    }), i = await this.contextBuilder.buildForCreativeAssets(t), c = n ? "你是一位小说创作助手，擅长根据用户的创意需求和已有小说内容生成结构化的创作素材。请严格以 JSON 格式输出，只输出 JSON，不要添加任何其他文字。所有生成的名称、描述等文本内容必须使用中文。生成的内容应与小说已有的角色、情节、世界观保持一致和关联。" : "You are a novel creation assistant. Generate structured creative assets in strict JSON format based on existing novel content. Output only JSON, no extra text. Generated content should be consistent with existing characters, plot, and world settings.", s = {
       plotLines: [{ name: "string", description: "string?" }],
       plotPoints: [{ title: "string", description: "string?", plotLineName: "string?" }],
       characters: [{ name: "string", role: "string?", description: "string?" }],
       items: [{ name: "string", type: "item|skill|location", description: "string?" }],
       skills: [{ name: "string", description: "string?" }],
       maps: [{ name: "string", type: "world|region|scene", description: "string?", imagePrompt: "string?" }]
-    }, p = JSON.stringify({
+    }, d = n ? [
+      "仅返回严格的 JSON，不要包含 markdown 代码块标记或其他文字",
+      "必须为所有请求的 section 生成内容，不得遗漏任何一个板块",
+      `请求的 section 列表: ${e.join(", ")}`,
+      "未请求的 section 必须设为空数组",
+      "生成内容必须与已有小说内容（角色、情节、世界观）保持一致和关联",
+      "避免与已存在的实体重名",
+      "所有字段内容简洁、可直接使用",
+      "所有名称和描述必须使用中文"
+    ] : [
+      "return strict JSON only, no markdown code fences or extra text",
+      "generate content for ALL requested sections, do not leave any empty",
+      `requested sections: ${e.join(", ")}`,
+      "all unrequested sections must be empty arrays",
+      "generated content must be consistent and related to existing novel content",
+      "avoid duplicate names against existing entities",
+      "fields should be concise and directly usable"
+    ], v = {
       task: "creative_assets_generation",
+      language: n ? "Chinese" : "English",
       brief: t.brief,
       novel: {
-        title: (n == null ? void 0 : n.title) || "",
-        description: (n == null ? void 0 : n.description) || ""
+        title: (a == null ? void 0 : a.title) || "",
+        description: (a == null ? void 0 : a.description) || ""
       },
-      worldSettings: a.map((m) => ({
-        name: String(m.name || ""),
-        description: String(m.content || "").slice(0, 180)
-      })),
       targetSections: e,
       outputShape: e,
-      outputSchema: C,
-      constraints: [
-        "return strict JSON only",
-        "output only requested sections; all unrequested sections must be empty arrays",
-        "avoid duplicate names against existing entities",
-        "fields should be concise and directly usable"
-      ]
-    }), g = (f = t.overrideUserPrompt) != null && f.trim() ? t.overrideUserPrompt.trim() : p;
+      outputSchema: s,
+      constraints: d
+    };
+    i.existingEntities.characters.length > 0 && (v.existingCharacters = i.existingEntities.characters), i.existingEntities.items.length > 0 && (v.existingItems = i.existingEntities.items), i.existingEntities.plotLines.length > 0 && (v.existingPlotLines = i.existingEntities.plotLines), i.existingEntities.worldSettings.length > 0 && (v.worldSettings = i.existingEntities.worldSettings), i.recentSummaries.length > 0 && (v.recentChapterSummaries = i.recentSummaries), i.narrativeSummaries.length > 0 && (v.narrativeSummary = i.narrativeSummaries[0]);
+    const w = JSON.stringify(v), C = (f = t.overrideUserPrompt) != null && f.trim() ? t.overrideUserPrompt.trim() : w, S = [
+      `Novel: ${(a == null ? void 0 : a.title) || t.novelId}`,
+      ...i.usedContext
+    ], p = n ? "根据用户创意简述和已有小说内容，生成可编辑的草稿素材。" : "Generate editable draft assets based on user brief and existing novel content.", g = n ? ["仅输出严格 JSON", "返回所有请求的板块", "与已有内容关联", "内容简洁可用", "避免重名", "使用中文"] : ["Output strict JSON.", "Return ALL selected sections.", "Stay consistent with existing content.", "Prefer concise fields.", "Avoid name conflicts."];
     return {
-      systemPrompt: E,
-      defaultUserPrompt: p,
-      effectiveUserPrompt: g,
+      systemPrompt: c,
+      defaultUserPrompt: w,
+      effectiveUserPrompt: C,
       structured: {
-        goal: "Generate editable draft assets for outline, world and map creation.",
-        contextRefs: w,
+        goal: p,
+        contextRefs: S,
         params: {
           briefLength: t.brief.trim().length,
-          sections: e
+          sections: e,
+          locale: t.locale || "zh",
+          estimatedContextTokens: i.estimatedTokens
         },
-        constraints: [
-          "Output strict JSON.",
-          "Return only selected sections.",
-          "Prefer concise, production-ready fields.",
-          "Avoid obvious name conflicts."
-        ]
+        constraints: g
       },
-      usedContext: w
+      usedContext: S,
+      estimatedTokens: i.estimatedTokens
     };
   }
   async buildMapPromptBundle(t) {
-    var l;
+    var d;
     const n = (await h.worldSetting.findMany({
       where: { novelId: t.novelId },
       orderBy: { updatedAt: "desc" },
       take: 8,
       select: { id: !0, name: !0, content: !0 }
-    })).map((I) => ({
-      id: I.id,
-      title: String(I.name || "Untitled"),
-      excerpt: String(I.content || "").slice(0, 180)
-    })), a = Ar(t.styleTemplate), o = n.length > 0 ? n.map((I, w) => `${w + 1}. ${I.title}: ${I.excerpt}`).join(`
+    })).map((v) => ({
+      id: v.id,
+      title: String(v.name || "Untitled"),
+      excerpt: String(v.content || "").slice(0, 180)
+    })), a = Tr(t.styleTemplate), i = n.length > 0 ? n.map((v, w) => `${w + 1}. ${v.title}: ${v.excerpt}`).join(`
 `) : "No explicit world lore provided.", c = [
       a || "Style: follow user requested style.",
       `ImageSize=${t.imageSize || this.settingsCache.http.imageSize || "2K"}`,
       "Task: Generate a clean map background image.",
       `UserRequest=${t.prompt}`,
       "WorldLore:",
-      o,
+      i,
       "Constraints:",
       "- avoid text labels or UI marks",
       "- keep high readability for map canvas editing",
       "- preserve coherence with world lore"
     ].join(`
-`), i = (l = t.overrideUserPrompt) != null && l.trim() ? t.overrideUserPrompt.trim() : c;
+`), s = (d = t.overrideUserPrompt) != null && d.trim() ? t.overrideUserPrompt.trim() : c;
     return {
       defaultUserPrompt: c,
-      effectiveUserPrompt: i,
+      effectiveUserPrompt: s,
       structured: {
         goal: "Generate map background image aligned with world lore.",
         contextRefs: [
@@ -3124,57 +3259,57 @@ ${JSON.stringify(I, null, 2)}`,
     };
   }
   getProvider() {
-    return this.settingsCache.providerType === "mcp-cli" ? new nt(this.settingsCache) : new _t(this.settingsCache);
+    return this.settingsCache.providerType === "mcp-cli" ? new at(this.settingsCache) : new At(this.settingsCache);
   }
   async saveImageAsset(t, e, n) {
-    let a = n.mimeType || "image/png", o;
+    let a = n.mimeType || "image/png", i;
     if (n.imageBase64)
-      o = Buffer.from(n.imageBase64, "base64");
+      i = Buffer.from(n.imageBase64, "base64");
     else if (n.imageUrl) {
       const w = await fetch(n.imageUrl);
       if (!w.ok)
         throw new Error(`Image download failed: ${w.status}`);
-      const E = w.headers.get("content-type") || "";
-      E && (a = E);
-      const C = await w.arrayBuffer();
-      o = Buffer.from(C);
+      const C = w.headers.get("content-type") || "";
+      C && (a = C);
+      const S = await w.arrayBuffer();
+      i = Buffer.from(S);
     } else
       throw new Error("No image data provided");
-    if (o.length === 0)
+    if (i.length === 0)
       throw new Error("Image data is empty");
-    if (o.length > Fe)
+    if (i.length > Fe)
       throw new Error("Image exceeds maximum size limit");
     if (!a.startsWith("image/"))
       throw new Error(`Invalid mime type: ${a}`);
-    const c = Er(a), i = L.join(this.userDataPath, "maps", t);
-    z.existsSync(i) || z.mkdirSync(i, { recursive: !0 });
-    const l = Sr(`ai-${e}-${Date.now()}.${c}`), I = L.join(i, l);
-    return z.writeFileSync(I, o), {
-      relativePath: `maps/${t}/${l}`,
-      absolutePath: I
+    const c = Lr(a), s = N.join(this.userDataPath, "maps", t);
+    j.existsSync(s) || j.mkdirSync(s, { recursive: !0 });
+    const d = Nr(`ai-${e}-${Date.now()}.${c}`), v = N.join(s, d);
+    return j.writeFileSync(v, i), {
+      relativePath: `maps/${t}/${d}`,
+      absolutePath: v
     };
   }
   loadSettings() {
     try {
-      if (!z.existsSync(this.settingsFilePath))
-        return ue;
-      const t = z.readFileSync(this.settingsFilePath, "utf8"), e = JSON.parse(t);
+      if (!j.existsSync(this.settingsFilePath))
+        return de;
+      const t = j.readFileSync(this.settingsFilePath, "utf8"), e = JSON.parse(t);
       return {
-        ...ue,
+        ...de,
         ...e,
-        http: { ...ue.http, ...e.http ?? {} },
-        mcpCli: { ...ue.mcpCli, ...e.mcpCli ?? {} },
-        proxy: { ...ue.proxy, ...e.proxy ?? {} },
-        summary: { ...ue.summary, ...e.summary ?? {} }
+        http: { ...de.http, ...e.http ?? {} },
+        mcpCli: { ...de.mcpCli, ...e.mcpCli ?? {} },
+        proxy: { ...de.proxy, ...e.proxy ?? {} },
+        summary: { ...de.summary, ...e.summary ?? {} }
       };
     } catch (t) {
-      return console.error("[AI] Failed to load settings, fallback to defaults:", t), ue;
+      return console.error("[AI] Failed to load settings, fallback to defaults:", t), de;
     }
   }
   persistSettings() {
     try {
-      const t = L.dirname(this.settingsFilePath);
-      z.existsSync(t) || z.mkdirSync(t, { recursive: !0 }), z.writeFileSync(this.settingsFilePath, JSON.stringify(this.settingsCache, null, 2), "utf8");
+      const t = N.dirname(this.settingsFilePath);
+      j.existsSync(t) || j.mkdirSync(t, { recursive: !0 }), j.writeFileSync(this.settingsFilePath, JSON.stringify(this.settingsCache, null, 2), "utf8");
     } catch (t) {
       console.error("[AI] Failed to persist settings:", t);
     }
@@ -3188,9 +3323,9 @@ ${JSON.stringify(I, null, 2)}`,
       updatedAt: (/* @__PURE__ */ new Date(0)).toISOString()
     };
     try {
-      if (!z.existsSync(this.mapImageStatsPath))
+      if (!j.existsSync(this.mapImageStatsPath))
         return t;
-      const e = z.readFileSync(this.mapImageStatsPath, "utf8"), n = JSON.parse(e);
+      const e = j.readFileSync(this.mapImageStatsPath, "utf8"), n = JSON.parse(e);
       return {
         totalCalls: n.totalCalls ?? 0,
         successCalls: n.successCalls ?? 0,
@@ -3206,8 +3341,8 @@ ${JSON.stringify(I, null, 2)}`,
   }
   persistMapImageStats() {
     try {
-      const t = L.dirname(this.mapImageStatsPath);
-      z.existsSync(t) || z.mkdirSync(t, { recursive: !0 }), z.writeFileSync(this.mapImageStatsPath, JSON.stringify(this.mapImageStatsCache, null, 2), "utf8");
+      const t = N.dirname(this.mapImageStatsPath);
+      j.existsSync(t) || j.mkdirSync(t, { recursive: !0 }), j.writeFileSync(this.mapImageStatsPath, JSON.stringify(this.mapImageStatsCache, null, 2), "utf8");
     } catch (t) {
       console.warn("[AI] Failed to persist map image stats:", t);
     }
@@ -3227,7 +3362,7 @@ ${JSON.stringify(I, null, 2)}`,
   }
 }
 const ct = "http://localhost:8080/api/sync";
-class Lr {
+class kr {
   // Get the global sync cursor
   async getCursor() {
     const t = await h.syncState.findUnique({ where: { id: "global" } });
@@ -3252,31 +3387,31 @@ class Lr {
       });
       if (!a.ok)
         throw new Error(`Pull failed: ${a.statusText}`);
-      const o = await a.json(), { newSyncCursor: c, data: i } = o;
-      return await h.$transaction(async (l) => {
-        var I, w, E;
-        if ((I = i.novels) != null && I.length)
-          for (const C of i.novels)
-            await l.novel.upsert({
-              where: { id: C.id },
-              create: { ...C, updatedAt: new Date(C.updatedAt), createdAt: new Date(C.createdAt) },
-              update: { ...C, updatedAt: new Date(C.updatedAt), createdAt: new Date(C.createdAt) }
+      const i = await a.json(), { newSyncCursor: c, data: s } = i;
+      return await h.$transaction(async (d) => {
+        var v, w, C;
+        if ((v = s.novels) != null && v.length)
+          for (const S of s.novels)
+            await d.novel.upsert({
+              where: { id: S.id },
+              create: { ...S, updatedAt: new Date(S.updatedAt), createdAt: new Date(S.createdAt) },
+              update: { ...S, updatedAt: new Date(S.updatedAt), createdAt: new Date(S.createdAt) }
             });
-        if ((w = i.volumes) != null && w.length)
-          for (const C of i.volumes)
-            await l.volume.upsert({
-              where: { id: C.id },
-              create: { ...C, updatedAt: new Date(C.updatedAt), createdAt: new Date(C.createdAt) },
-              update: { ...C, updatedAt: new Date(C.updatedAt), createdAt: new Date(C.createdAt) }
+        if ((w = s.volumes) != null && w.length)
+          for (const S of s.volumes)
+            await d.volume.upsert({
+              where: { id: S.id },
+              create: { ...S, updatedAt: new Date(S.updatedAt), createdAt: new Date(S.createdAt) },
+              update: { ...S, updatedAt: new Date(S.updatedAt), createdAt: new Date(S.createdAt) }
             });
-        if ((E = i.chapters) != null && E.length)
-          for (const C of i.chapters)
-            await l.chapter.upsert({
-              where: { id: C.id },
-              create: { ...C, updatedAt: new Date(C.updatedAt), createdAt: new Date(C.createdAt) },
-              update: { ...C, updatedAt: new Date(C.updatedAt), createdAt: new Date(C.createdAt) }
+        if ((C = s.chapters) != null && C.length)
+          for (const S of s.chapters)
+            await d.chapter.upsert({
+              where: { id: S.id },
+              create: { ...S, updatedAt: new Date(S.updatedAt), createdAt: new Date(S.createdAt) },
+              update: { ...S, updatedAt: new Date(S.updatedAt), createdAt: new Date(S.createdAt) }
             });
-      }), await this.setCursor(c), console.log("[Sync] Pull complete. New cursor:", c), { success: !0, count: (((e = i.novels) == null ? void 0 : e.length) || 0) + (((n = i.chapters) == null ? void 0 : n.length) || 0) };
+      }), await this.setCursor(c), console.log("[Sync] Pull complete. New cursor:", c), { success: !0, count: (((e = s.novels) == null ? void 0 : e.length) || 0) + (((n = s.chapters) == null ? void 0 : n.length) || 0) };
     } catch (a) {
       throw console.error("[Sync] Pull error:", a), a;
     }
@@ -3293,7 +3428,7 @@ class Lr {
     const n = JSON.stringify({
       lastSyncCursor: t,
       changes: e
-    }, (o, c) => typeof c == "bigint" ? c.toString() : c), a = await fetch(`${ct}/push`, {
+    }, (i, c) => typeof c == "bigint" ? c.toString() : c), a = await fetch(`${ct}/push`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: n
@@ -3303,10 +3438,10 @@ class Lr {
     return console.log("[Sync] Push success"), await a.json();
   }
 }
-function Pr(r) {
+function Mr(r) {
   return r && r.__esModule && Object.prototype.hasOwnProperty.call(r, "default") ? r.default : r;
 }
-var ye = { exports: {} }, Nt = {
+var ge = { exports: {} }, Nt = {
   /* The local file header */
   LOCHDR: 30,
   // LOC header size
@@ -3518,7 +3653,7 @@ var ye = { exports: {} }, Nt = {
   EF_ZIP64_SCOMP: 8,
   EF_ZIP64_RHO: 16,
   EF_ZIP64_DSN: 24
-}, Ne = {};
+}, Le = {};
 (function(r) {
   const t = {
     /* Header error messages */
@@ -3565,28 +3700,28 @@ var ye = { exports: {} }, Nt = {
   };
   function e(n) {
     return function(...a) {
-      return a.length && (n = n.replace(/\{(\d)\}/g, (o, c) => a[c] || "")), new Error("ADM-ZIP: " + n);
+      return a.length && (n = n.replace(/\{(\d)\}/g, (i, c) => a[c] || "")), new Error("ADM-ZIP: " + n);
     };
   }
   for (const n of Object.keys(t))
     r[n] = e(t[n]);
-})(Ne);
-const Tr = x, J = ne, lt = Nt, Mr = Ne, br = typeof process == "object" && process.platform === "win32", dt = (r) => typeof r == "object" && r !== null, Lt = new Uint32Array(256).map((r, t) => {
+})(Le);
+const Or = P, J = ne, lt = Nt, Rr = Le, $r = typeof process == "object" && process.platform === "win32", dt = (r) => typeof r == "object" && r !== null, Pt = new Uint32Array(256).map((r, t) => {
   for (let e = 0; e < 8; e++)
     t & 1 ? t = 3988292384 ^ t >>> 1 : t >>>= 1;
   return t >>> 0;
 });
 function G(r) {
-  this.sep = J.sep, this.fs = Tr, dt(r) && dt(r.fs) && typeof r.fs.statSync == "function" && (this.fs = r.fs);
+  this.sep = J.sep, this.fs = Or, dt(r) && dt(r.fs) && typeof r.fs.statSync == "function" && (this.fs = r.fs);
 }
-var xr = G;
+var Fr = G;
 G.prototype.makeDir = function(r) {
   const t = this;
   function e(n) {
     let a = n.split(t.sep)[0];
-    n.split(t.sep).forEach(function(o) {
-      if (!(!o || o.substr(-1, 1) === ":")) {
-        a += t.sep + o;
+    n.split(t.sep).forEach(function(i) {
+      if (!(!i || i.substr(-1, 1) === ":")) {
+        a += t.sep + i;
         var c;
         try {
           c = t.fs.statSync(a);
@@ -3594,7 +3729,7 @@ G.prototype.makeDir = function(r) {
           t.fs.mkdirSync(a);
         }
         if (c && c.isFile())
-          throw Mr.FILE_IN_THE_WAY(`"${a}"`);
+          throw Rr.FILE_IN_THE_WAY(`"${a}"`);
       }
     });
   }
@@ -3605,55 +3740,55 @@ G.prototype.writeFileTo = function(r, t, e, n) {
   if (a.fs.existsSync(r)) {
     if (!e)
       return !1;
-    var o = a.fs.statSync(r);
-    if (o.isDirectory())
+    var i = a.fs.statSync(r);
+    if (i.isDirectory())
       return !1;
   }
   var c = J.dirname(r);
   a.fs.existsSync(c) || a.makeDir(c);
-  var i;
+  var s;
   try {
-    i = a.fs.openSync(r, "w", 438);
+    s = a.fs.openSync(r, "w", 438);
   } catch {
-    a.fs.chmodSync(r, 438), i = a.fs.openSync(r, "w", 438);
+    a.fs.chmodSync(r, 438), s = a.fs.openSync(r, "w", 438);
   }
-  if (i)
+  if (s)
     try {
-      a.fs.writeSync(i, t, 0, t.length, 0);
+      a.fs.writeSync(s, t, 0, t.length, 0);
     } finally {
-      a.fs.closeSync(i);
+      a.fs.closeSync(s);
     }
   return a.fs.chmodSync(r, n || 438), !0;
 };
 G.prototype.writeFileToAsync = function(r, t, e, n, a) {
   typeof n == "function" && (a = n, n = void 0);
-  const o = this;
-  o.fs.exists(r, function(c) {
+  const i = this;
+  i.fs.exists(r, function(c) {
     if (c && !e)
       return a(!1);
-    o.fs.stat(r, function(i, l) {
-      if (c && l.isDirectory())
+    i.fs.stat(r, function(s, d) {
+      if (c && d.isDirectory())
         return a(!1);
-      var I = J.dirname(r);
-      o.fs.exists(I, function(w) {
-        w || o.makeDir(I), o.fs.open(r, "w", 438, function(E, C) {
-          E ? o.fs.chmod(r, 438, function() {
-            o.fs.open(r, "w", 438, function(p, g) {
-              o.fs.write(g, t, 0, t.length, 0, function() {
-                o.fs.close(g, function() {
-                  o.fs.chmod(r, n || 438, function() {
+      var v = J.dirname(r);
+      i.fs.exists(v, function(w) {
+        w || i.makeDir(v), i.fs.open(r, "w", 438, function(C, S) {
+          C ? i.fs.chmod(r, 438, function() {
+            i.fs.open(r, "w", 438, function(p, g) {
+              i.fs.write(g, t, 0, t.length, 0, function() {
+                i.fs.close(g, function() {
+                  i.fs.chmod(r, n || 438, function() {
                     a(!0);
                   });
                 });
               });
             });
-          }) : C ? o.fs.write(C, t, 0, t.length, 0, function() {
-            o.fs.close(C, function() {
-              o.fs.chmod(r, n || 438, function() {
+          }) : S ? i.fs.write(S, t, 0, t.length, 0, function() {
+            i.fs.close(S, function() {
+              i.fs.chmod(r, n || 438, function() {
                 a(!0);
               });
             });
-          }) : o.fs.chmod(r, n || 438, function() {
+          }) : i.fs.chmod(r, n || 438, function() {
             a(!0);
           });
         });
@@ -3663,11 +3798,11 @@ G.prototype.writeFileToAsync = function(r, t, e, n, a) {
 };
 G.prototype.findFiles = function(r) {
   const t = this;
-  function e(n, a, o) {
+  function e(n, a, i) {
     let c = [];
-    return t.fs.readdirSync(n).forEach(function(i) {
-      const l = J.join(n, i), I = t.fs.statSync(l);
-      c.push(J.normalize(l) + (I.isDirectory() ? t.sep : "")), I.isDirectory() && o && (c = c.concat(e(l, a, o)));
+    return t.fs.readdirSync(n).forEach(function(s) {
+      const d = J.join(n, s), v = t.fs.statSync(d);
+      c.push(J.normalize(d) + (v.isDirectory() ? t.sep : "")), v.isDirectory() && i && (c = c.concat(e(d, a, i)));
     }), c;
   }
   return e(r, void 0, !0);
@@ -3675,20 +3810,20 @@ G.prototype.findFiles = function(r) {
 G.prototype.findFilesAsync = function(r, t) {
   const e = this;
   let n = [];
-  e.fs.readdir(r, function(a, o) {
+  e.fs.readdir(r, function(a, i) {
     if (a)
       return t(a);
-    let c = o.length;
+    let c = i.length;
     if (!c)
       return t(null, n);
-    o.forEach(function(i) {
-      i = J.join(r, i), e.fs.stat(i, function(l, I) {
-        if (l)
-          return t(l);
-        I && (n.push(J.normalize(i) + (I.isDirectory() ? e.sep : "")), I.isDirectory() ? e.findFilesAsync(i, function(w, E) {
+    i.forEach(function(s) {
+      s = J.join(r, s), e.fs.stat(s, function(d, v) {
+        if (d)
+          return t(d);
+        v && (n.push(J.normalize(s) + (v.isDirectory() ? e.sep : "")), v.isDirectory() ? e.findFilesAsync(s, function(w, C) {
           if (w)
             return t(w);
-          n = n.concat(E), --c || t(null, n);
+          n = n.concat(C), --c || t(null, n);
         }) : --c || t(null, n));
       });
     });
@@ -3699,7 +3834,7 @@ G.prototype.getAttributes = function() {
 G.prototype.setAttributes = function() {
 };
 G.crc32update = function(r, t) {
-  return Lt[(r ^ t) & 255] ^ r >>> 8;
+  return Pt[(r ^ t) & 255] ^ r >>> 8;
 };
 G.crc32 = function(r) {
   typeof r == "string" && (r = Buffer.from(r, "utf8"));
@@ -3741,9 +3876,9 @@ G.findLast = function(r, t) {
 G.sanitize = function(r, t) {
   r = J.resolve(J.normalize(r));
   for (var e = t.split("/"), n = 0, a = e.length; n < a; n++) {
-    var o = J.normalize(J.join(r, e.slice(n, a).join(J.sep)));
-    if (o.indexOf(r) === 0)
-      return o;
+    var i = J.normalize(J.join(r, e.slice(n, a).join(J.sep)));
+    if (i.indexOf(r) === 0)
+      return i;
   }
   return J.normalize(J.join(r, J.basename(t)));
 };
@@ -3761,12 +3896,12 @@ G.fromDate2DOS = function(r) {
   let t = 0, e = 0;
   return r.getFullYear() > 1979 && (t = (r.getFullYear() - 1980 & 127) << 9 | r.getMonth() + 1 << 5 | r.getDate(), e = r.getHours() << 11 | r.getMinutes() << 5 | r.getSeconds() >> 1), t << 16 | e;
 };
-G.isWin = br;
-G.crcTable = Lt;
-const kr = ne;
-var Or = function(r, { fs: t }) {
-  var e = r || "", n = o(), a = null;
-  function o() {
+G.isWin = $r;
+G.crcTable = Pt;
+const Ur = ne;
+var Br = function(r, { fs: t }) {
+  var e = r || "", n = i(), a = null;
+  function i() {
     return {
       directory: !1,
       readonly: !1,
@@ -3776,7 +3911,7 @@ var Or = function(r, { fs: t }) {
       atime: 0
     };
   }
-  return e && t.existsSync(e) ? (a = t.statSync(e), n.directory = a.isDirectory(), n.mtime = a.mtime, n.atime = a.atime, n.executable = (73 & a.mode) !== 0, n.readonly = (128 & a.mode) === 0, n.hidden = kr.basename(e)[0] === ".") : console.warn("Invalid path: " + e), {
+  return e && t.existsSync(e) ? (a = t.statSync(e), n.directory = a.isDirectory(), n.mtime = a.mtime, n.atime = a.atime, n.executable = (73 & a.mode) !== 0, n.readonly = (128 & a.mode) === 0, n.hidden = Ur.basename(e)[0] === ".") : console.warn("Invalid path: " + e), {
     get directory() {
       return n.directory;
     },
@@ -3814,140 +3949,140 @@ var Or = function(r, { fs: t }) {
       return JSON.stringify(this.toJSON(), null, "	");
     }
   };
-}, $r = {
+}, jr = {
   efs: !0,
   encode: (r) => Buffer.from(r, "utf8"),
   decode: (r) => r.toString("utf8")
 };
-ye.exports = xr;
-ye.exports.Constants = Nt;
-ye.exports.Errors = Ne;
-ye.exports.FileAttr = Or;
-ye.exports.decoder = $r;
-var Se = ye.exports, Le = {}, le = Se, A = le.Constants, Rr = function() {
-  var r = 20, t = 10, e = 0, n = 0, a = 0, o = 0, c = 0, i = 0, l = 0, I = 0, w = 0, E = 0, C = 0, p = 0, g = 0;
-  r |= le.isWin ? 2560 : 768, e |= A.FLG_EFS;
+ge.exports = Fr;
+ge.exports.Constants = Nt;
+ge.exports.Errors = Le;
+ge.exports.FileAttr = Br;
+ge.exports.decoder = jr;
+var Ce = ge.exports, Ne = {}, ce = Ce, D = ce.Constants, zr = function() {
+  var r = 20, t = 10, e = 0, n = 0, a = 0, i = 0, c = 0, s = 0, d = 0, v = 0, w = 0, C = 0, S = 0, p = 0, g = 0;
+  r |= ce.isWin ? 2560 : 768, e |= D.FLG_EFS;
   const f = {
     extraLen: 0
-  }, m = (s) => Math.max(0, s) >>> 0, u = (s) => Math.max(0, s) & 255;
-  return a = le.fromDate2DOS(/* @__PURE__ */ new Date()), {
+  }, m = (o) => Math.max(0, o) >>> 0, u = (o) => Math.max(0, o) & 255;
+  return a = ce.fromDate2DOS(/* @__PURE__ */ new Date()), {
     get made() {
       return r;
     },
-    set made(s) {
-      r = s;
+    set made(o) {
+      r = o;
     },
     get version() {
       return t;
     },
-    set version(s) {
-      t = s;
+    set version(o) {
+      t = o;
     },
     get flags() {
       return e;
     },
-    set flags(s) {
-      e = s;
+    set flags(o) {
+      e = o;
     },
     get flags_efs() {
-      return (e & A.FLG_EFS) > 0;
+      return (e & D.FLG_EFS) > 0;
     },
-    set flags_efs(s) {
-      s ? e |= A.FLG_EFS : e &= ~A.FLG_EFS;
+    set flags_efs(o) {
+      o ? e |= D.FLG_EFS : e &= ~D.FLG_EFS;
     },
     get flags_desc() {
-      return (e & A.FLG_DESC) > 0;
+      return (e & D.FLG_DESC) > 0;
     },
-    set flags_desc(s) {
-      s ? e |= A.FLG_DESC : e &= ~A.FLG_DESC;
+    set flags_desc(o) {
+      o ? e |= D.FLG_DESC : e &= ~D.FLG_DESC;
     },
     get method() {
       return n;
     },
-    set method(s) {
-      switch (s) {
-        case A.STORED:
+    set method(o) {
+      switch (o) {
+        case D.STORED:
           this.version = 10;
-        case A.DEFLATED:
+        case D.DEFLATED:
         default:
           this.version = 20;
       }
-      n = s;
+      n = o;
     },
     get time() {
-      return le.fromDOS2Date(this.timeval);
+      return ce.fromDOS2Date(this.timeval);
     },
-    set time(s) {
-      this.timeval = le.fromDate2DOS(s);
+    set time(o) {
+      this.timeval = ce.fromDate2DOS(o);
     },
     get timeval() {
       return a;
     },
-    set timeval(s) {
-      a = m(s);
+    set timeval(o) {
+      a = m(o);
     },
     get timeHighByte() {
       return u(a >>> 8);
     },
     get crc() {
-      return o;
+      return i;
     },
-    set crc(s) {
-      o = m(s);
+    set crc(o) {
+      i = m(o);
     },
     get compressedSize() {
       return c;
     },
-    set compressedSize(s) {
-      c = m(s);
+    set compressedSize(o) {
+      c = m(o);
     },
     get size() {
-      return i;
+      return s;
     },
-    set size(s) {
-      i = m(s);
+    set size(o) {
+      s = m(o);
     },
     get fileNameLength() {
-      return l;
+      return d;
     },
-    set fileNameLength(s) {
-      l = s;
+    set fileNameLength(o) {
+      d = o;
     },
     get extraLength() {
-      return I;
+      return v;
     },
-    set extraLength(s) {
-      I = s;
+    set extraLength(o) {
+      v = o;
     },
     get extraLocalLength() {
       return f.extraLen;
     },
-    set extraLocalLength(s) {
-      f.extraLen = s;
+    set extraLocalLength(o) {
+      f.extraLen = o;
     },
     get commentLength() {
       return w;
     },
-    set commentLength(s) {
-      w = s;
+    set commentLength(o) {
+      w = o;
     },
     get diskNumStart() {
-      return E;
-    },
-    set diskNumStart(s) {
-      E = m(s);
-    },
-    get inAttr() {
       return C;
     },
-    set inAttr(s) {
-      C = m(s);
+    set diskNumStart(o) {
+      C = m(o);
+    },
+    get inAttr() {
+      return S;
+    },
+    set inAttr(o) {
+      S = m(o);
     },
     get attr() {
       return p;
     },
-    set attr(s) {
-      p = m(s);
+    set attr(o) {
+      p = m(o);
     },
     // get Unix file permissions
     get fileAttr() {
@@ -3956,126 +4091,126 @@ var Se = ye.exports, Le = {}, le = Se, A = le.Constants, Rr = function() {
     get offset() {
       return g;
     },
-    set offset(s) {
-      g = m(s);
+    set offset(o) {
+      g = m(o);
     },
     get encrypted() {
-      return (e & A.FLG_ENC) === A.FLG_ENC;
+      return (e & D.FLG_ENC) === D.FLG_ENC;
     },
     get centralHeaderSize() {
-      return A.CENHDR + l + I + w;
+      return D.CENHDR + d + v + w;
     },
     get realDataOffset() {
-      return g + A.LOCHDR + f.fnameLen + f.extraLen;
+      return g + D.LOCHDR + f.fnameLen + f.extraLen;
     },
     get localHeader() {
       return f;
     },
-    loadLocalHeaderFromBinary: function(s) {
-      var d = s.slice(g, g + A.LOCHDR);
-      if (d.readUInt32LE(0) !== A.LOCSIG)
-        throw le.Errors.INVALID_LOC();
-      f.version = d.readUInt16LE(A.LOCVER), f.flags = d.readUInt16LE(A.LOCFLG), f.method = d.readUInt16LE(A.LOCHOW), f.time = d.readUInt32LE(A.LOCTIM), f.crc = d.readUInt32LE(A.LOCCRC), f.compressedSize = d.readUInt32LE(A.LOCSIZ), f.size = d.readUInt32LE(A.LOCLEN), f.fnameLen = d.readUInt16LE(A.LOCNAM), f.extraLen = d.readUInt16LE(A.LOCEXT);
-      const y = g + A.LOCHDR + f.fnameLen, v = y + f.extraLen;
-      return s.slice(y, v);
+    loadLocalHeaderFromBinary: function(o) {
+      var l = o.slice(g, g + D.LOCHDR);
+      if (l.readUInt32LE(0) !== D.LOCSIG)
+        throw ce.Errors.INVALID_LOC();
+      f.version = l.readUInt16LE(D.LOCVER), f.flags = l.readUInt16LE(D.LOCFLG), f.method = l.readUInt16LE(D.LOCHOW), f.time = l.readUInt32LE(D.LOCTIM), f.crc = l.readUInt32LE(D.LOCCRC), f.compressedSize = l.readUInt32LE(D.LOCSIZ), f.size = l.readUInt32LE(D.LOCLEN), f.fnameLen = l.readUInt16LE(D.LOCNAM), f.extraLen = l.readUInt16LE(D.LOCEXT);
+      const y = g + D.LOCHDR + f.fnameLen, I = y + f.extraLen;
+      return o.slice(y, I);
     },
-    loadFromBinary: function(s) {
-      if (s.length !== A.CENHDR || s.readUInt32LE(0) !== A.CENSIG)
-        throw le.Errors.INVALID_CEN();
-      r = s.readUInt16LE(A.CENVEM), t = s.readUInt16LE(A.CENVER), e = s.readUInt16LE(A.CENFLG), n = s.readUInt16LE(A.CENHOW), a = s.readUInt32LE(A.CENTIM), o = s.readUInt32LE(A.CENCRC), c = s.readUInt32LE(A.CENSIZ), i = s.readUInt32LE(A.CENLEN), l = s.readUInt16LE(A.CENNAM), I = s.readUInt16LE(A.CENEXT), w = s.readUInt16LE(A.CENCOM), E = s.readUInt16LE(A.CENDSK), C = s.readUInt16LE(A.CENATT), p = s.readUInt32LE(A.CENATX), g = s.readUInt32LE(A.CENOFF);
+    loadFromBinary: function(o) {
+      if (o.length !== D.CENHDR || o.readUInt32LE(0) !== D.CENSIG)
+        throw ce.Errors.INVALID_CEN();
+      r = o.readUInt16LE(D.CENVEM), t = o.readUInt16LE(D.CENVER), e = o.readUInt16LE(D.CENFLG), n = o.readUInt16LE(D.CENHOW), a = o.readUInt32LE(D.CENTIM), i = o.readUInt32LE(D.CENCRC), c = o.readUInt32LE(D.CENSIZ), s = o.readUInt32LE(D.CENLEN), d = o.readUInt16LE(D.CENNAM), v = o.readUInt16LE(D.CENEXT), w = o.readUInt16LE(D.CENCOM), C = o.readUInt16LE(D.CENDSK), S = o.readUInt16LE(D.CENATT), p = o.readUInt32LE(D.CENATX), g = o.readUInt32LE(D.CENOFF);
     },
     localHeaderToBinary: function() {
-      var s = Buffer.alloc(A.LOCHDR);
-      return s.writeUInt32LE(A.LOCSIG, 0), s.writeUInt16LE(t, A.LOCVER), s.writeUInt16LE(e, A.LOCFLG), s.writeUInt16LE(n, A.LOCHOW), s.writeUInt32LE(a, A.LOCTIM), s.writeUInt32LE(o, A.LOCCRC), s.writeUInt32LE(c, A.LOCSIZ), s.writeUInt32LE(i, A.LOCLEN), s.writeUInt16LE(l, A.LOCNAM), s.writeUInt16LE(f.extraLen, A.LOCEXT), s;
+      var o = Buffer.alloc(D.LOCHDR);
+      return o.writeUInt32LE(D.LOCSIG, 0), o.writeUInt16LE(t, D.LOCVER), o.writeUInt16LE(e, D.LOCFLG), o.writeUInt16LE(n, D.LOCHOW), o.writeUInt32LE(a, D.LOCTIM), o.writeUInt32LE(i, D.LOCCRC), o.writeUInt32LE(c, D.LOCSIZ), o.writeUInt32LE(s, D.LOCLEN), o.writeUInt16LE(d, D.LOCNAM), o.writeUInt16LE(f.extraLen, D.LOCEXT), o;
     },
     centralHeaderToBinary: function() {
-      var s = Buffer.alloc(A.CENHDR + l + I + w);
-      return s.writeUInt32LE(A.CENSIG, 0), s.writeUInt16LE(r, A.CENVEM), s.writeUInt16LE(t, A.CENVER), s.writeUInt16LE(e, A.CENFLG), s.writeUInt16LE(n, A.CENHOW), s.writeUInt32LE(a, A.CENTIM), s.writeUInt32LE(o, A.CENCRC), s.writeUInt32LE(c, A.CENSIZ), s.writeUInt32LE(i, A.CENLEN), s.writeUInt16LE(l, A.CENNAM), s.writeUInt16LE(I, A.CENEXT), s.writeUInt16LE(w, A.CENCOM), s.writeUInt16LE(E, A.CENDSK), s.writeUInt16LE(C, A.CENATT), s.writeUInt32LE(p, A.CENATX), s.writeUInt32LE(g, A.CENOFF), s;
+      var o = Buffer.alloc(D.CENHDR + d + v + w);
+      return o.writeUInt32LE(D.CENSIG, 0), o.writeUInt16LE(r, D.CENVEM), o.writeUInt16LE(t, D.CENVER), o.writeUInt16LE(e, D.CENFLG), o.writeUInt16LE(n, D.CENHOW), o.writeUInt32LE(a, D.CENTIM), o.writeUInt32LE(i, D.CENCRC), o.writeUInt32LE(c, D.CENSIZ), o.writeUInt32LE(s, D.CENLEN), o.writeUInt16LE(d, D.CENNAM), o.writeUInt16LE(v, D.CENEXT), o.writeUInt16LE(w, D.CENCOM), o.writeUInt16LE(C, D.CENDSK), o.writeUInt16LE(S, D.CENATT), o.writeUInt32LE(p, D.CENATX), o.writeUInt32LE(g, D.CENOFF), o;
     },
     toJSON: function() {
-      const s = function(d) {
-        return d + " bytes";
+      const o = function(l) {
+        return l + " bytes";
       };
       return {
         made: r,
         version: t,
         flags: e,
-        method: le.methodToString(n),
+        method: ce.methodToString(n),
         time: this.time,
-        crc: "0x" + o.toString(16).toUpperCase(),
-        compressedSize: s(c),
-        size: s(i),
-        fileNameLength: s(l),
-        extraLength: s(I),
-        commentLength: s(w),
-        diskNumStart: E,
-        inAttr: C,
+        crc: "0x" + i.toString(16).toUpperCase(),
+        compressedSize: o(c),
+        size: o(s),
+        fileNameLength: o(d),
+        extraLength: o(v),
+        commentLength: o(w),
+        diskNumStart: C,
+        inAttr: S,
         attr: p,
         offset: g,
-        centralHeaderSize: s(A.CENHDR + l + I + w)
+        centralHeaderSize: o(D.CENHDR + d + v + w)
       };
     },
     toString: function() {
       return JSON.stringify(this.toJSON(), null, "	");
     }
   };
-}, he = Se, H = he.Constants, Fr = function() {
+}, fe = Ce, H = fe.Constants, Hr = function() {
   var r = 0, t = 0, e = 0, n = 0, a = 0;
   return {
     get diskEntries() {
       return r;
     },
-    set diskEntries(o) {
-      r = t = o;
+    set diskEntries(i) {
+      r = t = i;
     },
     get totalEntries() {
       return t;
     },
-    set totalEntries(o) {
-      t = r = o;
+    set totalEntries(i) {
+      t = r = i;
     },
     get size() {
       return e;
     },
-    set size(o) {
-      e = o;
+    set size(i) {
+      e = i;
     },
     get offset() {
       return n;
     },
-    set offset(o) {
-      n = o;
+    set offset(i) {
+      n = i;
     },
     get commentLength() {
       return a;
     },
-    set commentLength(o) {
-      a = o;
+    set commentLength(i) {
+      a = i;
     },
     get mainHeaderSize() {
       return H.ENDHDR + a;
     },
-    loadFromBinary: function(o) {
-      if ((o.length !== H.ENDHDR || o.readUInt32LE(0) !== H.ENDSIG) && (o.length < H.ZIP64HDR || o.readUInt32LE(0) !== H.ZIP64SIG))
-        throw he.Errors.INVALID_END();
-      o.readUInt32LE(0) === H.ENDSIG ? (r = o.readUInt16LE(H.ENDSUB), t = o.readUInt16LE(H.ENDTOT), e = o.readUInt32LE(H.ENDSIZ), n = o.readUInt32LE(H.ENDOFF), a = o.readUInt16LE(H.ENDCOM)) : (r = he.readBigUInt64LE(o, H.ZIP64SUB), t = he.readBigUInt64LE(o, H.ZIP64TOT), e = he.readBigUInt64LE(o, H.ZIP64SIZE), n = he.readBigUInt64LE(o, H.ZIP64OFF), a = 0);
+    loadFromBinary: function(i) {
+      if ((i.length !== H.ENDHDR || i.readUInt32LE(0) !== H.ENDSIG) && (i.length < H.ZIP64HDR || i.readUInt32LE(0) !== H.ZIP64SIG))
+        throw fe.Errors.INVALID_END();
+      i.readUInt32LE(0) === H.ENDSIG ? (r = i.readUInt16LE(H.ENDSUB), t = i.readUInt16LE(H.ENDTOT), e = i.readUInt32LE(H.ENDSIZ), n = i.readUInt32LE(H.ENDOFF), a = i.readUInt16LE(H.ENDCOM)) : (r = fe.readBigUInt64LE(i, H.ZIP64SUB), t = fe.readBigUInt64LE(i, H.ZIP64TOT), e = fe.readBigUInt64LE(i, H.ZIP64SIZE), n = fe.readBigUInt64LE(i, H.ZIP64OFF), a = 0);
     },
     toBinary: function() {
-      var o = Buffer.alloc(H.ENDHDR + a);
-      return o.writeUInt32LE(H.ENDSIG, 0), o.writeUInt32LE(0, 4), o.writeUInt16LE(r, H.ENDSUB), o.writeUInt16LE(t, H.ENDTOT), o.writeUInt32LE(e, H.ENDSIZ), o.writeUInt32LE(n, H.ENDOFF), o.writeUInt16LE(a, H.ENDCOM), o.fill(" ", H.ENDHDR), o;
+      var i = Buffer.alloc(H.ENDHDR + a);
+      return i.writeUInt32LE(H.ENDSIG, 0), i.writeUInt32LE(0, 4), i.writeUInt16LE(r, H.ENDSUB), i.writeUInt16LE(t, H.ENDTOT), i.writeUInt32LE(e, H.ENDSIZ), i.writeUInt32LE(n, H.ENDOFF), i.writeUInt16LE(a, H.ENDCOM), i.fill(" ", H.ENDHDR), i;
     },
     toJSON: function() {
-      const o = function(c, i) {
-        let l = c.toString(16).toUpperCase();
-        for (; l.length < i; )
-          l = "0" + l;
-        return "0x" + l;
+      const i = function(c, s) {
+        let d = c.toString(16).toUpperCase();
+        for (; d.length < s; )
+          d = "0" + d;
+        return "0x" + d;
       };
       return {
         diskEntries: r,
         totalEntries: t,
         size: e + " bytes",
-        offset: o(n, 4),
+        offset: i(n, 4),
         commentLength: a
       };
     },
@@ -4084,67 +4219,67 @@ var Se = ye.exports, Le = {}, le = Se, A = le.Constants, Rr = function() {
     }
   };
 };
-Le.EntryHeader = Rr;
-Le.MainHeader = Fr;
-var Pe = {}, Ur = function(r) {
+Ne.EntryHeader = zr;
+Ne.MainHeader = Hr;
+var Pe = {}, qr = function(r) {
   var t = It, e = { chunkSize: (parseInt(r.length / 1024) + 1) * 1024 };
   return {
     deflate: function() {
       return t.deflateRawSync(r, e);
     },
     deflateAsync: function(n) {
-      var a = t.createDeflateRaw(e), o = [], c = 0;
-      a.on("data", function(i) {
-        o.push(i), c += i.length;
+      var a = t.createDeflateRaw(e), i = [], c = 0;
+      a.on("data", function(s) {
+        i.push(s), c += s.length;
       }), a.on("end", function() {
-        var i = Buffer.alloc(c), l = 0;
-        i.fill(0);
-        for (var I = 0; I < o.length; I++) {
-          var w = o[I];
-          w.copy(i, l), l += w.length;
+        var s = Buffer.alloc(c), d = 0;
+        s.fill(0);
+        for (var v = 0; v < i.length; v++) {
+          var w = i[v];
+          w.copy(s, d), d += w.length;
         }
-        n && n(i);
+        n && n(s);
       }), a.end(r);
     }
   };
 };
-const Br = +(process.versions ? process.versions.node : "").split(".")[0] || 0;
-var zr = function(r, t) {
+const Vr = +(process.versions ? process.versions.node : "").split(".")[0] || 0;
+var Wr = function(r, t) {
   var e = It;
-  const n = Br >= 15 && t > 0 ? { maxOutputLength: t } : {};
+  const n = Vr >= 15 && t > 0 ? { maxOutputLength: t } : {};
   return {
     inflate: function() {
       return e.inflateRawSync(r, n);
     },
     inflateAsync: function(a) {
-      var o = e.createInflateRaw(n), c = [], i = 0;
-      o.on("data", function(l) {
-        c.push(l), i += l.length;
-      }), o.on("end", function() {
-        var l = Buffer.alloc(i), I = 0;
-        l.fill(0);
+      var i = e.createInflateRaw(n), c = [], s = 0;
+      i.on("data", function(d) {
+        c.push(d), s += d.length;
+      }), i.on("end", function() {
+        var d = Buffer.alloc(s), v = 0;
+        d.fill(0);
         for (var w = 0; w < c.length; w++) {
-          var E = c[w];
-          E.copy(l, I), I += E.length;
+          var C = c[w];
+          C.copy(d, v), v += C.length;
         }
-        a && a(l);
-      }), o.end(r);
+        a && a(d);
+      }), i.end(r);
     }
   };
 };
-const { randomFillSync: ut } = fe, jr = Ne, Hr = new Uint32Array(256).map((r, t) => {
+const { randomFillSync: ut } = pe, Gr = Le, Zr = new Uint32Array(256).map((r, t) => {
   for (let e = 0; e < 8; e++)
     t & 1 ? t = t >>> 1 ^ 3988292384 : t >>>= 1;
   return t >>> 0;
-}), Pt = (r, t) => Math.imul(r, t) >>> 0, mt = (r, t) => Hr[(r ^ t) & 255] ^ r >>> 8, Ie = () => typeof ut == "function" ? ut(Buffer.alloc(12)) : Ie.node();
-Ie.node = () => {
+}), Tt = (r, t) => Math.imul(r, t) >>> 0, mt = (r, t) => Zr[(r ^ t) & 255] ^ r >>> 8, ve = () => typeof ut == "function" ? ut(Buffer.alloc(12)) : ve.node();
+ve.node = () => {
   const r = Buffer.alloc(12), t = r.length;
   for (let e = 0; e < t; e++)
     r[e] = Math.random() * 256 & 255;
   return r;
 };
 const De = {
-  genSalt: Ie
+  genSalt: ve
 };
 function Te(r) {
   const t = Buffer.isBuffer(r) ? r : Buffer.from(r);
@@ -4154,233 +4289,233 @@ function Te(r) {
 }
 Te.prototype.updateKeys = function(r) {
   const t = this.keys;
-  return t[0] = mt(t[0], r), t[1] += t[0] & 255, t[1] = Pt(t[1], 134775813) + 1, t[2] = mt(t[2], t[1] >>> 24), r;
+  return t[0] = mt(t[0], r), t[1] += t[0] & 255, t[1] = Tt(t[1], 134775813) + 1, t[2] = mt(t[2], t[1] >>> 24), r;
 };
 Te.prototype.next = function() {
   const r = (this.keys[2] | 2) >>> 0;
-  return Pt(r, r ^ 1) >> 8 & 255;
+  return Tt(r, r ^ 1) >> 8 & 255;
 };
-function qr(r) {
+function Jr(r) {
   const t = new Te(r);
   return function(e) {
     const n = Buffer.alloc(e.length);
     let a = 0;
-    for (let o of e)
-      n[a++] = t.updateKeys(o ^ t.next());
+    for (let i of e)
+      n[a++] = t.updateKeys(i ^ t.next());
     return n;
   };
 }
-function Vr(r) {
+function Kr(r) {
   const t = new Te(r);
   return function(e, n, a = 0) {
     n || (n = Buffer.alloc(e.length));
-    for (let o of e) {
+    for (let i of e) {
       const c = t.next();
-      n[a++] = o ^ c, t.updateKeys(o);
+      n[a++] = i ^ c, t.updateKeys(i);
     }
     return n;
   };
 }
-function Wr(r, t, e) {
+function Xr(r, t, e) {
   if (!r || !Buffer.isBuffer(r) || r.length < 12)
     return Buffer.alloc(0);
-  const n = qr(e), a = n(r.slice(0, 12)), o = (t.flags & 8) === 8 ? t.timeHighByte : t.crc >>> 24;
-  if (a[11] !== o)
-    throw jr.WRONG_PASSWORD();
+  const n = Jr(e), a = n(r.slice(0, 12)), i = (t.flags & 8) === 8 ? t.timeHighByte : t.crc >>> 24;
+  if (a[11] !== i)
+    throw Gr.WRONG_PASSWORD();
   return n(r.slice(12));
 }
-function Gr(r) {
+function Yr(r) {
   Buffer.isBuffer(r) && r.length >= 12 ? De.genSalt = function() {
     return r.slice(0, 12);
-  } : r === "node" ? De.genSalt = Ie.node : De.genSalt = Ie;
+  } : r === "node" ? De.genSalt = ve.node : De.genSalt = ve;
 }
-function Zr(r, t, e, n = !1) {
+function Qr(r, t, e, n = !1) {
   r == null && (r = Buffer.alloc(0)), Buffer.isBuffer(r) || (r = Buffer.from(r.toString()));
-  const a = Vr(e), o = De.genSalt();
-  o[11] = t.crc >>> 24 & 255, n && (o[10] = t.crc >>> 16 & 255);
+  const a = Kr(e), i = De.genSalt();
+  i[11] = t.crc >>> 24 & 255, n && (i[10] = t.crc >>> 16 & 255);
   const c = Buffer.alloc(r.length + 12);
-  return a(o, c), a(r, c, 12);
+  return a(i, c), a(r, c, 12);
 }
-var Jr = { decrypt: Wr, encrypt: Zr, _salter: Gr };
-Pe.Deflater = Ur;
-Pe.Inflater = zr;
-Pe.ZipCrypto = Jr;
-var U = Se, Kr = Le, V = U.Constants, ze = Pe, Tt = function(r, t) {
-  var e = new Kr.EntryHeader(), n = Buffer.alloc(0), a = Buffer.alloc(0), o = !1, c = null, i = Buffer.alloc(0), l = Buffer.alloc(0), I = !0;
-  const w = r, E = typeof w.decoder == "object" ? w.decoder : U.decoder;
-  I = E.hasOwnProperty("efs") ? E.efs : !1;
-  function C() {
-    return !t || !(t instanceof Uint8Array) ? Buffer.alloc(0) : (l = e.loadLocalHeaderFromBinary(t), t.slice(e.realDataOffset, e.realDataOffset + e.compressedSize));
+var en = { decrypt: Xr, encrypt: Qr, _salter: Yr };
+Pe.Deflater = qr;
+Pe.Inflater = Wr;
+Pe.ZipCrypto = en;
+var U = Ce, tn = Ne, V = U.Constants, je = Pe, xt = function(r, t) {
+  var e = new tn.EntryHeader(), n = Buffer.alloc(0), a = Buffer.alloc(0), i = !1, c = null, s = Buffer.alloc(0), d = Buffer.alloc(0), v = !0;
+  const w = r, C = typeof w.decoder == "object" ? w.decoder : U.decoder;
+  v = C.hasOwnProperty("efs") ? C.efs : !1;
+  function S() {
+    return !t || !(t instanceof Uint8Array) ? Buffer.alloc(0) : (d = e.loadLocalHeaderFromBinary(t), t.slice(e.realDataOffset, e.realDataOffset + e.compressedSize));
   }
-  function p(d) {
+  function p(l) {
     if (e.flags_desc) {
-      const y = {}, v = e.realDataOffset + e.compressedSize;
-      if (t.readUInt32LE(v) == V.LOCSIG || t.readUInt32LE(v) == V.CENSIG)
+      const y = {}, I = e.realDataOffset + e.compressedSize;
+      if (t.readUInt32LE(I) == V.LOCSIG || t.readUInt32LE(I) == V.CENSIG)
         throw U.Errors.DESCRIPTOR_NOT_EXIST();
-      if (t.readUInt32LE(v) == V.EXTSIG)
-        y.crc = t.readUInt32LE(v + V.EXTCRC), y.compressedSize = t.readUInt32LE(v + V.EXTSIZ), y.size = t.readUInt32LE(v + V.EXTLEN);
-      else if (t.readUInt16LE(v + 12) === 19280)
-        y.crc = t.readUInt32LE(v + V.EXTCRC - 4), y.compressedSize = t.readUInt32LE(v + V.EXTSIZ - 4), y.size = t.readUInt32LE(v + V.EXTLEN - 4);
+      if (t.readUInt32LE(I) == V.EXTSIG)
+        y.crc = t.readUInt32LE(I + V.EXTCRC), y.compressedSize = t.readUInt32LE(I + V.EXTSIZ), y.size = t.readUInt32LE(I + V.EXTLEN);
+      else if (t.readUInt16LE(I + 12) === 19280)
+        y.crc = t.readUInt32LE(I + V.EXTCRC - 4), y.compressedSize = t.readUInt32LE(I + V.EXTSIZ - 4), y.size = t.readUInt32LE(I + V.EXTLEN - 4);
       else
         throw U.Errors.DESCRIPTOR_UNKNOWN();
       if (y.compressedSize !== e.compressedSize || y.size !== e.size || y.crc !== e.crc)
         throw U.Errors.DESCRIPTOR_FAULTY();
-      if (U.crc32(d) !== y.crc)
+      if (U.crc32(l) !== y.crc)
         return !1;
-    } else if (U.crc32(d) !== e.localHeader.crc)
+    } else if (U.crc32(l) !== e.localHeader.crc)
       return !1;
     return !0;
   }
-  function g(d, y, v) {
-    if (typeof y > "u" && typeof d == "string" && (v = d, d = void 0), o)
-      return d && y && y(Buffer.alloc(0), U.Errors.DIRECTORY_CONTENT_ERROR()), Buffer.alloc(0);
-    var _ = C();
-    if (_.length === 0)
-      return d && y && y(_), _;
+  function g(l, y, I) {
+    if (typeof y > "u" && typeof l == "string" && (I = l, l = void 0), i)
+      return l && y && y(Buffer.alloc(0), U.Errors.DIRECTORY_CONTENT_ERROR()), Buffer.alloc(0);
+    var E = S();
+    if (E.length === 0)
+      return l && y && y(E), E;
     if (e.encrypted) {
-      if (typeof v != "string" && !Buffer.isBuffer(v))
+      if (typeof I != "string" && !Buffer.isBuffer(I))
         throw U.Errors.INVALID_PASS_PARAM();
-      _ = ze.ZipCrypto.decrypt(_, e, v);
+      E = je.ZipCrypto.decrypt(E, e, I);
     }
-    var D = Buffer.alloc(e.size);
+    var _ = Buffer.alloc(e.size);
     switch (e.method) {
       case U.Constants.STORED:
-        if (_.copy(D), p(D))
-          return d && y && y(D), D;
-        throw d && y && y(D, U.Errors.BAD_CRC()), U.Errors.BAD_CRC();
+        if (E.copy(_), p(_))
+          return l && y && y(_), _;
+        throw l && y && y(_, U.Errors.BAD_CRC()), U.Errors.BAD_CRC();
       case U.Constants.DEFLATED:
-        var k = new ze.Inflater(_, e.size);
-        if (d)
-          k.inflateAsync(function(P) {
-            P.copy(P, 0), y && (p(P) ? y(P) : y(P, U.Errors.BAD_CRC()));
+        var x = new je.Inflater(E, e.size);
+        if (l)
+          x.inflateAsync(function(T) {
+            T.copy(T, 0), y && (p(T) ? y(T) : y(T, U.Errors.BAD_CRC()));
           });
         else {
-          if (k.inflate(D).copy(D, 0), !p(D))
-            throw U.Errors.BAD_CRC(`"${E.decode(n)}"`);
-          return D;
+          if (x.inflate(_).copy(_, 0), !p(_))
+            throw U.Errors.BAD_CRC(`"${C.decode(n)}"`);
+          return _;
         }
         break;
       default:
-        throw d && y && y(Buffer.alloc(0), U.Errors.UNKNOWN_METHOD()), U.Errors.UNKNOWN_METHOD();
+        throw l && y && y(Buffer.alloc(0), U.Errors.UNKNOWN_METHOD()), U.Errors.UNKNOWN_METHOD();
     }
   }
-  function f(d, y) {
+  function f(l, y) {
     if ((!c || !c.length) && Buffer.isBuffer(t))
-      return d && y && y(C()), C();
-    if (c.length && !o) {
-      var v;
+      return l && y && y(S()), S();
+    if (c.length && !i) {
+      var I;
       switch (e.method) {
         case U.Constants.STORED:
-          return e.compressedSize = e.size, v = Buffer.alloc(c.length), c.copy(v), d && y && y(v), v;
+          return e.compressedSize = e.size, I = Buffer.alloc(c.length), c.copy(I), l && y && y(I), I;
         default:
         case U.Constants.DEFLATED:
-          var _ = new ze.Deflater(c);
-          if (d)
-            _.deflateAsync(function(k) {
-              v = Buffer.alloc(k.length), e.compressedSize = k.length, k.copy(v), y && y(v);
+          var E = new je.Deflater(c);
+          if (l)
+            E.deflateAsync(function(x) {
+              I = Buffer.alloc(x.length), e.compressedSize = x.length, x.copy(I), y && y(I);
             });
           else {
-            var D = _.deflate();
-            return e.compressedSize = D.length, D;
+            var _ = E.deflate();
+            return e.compressedSize = _.length, _;
           }
-          _ = null;
+          E = null;
           break;
       }
-    } else if (d && y)
+    } else if (l && y)
       y(Buffer.alloc(0));
     else
       return Buffer.alloc(0);
   }
-  function m(d, y) {
-    return (d.readUInt32LE(y + 4) << 4) + d.readUInt32LE(y);
+  function m(l, y) {
+    return (l.readUInt32LE(y + 4) << 4) + l.readUInt32LE(y);
   }
-  function u(d) {
+  function u(l) {
     try {
-      for (var y = 0, v, _, D; y + 4 < d.length; )
-        v = d.readUInt16LE(y), y += 2, _ = d.readUInt16LE(y), y += 2, D = d.slice(y, y + _), y += _, V.ID_ZIP64 === v && s(D);
+      for (var y = 0, I, E, _; y + 4 < l.length; )
+        I = l.readUInt16LE(y), y += 2, E = l.readUInt16LE(y), y += 2, _ = l.slice(y, y + E), y += E, V.ID_ZIP64 === I && o(_);
     } catch {
       throw U.Errors.EXTRA_FIELD_PARSE_ERROR();
     }
   }
-  function s(d) {
-    var y, v, _, D;
-    d.length >= V.EF_ZIP64_SCOMP && (y = m(d, V.EF_ZIP64_SUNCOMP), e.size === V.EF_ZIP64_OR_32 && (e.size = y)), d.length >= V.EF_ZIP64_RHO && (v = m(d, V.EF_ZIP64_SCOMP), e.compressedSize === V.EF_ZIP64_OR_32 && (e.compressedSize = v)), d.length >= V.EF_ZIP64_DSN && (_ = m(d, V.EF_ZIP64_RHO), e.offset === V.EF_ZIP64_OR_32 && (e.offset = _)), d.length >= V.EF_ZIP64_DSN + 4 && (D = d.readUInt32LE(V.EF_ZIP64_DSN), e.diskNumStart === V.EF_ZIP64_OR_16 && (e.diskNumStart = D));
+  function o(l) {
+    var y, I, E, _;
+    l.length >= V.EF_ZIP64_SCOMP && (y = m(l, V.EF_ZIP64_SUNCOMP), e.size === V.EF_ZIP64_OR_32 && (e.size = y)), l.length >= V.EF_ZIP64_RHO && (I = m(l, V.EF_ZIP64_SCOMP), e.compressedSize === V.EF_ZIP64_OR_32 && (e.compressedSize = I)), l.length >= V.EF_ZIP64_DSN && (E = m(l, V.EF_ZIP64_RHO), e.offset === V.EF_ZIP64_OR_32 && (e.offset = E)), l.length >= V.EF_ZIP64_DSN + 4 && (_ = l.readUInt32LE(V.EF_ZIP64_DSN), e.diskNumStart === V.EF_ZIP64_OR_16 && (e.diskNumStart = _));
   }
   return {
     get entryName() {
-      return E.decode(n);
+      return C.decode(n);
     },
     get rawEntryName() {
       return n;
     },
-    set entryName(d) {
-      n = U.toBuffer(d, E.encode);
+    set entryName(l) {
+      n = U.toBuffer(l, C.encode);
       var y = n[n.length - 1];
-      o = y === 47 || y === 92, e.fileNameLength = n.length;
+      i = y === 47 || y === 92, e.fileNameLength = n.length;
     },
     get efs() {
-      return typeof I == "function" ? I(this.entryName) : I;
+      return typeof v == "function" ? v(this.entryName) : v;
     },
     get extra() {
-      return i;
+      return s;
     },
-    set extra(d) {
-      i = d, e.extraLength = d.length, u(d);
+    set extra(l) {
+      s = l, e.extraLength = l.length, u(l);
     },
     get comment() {
-      return E.decode(a);
+      return C.decode(a);
     },
-    set comment(d) {
-      if (a = U.toBuffer(d, E.encode), e.commentLength = a.length, a.length > 65535)
+    set comment(l) {
+      if (a = U.toBuffer(l, C.encode), e.commentLength = a.length, a.length > 65535)
         throw U.Errors.COMMENT_TOO_LONG();
     },
     get name() {
-      var d = E.decode(n);
-      return o ? d.substr(d.length - 1).split("/").pop() : d.split("/").pop();
+      var l = C.decode(n);
+      return i ? l.substr(l.length - 1).split("/").pop() : l.split("/").pop();
     },
     get isDirectory() {
-      return o;
+      return i;
     },
     getCompressedData: function() {
       return f(!1, null);
     },
-    getCompressedDataAsync: function(d) {
-      f(!0, d);
+    getCompressedDataAsync: function(l) {
+      f(!0, l);
     },
-    setData: function(d) {
-      c = U.toBuffer(d, U.decoder.encode), !o && c.length ? (e.size = c.length, e.method = U.Constants.DEFLATED, e.crc = U.crc32(d), e.changed = !0) : e.method = U.Constants.STORED;
+    setData: function(l) {
+      c = U.toBuffer(l, U.decoder.encode), !i && c.length ? (e.size = c.length, e.method = U.Constants.DEFLATED, e.crc = U.crc32(l), e.changed = !0) : e.method = U.Constants.STORED;
     },
-    getData: function(d) {
-      return e.changed ? c : g(!1, null, d);
+    getData: function(l) {
+      return e.changed ? c : g(!1, null, l);
     },
-    getDataAsync: function(d, y) {
-      e.changed ? d(c) : g(!0, d, y);
+    getDataAsync: function(l, y) {
+      e.changed ? l(c) : g(!0, l, y);
     },
-    set attr(d) {
-      e.attr = d;
+    set attr(l) {
+      e.attr = l;
     },
     get attr() {
       return e.attr;
     },
-    set header(d) {
-      e.loadFromBinary(d);
+    set header(l) {
+      e.loadFromBinary(l);
     },
     get header() {
       return e;
     },
     packCentralHeader: function() {
-      e.flags_efs = this.efs, e.extraLength = i.length;
-      var d = e.centralHeaderToBinary(), y = U.Constants.CENHDR;
-      return n.copy(d, y), y += n.length, i.copy(d, y), y += e.extraLength, a.copy(d, y), d;
+      e.flags_efs = this.efs, e.extraLength = s.length;
+      var l = e.centralHeaderToBinary(), y = U.Constants.CENHDR;
+      return n.copy(l, y), y += n.length, s.copy(l, y), y += e.extraLength, a.copy(l, y), l;
     },
     packLocalHeader: function() {
-      let d = 0;
-      e.flags_efs = this.efs, e.extraLocalLength = l.length;
-      const y = e.localHeaderToBinary(), v = Buffer.alloc(y.length + n.length + e.extraLocalLength);
-      return y.copy(v, d), d += y.length, n.copy(v, d), d += n.length, l.copy(v, d), d += l.length, v;
+      let l = 0;
+      e.flags_efs = this.efs, e.extraLocalLength = d.length;
+      const y = e.localHeaderToBinary(), I = Buffer.alloc(y.length + n.length + e.extraLocalLength);
+      return y.copy(I, l), l += y.length, n.copy(I, l), l += n.length, d.copy(I, l), l += d.length, I;
     },
     toJSON: function() {
-      const d = function(y) {
+      const l = function(y) {
         return "<" + (y && y.length + " bytes buffer" || "null") + ">";
       };
       return {
@@ -4389,8 +4524,8 @@ var U = Se, Kr = Le, V = U.Constants, ze = Pe, Tt = function(r, t) {
         comment: this.comment,
         isDirectory: this.isDirectory,
         header: e.toJSON(),
-        compressedData: d(t),
-        data: d(c)
+        compressedData: l(t),
+        data: l(c)
       };
     },
     toString: function() {
@@ -4398,60 +4533,60 @@ var U = Se, Kr = Le, V = U.Constants, ze = Pe, Tt = function(r, t) {
     }
   };
 };
-const pt = Tt, Xr = Le, Y = Se;
-var Yr = function(r, t) {
-  var e = [], n = {}, a = Buffer.alloc(0), o = new Xr.MainHeader(), c = !1;
-  const i = /* @__PURE__ */ new Set(), l = t, { noSort: I, decoder: w } = l;
-  r ? p(l.readEntries) : c = !0;
-  function E() {
+const pt = xt, rn = Ne, Y = Ce;
+var nn = function(r, t) {
+  var e = [], n = {}, a = Buffer.alloc(0), i = new rn.MainHeader(), c = !1;
+  const s = /* @__PURE__ */ new Set(), d = t, { noSort: v, decoder: w } = d;
+  r ? p(d.readEntries) : c = !0;
+  function C() {
     const f = /* @__PURE__ */ new Set();
     for (const m of Object.keys(n)) {
       const u = m.split("/");
       if (u.pop(), !!u.length)
-        for (let s = 0; s < u.length; s++) {
-          const d = u.slice(0, s + 1).join("/") + "/";
-          f.add(d);
+        for (let o = 0; o < u.length; o++) {
+          const l = u.slice(0, o + 1).join("/") + "/";
+          f.add(l);
         }
     }
     for (const m of f)
       if (!(m in n)) {
-        const u = new pt(l);
-        u.entryName = m, u.attr = 16, u.temporary = !0, e.push(u), n[u.entryName] = u, i.add(u);
+        const u = new pt(d);
+        u.entryName = m, u.attr = 16, u.temporary = !0, e.push(u), n[u.entryName] = u, s.add(u);
       }
   }
-  function C() {
-    if (c = !0, n = {}, o.diskEntries > (r.length - o.offset) / Y.Constants.CENHDR)
+  function S() {
+    if (c = !0, n = {}, i.diskEntries > (r.length - i.offset) / Y.Constants.CENHDR)
       throw Y.Errors.DISK_ENTRY_TOO_LARGE();
-    e = new Array(o.diskEntries);
-    for (var f = o.offset, m = 0; m < e.length; m++) {
-      var u = f, s = new pt(l, r);
-      s.header = r.slice(u, u += Y.Constants.CENHDR), s.entryName = r.slice(u, u += s.header.fileNameLength), s.header.extraLength && (s.extra = r.slice(u, u += s.header.extraLength)), s.header.commentLength && (s.comment = r.slice(u, u + s.header.commentLength)), f += s.header.centralHeaderSize, e[m] = s, n[s.entryName] = s;
+    e = new Array(i.diskEntries);
+    for (var f = i.offset, m = 0; m < e.length; m++) {
+      var u = f, o = new pt(d, r);
+      o.header = r.slice(u, u += Y.Constants.CENHDR), o.entryName = r.slice(u, u += o.header.fileNameLength), o.header.extraLength && (o.extra = r.slice(u, u += o.header.extraLength)), o.header.commentLength && (o.comment = r.slice(u, u + o.header.commentLength)), f += o.header.centralHeaderSize, e[m] = o, n[o.entryName] = o;
     }
-    i.clear(), E();
+    s.clear(), C();
   }
   function p(f) {
-    var m = r.length - Y.Constants.ENDHDR, u = Math.max(0, m - 65535), s = u, d = r.length, y = -1, v = 0;
-    for ((typeof l.trailingSpace == "boolean" ? l.trailingSpace : !1) && (u = 0), m; m >= s; m--)
+    var m = r.length - Y.Constants.ENDHDR, u = Math.max(0, m - 65535), o = u, l = r.length, y = -1, I = 0;
+    for ((typeof d.trailingSpace == "boolean" ? d.trailingSpace : !1) && (u = 0), m; m >= o; m--)
       if (r[m] === 80) {
         if (r.readUInt32LE(m) === Y.Constants.ENDSIG) {
-          y = m, v = m, d = m + Y.Constants.ENDHDR, s = m - Y.Constants.END64HDR;
+          y = m, I = m, l = m + Y.Constants.ENDHDR, o = m - Y.Constants.END64HDR;
           continue;
         }
         if (r.readUInt32LE(m) === Y.Constants.END64SIG) {
-          s = u;
+          o = u;
           continue;
         }
         if (r.readUInt32LE(m) === Y.Constants.ZIP64SIG) {
-          y = m, d = m + Y.readBigUInt64LE(r, m + Y.Constants.ZIP64SIZE) + Y.Constants.ZIP64LEAD;
+          y = m, l = m + Y.readBigUInt64LE(r, m + Y.Constants.ZIP64SIZE) + Y.Constants.ZIP64LEAD;
           break;
         }
       }
     if (y == -1)
       throw Y.Errors.INVALID_FORMAT();
-    o.loadFromBinary(r.slice(y, d)), o.commentLength && (a = r.slice(v + Y.Constants.ENDHDR)), f && C();
+    i.loadFromBinary(r.slice(y, l)), i.commentLength && (a = r.slice(I + Y.Constants.ENDHDR)), f && S();
   }
   function g() {
-    e.length > 1 && !I && e.sort((f, m) => f.entryName.toLowerCase().localeCompare(m.entryName.toLowerCase()));
+    e.length > 1 && !v && e.sort((f, m) => f.entryName.toLowerCase().localeCompare(m.entryName.toLowerCase()));
   }
   return {
     /**
@@ -4459,7 +4594,7 @@ var Yr = function(r, t) {
      * @return Array
      */
     get entries() {
-      return c || C(), e.filter((f) => !i.has(f));
+      return c || S(), e.filter((f) => !s.has(f));
     },
     /**
      * Archive comment
@@ -4469,10 +4604,10 @@ var Yr = function(r, t) {
       return w.decode(a);
     },
     set comment(f) {
-      a = Y.toBuffer(f, w.encode), o.commentLength = a.length;
+      a = Y.toBuffer(f, w.encode), i.commentLength = a.length;
     },
     getEntryCount: function() {
-      return c ? e.length : o.diskEntries;
+      return c ? e.length : i.diskEntries;
     },
     forEach: function(f) {
       this.entries.forEach(f);
@@ -4484,7 +4619,7 @@ var Yr = function(r, t) {
      * @return ZipEntry
      */
     getEntry: function(f) {
-      return c || C(), n[f] || null;
+      return c || S(), n[f] || null;
     },
     /**
      * Adds the given entry to the entry list
@@ -4492,7 +4627,7 @@ var Yr = function(r, t) {
      * @param entry
      */
     setEntry: function(f) {
-      c || C(), e.push(f), n[f.entryName] = f, o.totalEntries = e.length;
+      c || S(), e.push(f), n[f.entryName] = f, i.totalEntries = e.length;
     },
     /**
      * Removes the file with the given name from the entry list.
@@ -4502,9 +4637,9 @@ var Yr = function(r, t) {
      * @returns {void}
      */
     deleteFile: function(f, m = !0) {
-      c || C();
+      c || S();
       const u = n[f];
-      this.getEntryChildren(u, m).map((d) => d.entryName).forEach(this.deleteEntry);
+      this.getEntryChildren(u, m).map((l) => l.entryName).forEach(this.deleteEntry);
     },
     /**
      * Removes the entry with the given name from the entry list.
@@ -4513,9 +4648,9 @@ var Yr = function(r, t) {
      * @returns {void}
      */
     deleteEntry: function(f) {
-      c || C();
+      c || S();
       const m = n[f], u = e.indexOf(m);
-      u >= 0 && (e.splice(u, 1), delete n[f], o.totalEntries = e.length);
+      u >= 0 && (e.splice(u, 1), delete n[f], i.totalEntries = e.length);
     },
     /**
      *  Iterates and returns all nested files and directories of the given entry
@@ -4524,11 +4659,11 @@ var Yr = function(r, t) {
      * @return Array
      */
     getEntryChildren: function(f, m = !0) {
-      if (c || C(), typeof f == "object")
+      if (c || S(), typeof f == "object")
         if (f.isDirectory && m) {
-          const u = [], s = f.entryName;
-          for (const d of e)
-            d.entryName.startsWith(s) && u.push(d);
+          const u = [], o = f.entryName;
+          for (const l of e)
+            l.entryName.startsWith(o) && u.push(l);
           return u;
         } else
           return [f];
@@ -4553,64 +4688,64 @@ var Yr = function(r, t) {
      * @return Buffer
      */
     compressToBuffer: function() {
-      c || C(), g();
+      c || S(), g();
       const f = [], m = [];
-      let u = 0, s = 0;
-      o.size = 0, o.offset = 0;
-      let d = 0;
-      for (const _ of this.entries) {
-        const D = _.getCompressedData();
-        _.header.offset = s;
-        const k = _.packLocalHeader(), P = k.length + D.length;
-        s += P, f.push(k), f.push(D);
-        const $ = _.packCentralHeader();
-        m.push($), o.size += $.length, u += P + $.length, d++;
+      let u = 0, o = 0;
+      i.size = 0, i.offset = 0;
+      let l = 0;
+      for (const E of this.entries) {
+        const _ = E.getCompressedData();
+        E.header.offset = o;
+        const x = E.packLocalHeader(), T = x.length + _.length;
+        o += T, f.push(x), f.push(_);
+        const M = E.packCentralHeader();
+        m.push(M), i.size += M.length, u += T + M.length, l++;
       }
-      u += o.mainHeaderSize, o.offset = s, o.totalEntries = d, s = 0;
+      u += i.mainHeaderSize, i.offset = o, i.totalEntries = l, o = 0;
       const y = Buffer.alloc(u);
-      for (const _ of f)
-        _.copy(y, s), s += _.length;
-      for (const _ of m)
-        _.copy(y, s), s += _.length;
-      const v = o.toBinary();
-      return a && a.copy(v, Y.Constants.ENDHDR), v.copy(y, s), r = y, c = !1, y;
+      for (const E of f)
+        E.copy(y, o), o += E.length;
+      for (const E of m)
+        E.copy(y, o), o += E.length;
+      const I = i.toBinary();
+      return a && a.copy(I, Y.Constants.ENDHDR), I.copy(y, o), r = y, c = !1, y;
     },
-    toAsyncBuffer: function(f, m, u, s) {
+    toAsyncBuffer: function(f, m, u, o) {
       try {
-        c || C(), g();
-        const d = [], y = [];
-        let v = 0, _ = 0, D = 0;
-        o.size = 0, o.offset = 0;
-        const k = function(P) {
-          if (P.length > 0) {
-            const $ = P.shift(), K = $.entryName + $.extra.toString();
-            u && u(K), $.getCompressedDataAsync(function(Q) {
-              s && s(K), $.header.offset = _;
-              const N = $.packLocalHeader(), Z = N.length + Q.length;
-              _ += Z, d.push(N), d.push(Q);
-              const X = $.packCentralHeader();
-              y.push(X), o.size += X.length, v += Z + X.length, D++, k(P);
+        c || S(), g();
+        const l = [], y = [];
+        let I = 0, E = 0, _ = 0;
+        i.size = 0, i.offset = 0;
+        const x = function(T) {
+          if (T.length > 0) {
+            const M = T.shift(), K = M.entryName + M.extra.toString();
+            u && u(K), M.getCompressedDataAsync(function(Q) {
+              o && o(K), M.header.offset = E;
+              const L = M.packLocalHeader(), Z = L.length + Q.length;
+              E += Z, l.push(L), l.push(Q);
+              const X = M.packCentralHeader();
+              y.push(X), i.size += X.length, I += Z + X.length, _++, x(T);
             });
           } else {
-            v += o.mainHeaderSize, o.offset = _, o.totalEntries = D, _ = 0;
-            const $ = Buffer.alloc(v);
-            d.forEach(function(Q) {
-              Q.copy($, _), _ += Q.length;
+            I += i.mainHeaderSize, i.offset = E, i.totalEntries = _, E = 0;
+            const M = Buffer.alloc(I);
+            l.forEach(function(Q) {
+              Q.copy(M, E), E += Q.length;
             }), y.forEach(function(Q) {
-              Q.copy($, _), _ += Q.length;
+              Q.copy(M, E), E += Q.length;
             });
-            const K = o.toBinary();
-            a && a.copy(K, Y.Constants.ENDHDR), K.copy($, _), r = $, c = !1, f($);
+            const K = i.toBinary();
+            a && a.copy(K, Y.Constants.ENDHDR), K.copy(M, E), r = M, c = !1, f(M);
           }
         };
-        k(Array.from(this.entries));
-      } catch (d) {
-        m(d);
+        x(Array.from(this.entries));
+      } catch (l) {
+        m(l);
       }
     }
   };
 };
-const q = Se, W = ne, Qr = Tt, en = Yr, me = (...r) => q.findLast(r, (t) => typeof t == "boolean"), ft = (...r) => q.findLast(r, (t) => typeof t == "string"), tn = (...r) => q.findLast(r, (t) => typeof t == "function"), rn = {
+const q = Ce, W = ne, an = xt, sn = nn, ue = (...r) => q.findLast(r, (t) => typeof t == "boolean"), ft = (...r) => q.findLast(r, (t) => typeof t == "string"), on = (...r) => q.findLast(r, (t) => typeof t == "function"), cn = {
   // option "noSort" : if true it disables files sorting
   noSort: !1,
   // read entries during load (initial loading may be slower)
@@ -4620,9 +4755,9 @@ const q = Se, W = ne, Qr = Tt, en = Yr, me = (...r) => q.findLast(r, (t) => type
   // file system
   fs: null
 };
-var nn = function(r, t) {
+var ln = function(r, t) {
   let e = null;
-  const n = Object.assign(/* @__PURE__ */ Object.create(null), rn);
+  const n = Object.assign(/* @__PURE__ */ Object.create(null), cn);
   r && typeof r == "object" && (r instanceof Uint8Array || (Object.assign(n, r), r = n.input ? n.input : void 0, n.input && delete n.input), Buffer.isBuffer(r) && (e = r, n.method = q.Constants.BUFFER, r = void 0)), Object.assign(n, t);
   const a = new q(n);
   if ((typeof n.decoder != "object" || typeof n.decoder.encode != "function" || typeof n.decoder.decode != "function") && (n.decoder = q.decoder), r && typeof r == "string")
@@ -4630,11 +4765,11 @@ var nn = function(r, t) {
       n.method = q.Constants.FILE, n.filename = r, e = a.fs.readFileSync(r);
     else
       throw q.Errors.INVALID_FILENAME();
-  const o = new en(e, n), { canonical: c, sanitize: i, zipnamefix: l } = q;
-  function I(p) {
-    if (p && o) {
+  const i = new sn(e, n), { canonical: c, sanitize: s, zipnamefix: d } = q;
+  function v(p) {
+    if (p && i) {
       var g;
-      if (typeof p == "string" && (g = o.getEntry(W.posix.normalize(p))), typeof p == "object" && typeof p.entryName < "u" && typeof p.header < "u" && (g = o.getEntry(p.entryName)), g)
+      if (typeof p == "string" && (g = i.getEntry(W.posix.normalize(p))), typeof p == "object" && typeof p.entryName < "u" && typeof p.header < "u" && (g = i.getEntry(p.entryName)), g)
         return g;
     }
     return null;
@@ -4643,14 +4778,14 @@ var nn = function(r, t) {
     const { join: g, normalize: f, sep: m } = W.posix;
     return g(".", f(m + p.split("\\").join(m) + m));
   }
-  function E(p) {
+  function C(p) {
     return p instanceof RegExp ? /* @__PURE__ */ function(g) {
       return function(f) {
         return g.test(f);
       };
     }(p) : typeof p != "function" ? () => !0 : p;
   }
-  const C = (p, g) => {
+  const S = (p, g) => {
     let f = g.slice(-1);
     return f = f === a.sep ? a.sep : "", W.relative(p, g) + f;
   };
@@ -4662,7 +4797,7 @@ var nn = function(r, t) {
      * @return Buffer or Null in case of error
      */
     readFile: function(p, g) {
-      var f = I(p);
+      var f = v(p);
       return f && f.getData(g) || null;
     },
     /**
@@ -4671,9 +4806,9 @@ var nn = function(r, t) {
      * @returns {integer}
      */
     childCount: function(p) {
-      const g = I(p);
+      const g = v(p);
       if (g)
-        return o.getChildCount(g);
+        return i.getChildCount(g);
     },
     /**
      * Asynchronous readFile
@@ -4683,7 +4818,7 @@ var nn = function(r, t) {
      * @return Buffer or Null in case of error
      */
     readFileAsync: function(p, g) {
-      var f = I(p);
+      var f = v(p);
       f ? f.getDataAsync(g) : g(null, "getEntry failed for:" + p);
     },
     /**
@@ -4694,7 +4829,7 @@ var nn = function(r, t) {
      * @return String
      */
     readAsText: function(p, g) {
-      var f = I(p);
+      var f = v(p);
       if (f) {
         var m = f.getData();
         if (m && m.length)
@@ -4711,10 +4846,10 @@ var nn = function(r, t) {
      * @return String
      */
     readAsTextAsync: function(p, g, f) {
-      var m = I(p);
-      m ? m.getDataAsync(function(u, s) {
-        if (s) {
-          g(u, s);
+      var m = v(p);
+      m ? m.getDataAsync(function(u, o) {
+        if (o) {
+          g(u, o);
           return;
         }
         u && u.length ? g(u.toString(f || "utf8")) : g("");
@@ -4727,8 +4862,8 @@ var nn = function(r, t) {
      * @returns {void}
      */
     deleteFile: function(p, g = !0) {
-      var f = I(p);
-      f && o.deleteFile(f.entryName, g);
+      var f = v(p);
+      f && i.deleteFile(f.entryName, g);
     },
     /**
      * Remove the entry from the file or directory without affecting any nested entries
@@ -4737,8 +4872,8 @@ var nn = function(r, t) {
      * @returns {void}
      */
     deleteEntry: function(p) {
-      var g = I(p);
-      g && o.deleteEntry(g.entryName);
+      var g = v(p);
+      g && i.deleteEntry(g.entryName);
     },
     /**
      * Adds a comment to the zip. The zip must be rewritten after adding the comment.
@@ -4746,7 +4881,7 @@ var nn = function(r, t) {
      * @param {string} comment
      */
     addZipComment: function(p) {
-      o.comment = p;
+      i.comment = p;
     },
     /**
      * Returns the zip comment
@@ -4754,7 +4889,7 @@ var nn = function(r, t) {
      * @return String
      */
     getZipComment: function() {
-      return o.comment || "";
+      return i.comment || "";
     },
     /**
      * Adds a comment to a specified zipEntry. The zip must be rewritten after adding the comment
@@ -4764,7 +4899,7 @@ var nn = function(r, t) {
      * @param {string} comment
      */
     addZipEntryComment: function(p, g) {
-      var f = I(p);
+      var f = v(p);
       f && (f.comment = g);
     },
     /**
@@ -4774,7 +4909,7 @@ var nn = function(r, t) {
      * @return String
      */
     getZipEntryComment: function(p) {
-      var g = I(p);
+      var g = v(p);
       return g && g.comment || "";
     },
     /**
@@ -4784,7 +4919,7 @@ var nn = function(r, t) {
      * @param {Buffer} content
      */
     updateFile: function(p, g) {
-      var f = I(p);
+      var f = v(p);
       f && f.setData(g);
     },
     /**
@@ -4800,8 +4935,8 @@ var nn = function(r, t) {
         g = g ? w(g) : "";
         const u = W.win32.basename(W.win32.normalize(p));
         g += f || u;
-        const s = a.fs.statSync(p), d = s.isFile() ? a.fs.readFileSync(p) : Buffer.alloc(0);
-        s.isDirectory() && (g += a.sep), this.addFile(g, d, m, s);
+        const o = a.fs.statSync(p), l = o.isFile() ? a.fs.readFileSync(p) : Buffer.alloc(0);
+        o.isDirectory() && (g += a.sep), this.addFile(g, l, m, o);
       } else
         throw q.Errors.FILE_NOT_FOUND(p);
     },
@@ -4825,19 +4960,19 @@ var nn = function(r, t) {
     addLocalFileAsync: function(p, g) {
       p = typeof p == "object" ? p : { localPath: p };
       const f = W.resolve(p.localPath), { comment: m } = p;
-      let { zipPath: u, zipName: s } = p;
-      const d = this;
-      a.fs.stat(f, function(y, v) {
+      let { zipPath: u, zipName: o } = p;
+      const l = this;
+      a.fs.stat(f, function(y, I) {
         if (y)
           return g(y, !1);
         u = u ? w(u) : "";
-        const _ = W.win32.basename(W.win32.normalize(f));
-        if (u += s || _, v.isFile())
-          a.fs.readFile(f, function(D, k) {
-            return D ? g(D, !1) : (d.addFile(u, k, m, v), setImmediate(g, void 0, !0));
+        const E = W.win32.basename(W.win32.normalize(f));
+        if (u += o || E, I.isFile())
+          a.fs.readFile(f, function(_, x) {
+            return _ ? g(_, !1) : (l.addFile(u, x, m, I), setImmediate(g, void 0, !0));
           });
-        else if (v.isDirectory())
-          return u += a.sep, d.addFile(u, Buffer.alloc(0), m, v), setImmediate(g, void 0, !0);
+        else if (I.isDirectory())
+          return u += a.sep, l.addFile(u, Buffer.alloc(0), m, I), setImmediate(g, void 0, !0);
       });
     },
     /**
@@ -4848,12 +4983,12 @@ var nn = function(r, t) {
      * @param {(RegExp|function)} [filter] - optional RegExp or Function if files match will be included.
      */
     addLocalFolder: function(p, g, f) {
-      if (f = E(f), g = g ? w(g) : "", p = W.normalize(p), a.fs.existsSync(p)) {
+      if (f = C(f), g = g ? w(g) : "", p = W.normalize(p), a.fs.existsSync(p)) {
         const m = a.findFiles(p), u = this;
         if (m.length)
-          for (const s of m) {
-            const d = W.join(g, C(p, s));
-            f(d) && u.addLocalFile(s, W.dirname(d));
+          for (const o of m) {
+            const l = W.join(g, S(p, o));
+            f(l) && u.addLocalFile(o, W.dirname(l));
           }
       } else
         throw q.Errors.FILE_NOT_FOUND(p);
@@ -4867,28 +5002,28 @@ var nn = function(r, t) {
      *               be included.
      */
     addLocalFolderAsync: function(p, g, f, m) {
-      m = E(m), f = f ? w(f) : "", p = W.normalize(p);
+      m = C(m), f = f ? w(f) : "", p = W.normalize(p);
       var u = this;
-      a.fs.open(p, "r", function(s) {
-        if (s && s.code === "ENOENT")
+      a.fs.open(p, "r", function(o) {
+        if (o && o.code === "ENOENT")
           g(void 0, q.Errors.FILE_NOT_FOUND(p));
-        else if (s)
-          g(void 0, s);
+        else if (o)
+          g(void 0, o);
         else {
-          var d = a.findFiles(p), y = -1, v = function() {
-            if (y += 1, y < d.length) {
-              var _ = d[y], D = C(p, _).split("\\").join("/");
-              D = D.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^\x20-\x7E]/g, ""), m(D) ? a.fs.stat(_, function(k, P) {
-                k && g(void 0, k), P.isFile() ? a.fs.readFile(_, function($, K) {
-                  $ ? g(void 0, $) : (u.addFile(f + D, K, "", P), v());
-                }) : (u.addFile(f + D + "/", Buffer.alloc(0), "", P), v());
+          var l = a.findFiles(p), y = -1, I = function() {
+            if (y += 1, y < l.length) {
+              var E = l[y], _ = S(p, E).split("\\").join("/");
+              _ = _.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^\x20-\x7E]/g, ""), m(_) ? a.fs.stat(E, function(x, T) {
+                x && g(void 0, x), T.isFile() ? a.fs.readFile(E, function(M, K) {
+                  M ? g(void 0, M) : (u.addFile(f + _, K, "", T), I());
+                }) : (u.addFile(f + _ + "/", Buffer.alloc(0), "", T), I());
               }) : process.nextTick(() => {
-                v();
+                I();
               });
             } else
               g(!0, void 0);
           };
-          v();
+          I();
         }
       });
     },
@@ -4906,31 +5041,31 @@ var nn = function(r, t) {
     addLocalFolderAsync2: function(p, g) {
       const f = this;
       p = typeof p == "object" ? p : { localPath: p }, localPath = W.resolve(w(p.localPath));
-      let { zipPath: m, filter: u, namefix: s } = p;
-      u instanceof RegExp ? u = /* @__PURE__ */ function(v) {
-        return function(_) {
-          return v.test(_);
+      let { zipPath: m, filter: u, namefix: o } = p;
+      u instanceof RegExp ? u = /* @__PURE__ */ function(I) {
+        return function(E) {
+          return I.test(E);
         };
       }(u) : typeof u != "function" && (u = function() {
         return !0;
-      }), m = m ? w(m) : "", s == "latin1" && (s = (v) => v.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^\x20-\x7E]/g, "")), typeof s != "function" && (s = (v) => v);
-      const d = (v) => W.join(m, s(C(localPath, v))), y = (v) => W.win32.basename(W.win32.normalize(s(v)));
-      a.fs.open(localPath, "r", function(v) {
-        v && v.code === "ENOENT" ? g(void 0, q.Errors.FILE_NOT_FOUND(localPath)) : v ? g(void 0, v) : a.findFilesAsync(localPath, function(_, D) {
-          if (_)
-            return g(_);
-          D = D.filter((k) => u(d(k))), D.length || g(void 0, !1), setImmediate(
-            D.reverse().reduce(function(k, P) {
-              return function($, K) {
-                if ($ || K === !1)
-                  return setImmediate(k, $, !1);
+      }), m = m ? w(m) : "", o == "latin1" && (o = (I) => I.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^\x20-\x7E]/g, "")), typeof o != "function" && (o = (I) => I);
+      const l = (I) => W.join(m, o(S(localPath, I))), y = (I) => W.win32.basename(W.win32.normalize(o(I)));
+      a.fs.open(localPath, "r", function(I) {
+        I && I.code === "ENOENT" ? g(void 0, q.Errors.FILE_NOT_FOUND(localPath)) : I ? g(void 0, I) : a.findFilesAsync(localPath, function(E, _) {
+          if (E)
+            return g(E);
+          _ = _.filter((x) => u(l(x))), _.length || g(void 0, !1), setImmediate(
+            _.reverse().reduce(function(x, T) {
+              return function(M, K) {
+                if (M || K === !1)
+                  return setImmediate(x, M, !1);
                 f.addLocalFileAsync(
                   {
-                    localPath: P,
-                    zipPath: W.dirname(d(P)),
-                    zipName: y(P)
+                    localPath: T,
+                    zipPath: W.dirname(l(T)),
+                    zipName: y(T)
                   },
-                  k
+                  x
                 );
               };
             }, g)
@@ -4949,8 +5084,8 @@ var nn = function(r, t) {
      */
     addLocalFolderPromise: function(p, g) {
       return new Promise((f, m) => {
-        this.addLocalFolderAsync2(Object.assign({ localPath: p }, g), (u, s) => {
-          u && m(u), s && f(this);
+        this.addLocalFolderAsync2(Object.assign({ localPath: p }, g), (u, o) => {
+          u && m(u), o && f(this);
         });
       });
     },
@@ -4965,15 +5100,15 @@ var nn = function(r, t) {
      * @param {number | object} [attr] - number as unix file permissions, object as filesystem Stats object
      */
     addFile: function(p, g, f, m) {
-      p = l(p);
-      let u = I(p);
-      const s = u != null;
-      s || (u = new Qr(n), u.entryName = p), u.comment = f || "";
-      const d = typeof m == "object" && m instanceof a.fs.Stats;
-      d && (u.header.time = m.mtime);
+      p = d(p);
+      let u = v(p);
+      const o = u != null;
+      o || (u = new an(n), u.entryName = p), u.comment = f || "";
+      const l = typeof m == "object" && m instanceof a.fs.Stats;
+      l && (u.header.time = m.mtime);
       var y = u.isDirectory ? 16 : 0;
-      let v = u.isDirectory ? 16384 : 32768;
-      return d ? v |= 4095 & m.mode : typeof m == "number" ? v |= 4095 & m : v |= u.isDirectory ? 493 : 420, y = (y | v << 16) >>> 0, u.attr = y, u.setData(g), s || o.setEntry(u), u;
+      let I = u.isDirectory ? 16384 : 32768;
+      return l ? I |= 4095 & m.mode : typeof m == "number" ? I |= 4095 & m : I |= u.isDirectory ? 493 : 420, y = (y | I << 16) >>> 0, u.attr = y, u.setData(g), o || i.setEntry(u), u;
     },
     /**
      * Returns an array of ZipEntry objects representing the files and folders inside the archive
@@ -4982,7 +5117,7 @@ var nn = function(r, t) {
      * @returns Array
      */
     getEntries: function(p) {
-      return o.password = p, o ? o.entries : [];
+      return i.password = p, i ? i.entries : [];
     },
     /**
      * Returns a ZipEntry object representing the file or folder specified by ``name``.
@@ -4991,13 +5126,13 @@ var nn = function(r, t) {
      * @return ZipEntry
      */
     getEntry: function(p) {
-      return I(p);
+      return v(p);
     },
     getEntryCount: function() {
-      return o.getEntryCount();
+      return i.getEntryCount();
     },
     forEach: function(p) {
-      return o.forEach(p);
+      return i.forEach(p);
     },
     /**
      * Extracts the given entry to the given targetPath
@@ -5012,45 +5147,45 @@ var nn = function(r, t) {
      *
      * @return Boolean
      */
-    extractEntryTo: function(p, g, f, m, u, s) {
-      m = me(!1, m), u = me(!1, u), f = me(!0, f), s = ft(u, s);
-      var d = I(p);
-      if (!d)
+    extractEntryTo: function(p, g, f, m, u, o) {
+      m = ue(!1, m), u = ue(!1, u), f = ue(!0, f), o = ft(u, o);
+      var l = v(p);
+      if (!l)
         throw q.Errors.NO_ENTRY();
-      var y = c(d.entryName), v = i(g, s && !d.isDirectory ? s : f ? y : W.basename(y));
-      if (d.isDirectory) {
-        var _ = o.getEntryChildren(d);
-        return _.forEach(function(P) {
-          if (P.isDirectory)
+      var y = c(l.entryName), I = s(g, o && !l.isDirectory ? o : f ? y : W.basename(y));
+      if (l.isDirectory) {
+        var E = i.getEntryChildren(l);
+        return E.forEach(function(T) {
+          if (T.isDirectory)
             return;
-          var $ = P.getData();
-          if (!$)
+          var M = T.getData();
+          if (!M)
             throw q.Errors.CANT_EXTRACT_FILE();
-          var K = c(P.entryName), Q = i(g, f ? K : W.basename(K));
-          const N = u ? P.header.fileAttr : void 0;
-          a.writeFileTo(Q, $, m, N);
+          var K = c(T.entryName), Q = s(g, f ? K : W.basename(K));
+          const L = u ? T.header.fileAttr : void 0;
+          a.writeFileTo(Q, M, m, L);
         }), !0;
       }
-      var D = d.getData(o.password);
-      if (!D)
+      var _ = l.getData(i.password);
+      if (!_)
         throw q.Errors.CANT_EXTRACT_FILE();
-      if (a.fs.existsSync(v) && !m)
+      if (a.fs.existsSync(I) && !m)
         throw q.Errors.CANT_OVERRIDE();
-      const k = u ? p.header.fileAttr : void 0;
-      return a.writeFileTo(v, D, m, k), !0;
+      const x = u ? p.header.fileAttr : void 0;
+      return a.writeFileTo(I, _, m, x), !0;
     },
     /**
      * Test the archive
      * @param {string} [pass]
      */
     test: function(p) {
-      if (!o)
+      if (!i)
         return !1;
-      for (var g in o.entries)
+      for (var g in i.entries)
         try {
           if (g.isDirectory)
             continue;
-          var f = o.entries[g].getData(p);
+          var f = i.entries[g].getData(p);
           if (!f)
             return !1;
         } catch {
@@ -5069,21 +5204,21 @@ var nn = function(r, t) {
      * @param {string|Buffer} [pass] password
      */
     extractAllTo: function(p, g, f, m) {
-      if (f = me(!1, f), m = ft(f, m), g = me(!1, g), !o)
+      if (f = ue(!1, f), m = ft(f, m), g = ue(!1, g), !i)
         throw q.Errors.NO_ZIP();
-      o.entries.forEach(function(u) {
-        var s = i(p, c(u.entryName));
+      i.entries.forEach(function(u) {
+        var o = s(p, c(u.entryName));
         if (u.isDirectory) {
-          a.makeDir(s);
+          a.makeDir(o);
           return;
         }
-        var d = u.getData(m);
-        if (!d)
+        var l = u.getData(m);
+        if (!l)
           throw q.Errors.CANT_EXTRACT_FILE();
         const y = f ? u.header.fileAttr : void 0;
-        a.writeFileTo(s, d, g, y);
+        a.writeFileTo(o, l, g, y);
         try {
-          a.fs.utimesSync(s, u.header.time, u.header.time);
+          a.fs.utimesSync(o, u.header.time, u.header.time);
         } catch {
           throw q.Errors.CANT_EXTRACT_FILE();
         }
@@ -5100,45 +5235,45 @@ var nn = function(r, t) {
      * @param {function} callback The callback will be executed when all entries are extracted successfully or any error is thrown.
      */
     extractAllToAsync: function(p, g, f, m) {
-      if (m = tn(g, f, m), f = me(!1, f), g = me(!1, g), !m)
-        return new Promise((v, _) => {
-          this.extractAllToAsync(p, g, f, function(D) {
-            D ? _(D) : v(this);
+      if (m = on(g, f, m), f = ue(!1, f), g = ue(!1, g), !m)
+        return new Promise((I, E) => {
+          this.extractAllToAsync(p, g, f, function(_) {
+            _ ? E(_) : I(this);
           });
         });
-      if (!o) {
+      if (!i) {
         m(q.Errors.NO_ZIP());
         return;
       }
       p = W.resolve(p);
-      const u = (v) => i(p, W.normalize(c(v.entryName))), s = (v, _) => new Error(v + ': "' + _ + '"'), d = [], y = [];
-      o.entries.forEach((v) => {
-        v.isDirectory ? d.push(v) : y.push(v);
+      const u = (I) => s(p, W.normalize(c(I.entryName))), o = (I, E) => new Error(I + ': "' + E + '"'), l = [], y = [];
+      i.entries.forEach((I) => {
+        I.isDirectory ? l.push(I) : y.push(I);
       });
-      for (const v of d) {
-        const _ = u(v), D = f ? v.header.fileAttr : void 0;
+      for (const I of l) {
+        const E = u(I), _ = f ? I.header.fileAttr : void 0;
         try {
-          a.makeDir(_), D && a.fs.chmodSync(_, D), a.fs.utimesSync(_, v.header.time, v.header.time);
+          a.makeDir(E), _ && a.fs.chmodSync(E, _), a.fs.utimesSync(E, I.header.time, I.header.time);
         } catch {
-          m(s("Unable to create folder", _));
+          m(o("Unable to create folder", E));
         }
       }
-      y.reverse().reduce(function(v, _) {
-        return function(D) {
-          if (D)
-            v(D);
+      y.reverse().reduce(function(I, E) {
+        return function(_) {
+          if (_)
+            I(_);
           else {
-            const k = W.normalize(c(_.entryName)), P = i(p, k);
-            _.getDataAsync(function($, K) {
+            const x = W.normalize(c(E.entryName)), T = s(p, x);
+            E.getDataAsync(function(M, K) {
               if (K)
-                v(K);
-              else if (!$)
-                v(q.Errors.CANT_EXTRACT_FILE());
+                I(K);
+              else if (!M)
+                I(q.Errors.CANT_EXTRACT_FILE());
               else {
-                const Q = f ? _.header.fileAttr : void 0;
-                a.writeFileToAsync(P, $, g, Q, function(N) {
-                  N || v(s("Unable to write file", P)), a.fs.utimes(P, _.header.time, _.header.time, function(Z) {
-                    Z ? v(s("Unable to set times", P)) : v();
+                const Q = f ? E.header.fileAttr : void 0;
+                a.writeFileToAsync(T, M, g, Q, function(L) {
+                  L || I(o("Unable to write file", T)), a.fs.utimes(T, E.header.time, E.header.time, function(Z) {
+                    Z ? I(o("Unable to set times", T)) : I();
                   });
                 });
               }
@@ -5155,7 +5290,7 @@ var nn = function(r, t) {
      */
     writeZip: function(p, g) {
       if (arguments.length === 1 && typeof p == "function" && (g = p, p = ""), !p && n.filename && (p = n.filename), !!p) {
-        var f = o.compressToBuffer();
+        var f = i.compressToBuffer();
         if (f) {
           var m = a.writeFileTo(p, f, !0);
           typeof g == "function" && g(m ? null : new Error("failed"), "");
@@ -5173,11 +5308,11 @@ var nn = function(r, t) {
              */
     writeZipPromise: function(p, g) {
       const { overwrite: f, perm: m } = Object.assign({ overwrite: !0 }, g);
-      return new Promise((u, s) => {
-        !p && n.filename && (p = n.filename), p || s("ADM-ZIP: ZIP File Name Missing"), this.toBufferPromise().then((d) => {
-          const y = (v) => v ? u(v) : s("ADM-ZIP: Wasn't able to write zip file");
-          a.writeFileToAsync(p, d, f, m, y);
-        }, s);
+      return new Promise((u, o) => {
+        !p && n.filename && (p = n.filename), p || o("ADM-ZIP: ZIP File Name Missing"), this.toBufferPromise().then((l) => {
+          const y = (I) => I ? u(I) : o("ADM-ZIP: Wasn't able to write zip file");
+          a.writeFileToAsync(p, l, f, m, y);
+        }, o);
       });
     },
     /**
@@ -5185,7 +5320,7 @@ var nn = function(r, t) {
      */
     toBufferPromise: function() {
       return new Promise((p, g) => {
-        o.toAsyncBuffer(p, g);
+        i.toAsyncBuffer(p, g);
       });
     },
     /**
@@ -5198,42 +5333,50 @@ var nn = function(r, t) {
      * @returns {Buffer}
      */
     toBuffer: function(p, g, f, m) {
-      return typeof p == "function" ? (o.toAsyncBuffer(p, g, f, m), null) : o.compressToBuffer();
+      return typeof p == "function" ? (i.toAsyncBuffer(p, g, f, m), null) : i.compressToBuffer();
     }
   };
 };
-const ht = /* @__PURE__ */ Pr(nn), He = ne.join(b.getPath("userData"), "backups"), se = ne.join(He, "auto");
-x.existsSync(He) || x.mkdirSync(He, { recursive: !0 });
-x.existsSync(se) || x.mkdirSync(se, { recursive: !0 });
-class an {
+const ht = /* @__PURE__ */ Mr(ln);
+class dn {
+  getBackupDir() {
+    return ne.join(b.getPath("userData"), "backups");
+  }
+  getAutoBackupDir() {
+    return ne.join(this.getBackupDir(), "auto");
+  }
+  ensureBackupDirs() {
+    const t = this.getBackupDir(), e = this.getAutoBackupDir();
+    P.existsSync(t) || P.mkdirSync(t, { recursive: !0 }), P.existsSync(e) || P.mkdirSync(e, { recursive: !0 });
+  }
   // --- Encryption Helpers ---
   deriveKey(t, e) {
-    return fe.pbkdf2Sync(t, e, 1e5, 32, "sha256");
+    return pe.pbkdf2Sync(t, e, 1e5, 32, "sha256");
   }
   encryptData(t, e) {
-    const n = fe.randomBytes(16), a = fe.randomBytes(12), o = this.deriveKey(e, n), c = fe.createCipheriv("aes-256-gcm", o, a), i = Buffer.concat([c.update(t), c.final()]), l = c.getAuthTag();
+    const n = pe.randomBytes(16), a = pe.randomBytes(12), i = this.deriveKey(e, n), c = pe.createCipheriv("aes-256-gcm", i, a), s = Buffer.concat([c.update(t), c.final()]), d = c.getAuthTag();
     return {
-      encryptedData: i,
+      encryptedData: s,
       salt: n.toString("hex"),
       iv: a.toString("hex"),
-      authTag: l.toString("hex")
+      authTag: d.toString("hex")
     };
   }
   decryptData(t, e, n) {
-    const a = Buffer.from(n.salt, "hex"), o = Buffer.from(n.iv, "hex"), c = Buffer.from(n.authTag, "hex"), i = this.deriveKey(e, a), l = fe.createDecipheriv("aes-256-gcm", i, o);
-    return l.setAuthTag(c), Buffer.concat([l.update(t), l.final()]);
+    const a = Buffer.from(n.salt, "hex"), i = Buffer.from(n.iv, "hex"), c = Buffer.from(n.authTag, "hex"), s = this.deriveKey(e, a), d = pe.createDecipheriv("aes-256-gcm", s, i);
+    return d.setAuthTag(c), Buffer.concat([d.update(t), d.final()]);
   }
   // --- Core Logic ---
   // 1. Export Data
   async exportData(t, e) {
-    const [n, a, o, c, i, l] = await Promise.all([
+    const [n, a, i, c, s, d] = await Promise.all([
       h.novel.findMany(),
       h.volume.findMany(),
       h.chapter.findMany(),
       h.character.findMany(),
       h.idea.findMany(),
       h.tag.findMany()
-    ]), I = { novels: n, volumes: a, chapters: o, characters: c, ideas: i, tags: l }, w = Buffer.from(JSON.stringify(I)), E = new ht(), C = {
+    ]), v = { novels: n, volumes: a, chapters: i, characters: c, ideas: s, tags: d }, w = Buffer.from(JSON.stringify(v)), C = new ht(), S = {
       version: 1,
       appVersion: b.getVersion(),
       createdAt: (/* @__PURE__ */ new Date()).toISOString(),
@@ -5242,11 +5385,11 @@ class an {
     };
     if (e) {
       const { encryptedData: p, salt: g, iv: f, authTag: m } = this.encryptData(w, e);
-      C.encryption = { algo: "aes-256-gcm", salt: g, iv: f, authTag: m }, E.addFile("data.bin", p);
+      S.encryption = { algo: "aes-256-gcm", salt: g, iv: f, authTag: m }, C.addFile("data.bin", p);
     } else
-      E.addFile("data.json", w);
-    if (E.addFile("manifest.json", Buffer.from(JSON.stringify(C, null, 2))), !t) {
-      const { filePath: p } = await Ce.showSaveDialog({
+      C.addFile("data.json", w);
+    if (C.addFile("manifest.json", Buffer.from(JSON.stringify(S, null, 2))), !t) {
+      const { filePath: p } = await Ie.showSaveDialog({
         title: "Export Backup",
         defaultPath: `NovelData_${(/* @__PURE__ */ new Date()).toISOString().slice(0, 19).replace(/[-:]/g, "").replace("T", "_")}.nebak`,
         filters: [{ name: "Novel Editor Backup", extensions: ["nebak"] }]
@@ -5255,59 +5398,59 @@ class an {
         throw new Error("Export cancelled");
       t = p;
     }
-    return E.writeZip(t), t;
+    return C.writeZip(t), t;
   }
   // 2. Import Data (Restore)
   async importData(t, e) {
     const n = new ht(t), a = n.getEntry("manifest.json");
     if (!a)
       throw new Error("Invalid backup file: manifest.json missing");
-    const o = JSON.parse(a.getData().toString("utf8"));
+    const i = JSON.parse(a.getData().toString("utf8"));
     let c;
-    if (o.encrypted) {
+    if (i.encrypted) {
       if (!e)
         throw new Error("PASSWORD_REQUIRED");
-      const i = n.getEntry("data.bin");
-      if (!i)
+      const s = n.getEntry("data.bin");
+      if (!s)
         throw new Error("Invalid backup file: data.bin missing");
-      if (!o.encryption)
+      if (!i.encryption)
         throw new Error("Invalid backup file: encryption metadata missing");
       try {
-        const l = this.decryptData(i.getData(), e, o.encryption);
-        c = JSON.parse(l.toString("utf8"));
+        const d = this.decryptData(s.getData(), e, i.encryption);
+        c = JSON.parse(d.toString("utf8"));
       } catch {
         throw new Error("PASSWORD_INVALID");
       }
     } else {
-      const i = n.getEntry("data.json");
-      if (!i)
+      const s = n.getEntry("data.json");
+      if (!s)
         throw new Error("Invalid backup file: data.json missing");
-      c = JSON.parse(i.getData().toString("utf8"));
+      c = JSON.parse(s.getData().toString("utf8"));
     }
     await this.performRestore(c);
   }
   // Helper: Perform Restore (Transactional)
   async performRestore(t) {
     await this.createAutoBackup(), await h.$transaction(async (e) => {
-      var n, a, o, c, i, l;
+      var n, a, i, c, s, d;
       if (await e.tag.deleteMany(), await e.idea.deleteMany(), await e.character.deleteMany(), await e.chapter.deleteMany(), await e.volume.deleteMany(), await e.novel.deleteMany(), (n = t.novels) != null && n.length)
-        for (const I of t.novels)
-          await e.novel.create({ data: I });
+        for (const v of t.novels)
+          await e.novel.create({ data: v });
       if ((a = t.volumes) != null && a.length)
-        for (const I of t.volumes)
-          await e.volume.create({ data: I });
-      if ((o = t.chapters) != null && o.length)
-        for (const I of t.chapters)
-          await e.chapter.create({ data: I });
+        for (const v of t.volumes)
+          await e.volume.create({ data: v });
+      if ((i = t.chapters) != null && i.length)
+        for (const v of t.chapters)
+          await e.chapter.create({ data: v });
       if ((c = t.characters) != null && c.length)
-        for (const I of t.characters)
-          await e.character.create({ data: I });
-      if ((i = t.ideas) != null && i.length)
-        for (const I of t.ideas)
-          await e.idea.create({ data: I });
-      if ((l = t.tags) != null && l.length)
-        for (const I of t.tags)
-          await e.tag.create({ data: I });
+        for (const v of t.characters)
+          await e.character.create({ data: v });
+      if ((s = t.ideas) != null && s.length)
+        for (const v of t.ideas)
+          await e.idea.create({ data: v });
+      if ((d = t.tags) != null && d.length)
+        for (const v of t.tags)
+          await e.tag.create({ data: v });
     }, {
       maxWait: 1e4,
       timeout: 2e4
@@ -5316,56 +5459,107 @@ class an {
   // 3. Auto Backup Logic
   async createAutoBackup() {
     try {
-      const e = `auto_backup_${Date.now()}.nebak`, n = ne.join(se, e);
+      this.ensureBackupDirs();
+      const e = `auto_backup_${Date.now()}.nebak`, n = ne.join(this.getAutoBackupDir(), e);
       await this.exportData(n), console.log("[BackupService] Auto-backup created:", e), await this.rotateAutoBackups();
     } catch (t) {
       console.error("[BackupService] Failed to create auto-backup:", t);
     }
   }
   async rotateAutoBackups() {
-    const e = x.readdirSync(se).filter((n) => n.endsWith(".nebak")).map((n) => ({
-      name: n,
-      time: x.statSync(ne.join(se, n)).mtime.getTime()
-    })).sort((n, a) => a.time - n.time).slice(3);
-    for (const n of e)
-      x.unlinkSync(ne.join(se, n.name)), console.log("[BackupService] Rotated auto-backup:", n.name);
+    this.ensureBackupDirs();
+    const t = this.getAutoBackupDir(), n = P.readdirSync(t).filter((a) => a.endsWith(".nebak")).map((a) => ({
+      name: a,
+      time: P.statSync(ne.join(t, a)).mtime.getTime()
+    })).sort((a, i) => i.time - a.time).slice(3);
+    for (const a of n)
+      P.unlinkSync(ne.join(t, a.name)), console.log("[BackupService] Rotated auto-backup:", a.name);
   }
   // 4. List Auto Backups
   async getAutoBackups() {
-    return x.readdirSync(se).filter((t) => t.endsWith(".nebak")).map((t) => {
-      const e = x.statSync(ne.join(se, t));
+    this.ensureBackupDirs();
+    const t = this.getAutoBackupDir();
+    return P.readdirSync(t).filter((e) => e.endsWith(".nebak")).map((e) => {
+      const n = P.statSync(ne.join(t, e));
       return {
-        filename: t,
-        createdAt: e.mtime.getTime(),
-        size: e.size
+        filename: e,
+        createdAt: n.mtime.getTime(),
+        size: n.size
       };
-    }).sort((t, e) => e.createdAt - t.createdAt);
+    }).sort((e, n) => n.createdAt - e.createdAt);
   }
   // 5. Restore from Auto Backup
   async restoreAutoBackup(t) {
-    const e = ne.join(se, t);
-    if (!x.existsSync(e))
+    this.ensureBackupDirs();
+    const e = ne.join(this.getAutoBackupDir(), t);
+    if (!P.existsSync(e))
       throw new Error("Backup file not found");
     await this.importData(e);
   }
 }
-const Me = new an(), ve = L.dirname(jt(import.meta.url));
-process.env.APP_ROOT = L.join(ve, "..");
-const qe = process.env.VITE_DEV_SERVER_URL, An = L.join(process.env.APP_ROOT, "dist-electron"), Mt = L.join(process.env.APP_ROOT, "dist");
-process.env.VITE_PUBLIC = qe ? L.join(process.env.APP_ROOT, "public") : Mt;
+const xe = new dn(), we = N.dirname(Vt(import.meta.url));
+process.env.APP_ROOT = N.join(we, "..");
+const He = process.env.VITE_DEV_SERVER_URL, On = N.join(process.env.APP_ROOT, "dist-electron"), bt = N.join(process.env.APP_ROOT, "dist");
+process.env.VITE_PUBLIC = He ? N.join(process.env.APP_ROOT, "public") : bt;
 process.on("uncaughtException", (r) => {
-  ie("Main.uncaughtException", r), console.error("[Main] Uncaught Exception:", r), b.quit(), process.exit(1);
+  se("Main.uncaughtException", r), console.error("[Main] Uncaught Exception:", r), b.quit(), process.exit(1);
 });
 process.on("unhandledRejection", (r, t) => {
-  ie("Main.unhandledRejection", r, { promise: String(t) }), console.error("[Main] Unhandled Rejection at:", t, "reason:", r), b.quit(), process.exit(1);
+  se("Main.unhandledRejection", r, { promise: String(t) }), console.error("[Main] Unhandled Rejection at:", t, "reason:", r), b.quit(), process.exit(1);
 });
-let T, gt = !1;
-const bt = "云梦小说编辑器", on = "Novel Editor Dev";
-function sn() {
-  const r = b.getPath("appData");
-  return b.isPackaged ? L.join(r, bt) : L.join(r, "@novel-editor", "desktop-dev");
+let k, gt = !1;
+const kt = "云梦小说编辑器", un = "Novel Editor Dev";
+function mn() {
+  return b.isPackaged && process.platform === "win32" ? process.execPath : "com.noveleditor.app";
 }
-function cn(r) {
+function Mt() {
+  return b.isPackaged && typeof process.env.PORTABLE_EXECUTABLE_DIR == "string" && process.env.PORTABLE_EXECUTABLE_DIR.length > 0;
+}
+function Ot() {
+  return N.join(N.dirname(b.getPath("exe")), "data");
+}
+function pn() {
+  const r = process.env.PORTABLE_EXECUTABLE_DIR;
+  return r ? N.join(r, "data") : Ot();
+}
+function fn(r, t) {
+  if (!P.existsSync(r))
+    return;
+  P.existsSync(t) || P.mkdirSync(t, { recursive: !0 });
+  const e = P.readdirSync(r, { withFileTypes: !0 });
+  for (const n of e) {
+    const a = N.join(r, n.name), i = N.join(t, n.name);
+    if (!P.existsSync(i)) {
+      if (n.isDirectory()) {
+        P.cpSync(a, i, { recursive: !0 });
+        continue;
+      }
+      P.copyFileSync(a, i);
+    }
+  }
+}
+function hn() {
+  if (!b.isPackaged || Mt())
+    return;
+  const r = Ot(), t = b.getPath("userData"), e = N.join(r, "novel_editor.db"), n = N.join(t, "novel_editor.db");
+  !P.existsSync(e) || P.existsSync(n) || (fn(r, t), console.log("[Main] Migrated legacy packaged data from exe/data to userData."));
+}
+function gn() {
+  if (b.isPackaged) {
+    const e = N.join(process.resourcesPath, "icon_ink_pen_256.ico");
+    return P.existsSync(e) ? e : void 0;
+  }
+  const r = N.join(process.env.APP_ROOT || "", "build", "icon_ink_pen_256.ico");
+  if (P.existsSync(r))
+    return r;
+  const t = N.join(process.env.VITE_PUBLIC || "", "electron-vite.svg");
+  return P.existsSync(t) ? t : void 0;
+}
+function yn() {
+  const r = b.getPath("appData");
+  return b.isPackaged ? N.join(r, kt) : N.join(r, "@novel-editor", "desktop-dev");
+}
+function wn(r) {
   const t = r.indexOf("--ai-diag");
   if (t < 0)
     return {};
@@ -5373,42 +5567,42 @@ function cn(r) {
   if (e.length === 0)
     return { error: "Missing diagnostic action. Use: --ai-diag smoke <mcp|skill> [--json] [--db <path>] [--user-data <path>] or --ai-diag coverage [--json] [--db <path>] [--user-data <path>]" };
   const n = [];
-  let a = !1, o, c;
-  for (let I = 0; I < e.length; I += 1) {
-    const w = e[I];
+  let a = !1, i, c;
+  for (let v = 0; v < e.length; v += 1) {
+    const w = e[v];
     if (w === "--json") {
       a = !0;
       continue;
     }
     if (w === "--db") {
-      const E = e[I + 1];
-      if (!E)
+      const C = e[v + 1];
+      if (!C)
         return { error: "Missing value for --db" };
-      o = E, I += 1;
+      i = C, v += 1;
       continue;
     }
     if (w === "--user-data") {
-      const E = e[I + 1];
-      if (!E)
+      const C = e[v + 1];
+      if (!C)
         return { error: "Missing value for --user-data" };
-      c = E, I += 1;
+      c = C, v += 1;
       continue;
     }
     if (w.startsWith("--"))
       return { error: `Unknown option: ${w}` };
     n.push(w);
   }
-  const [i, l] = n;
-  return i === "coverage" ? { command: { action: "coverage", json: a, dbPath: o, userDataPath: c } } : i === "smoke" ? l !== "mcp" && l !== "skill" ? { error: "Smoke mode requires kind: mcp | skill" } : { command: { action: "smoke", kind: l, json: a, dbPath: o, userDataPath: c } } : { error: `Unknown diagnostic action: ${i}` };
+  const [s, d] = n;
+  return s === "coverage" ? { command: { action: "coverage", json: a, dbPath: i, userDataPath: c } } : s === "smoke" ? d !== "mcp" && d !== "skill" ? { error: "Smoke mode requires kind: mcp | skill" } : { command: { action: "smoke", kind: d, json: a, dbPath: i, userDataPath: c } } : { error: `Unknown diagnostic action: ${s}` };
 }
-function ln(r, t) {
+function vn(r, t) {
   if (t.action === "coverage") {
     const a = r;
     return [
       `[AI-Diag] Coverage ${a.overallCoverage}% (${a.totalSupported}/${a.totalRequired})`,
       ...a.modules.map((c) => {
-        const i = c.missingActions.length ? ` missing=[${c.missingActions.join(", ")}]` : "";
-        return `- ${c.title}: ${c.coverage}% (${c.supportedActions.length}/${c.requiredActions.length})${i}`;
+        const s = c.missingActions.length ? ` missing=[${c.missingActions.join(", ")}]` : "";
+        return `- ${c.title}: ${c.coverage}% (${c.supportedActions.length}/${c.requiredActions.length})${s}`;
       })
     ].join(`
 `);
@@ -5422,33 +5616,33 @@ function ln(r, t) {
   ].join(`
 `);
 }
-async function dn(r, t) {
+async function In(r, t) {
   const e = t.action === "coverage" ? r.getCapabilityCoverage() : await r.testOpenClawSmoke({ kind: t.kind });
-  return t.json ? console.log(JSON.stringify(e, null, 2)) : console.log(ln(e, t)), t.action === "smoke" && !e.ok ? 1 : 0;
+  return t.json ? console.log(JSON.stringify(e, null, 2)) : console.log(vn(e, t)), t.action === "smoke" && !e.ok ? 1 : 0;
 }
 function yt() {
-  if (!We() || gt)
+  if (!Ve() || gt)
     return;
   gt = !0;
   const r = console.error.bind(console), t = console.warn.bind(console);
   console.error = (...e) => {
-    M("ERROR", "console.error", "console.error called", { args: oe(e) }), r(...e);
+    O("ERROR", "console.error", "console.error called", { args: ie(e) }), r(...e);
   }, console.warn = (...e) => {
-    M("WARN", "console.warn", "console.warn called", { args: oe(e) }), t(...e);
+    O("WARN", "console.warn", "console.warn called", { args: ie(e) }), t(...e);
   };
 }
 function F(r, t, e) {
   const n = te(e);
-  ie(`Main.${r}`, e, {
-    payload: oe(t),
+  se(`Main.${r}`, e, {
+    payload: ie(t),
     normalizedError: n,
-    displayMessage: ge(n.code, n.message)
+    displayMessage: he(n.code, n.message)
   });
 }
-const re = cn(process.argv);
-async function xt(r) {
+const re = wn(process.argv);
+async function Rt(r) {
   const t = r == null ? void 0 : r.proxy;
-  if (!t || !_e.defaultSession)
+  if (!t || !Ee.defaultSession)
     return;
   const e = () => {
     delete process.env.HTTP_PROXY, delete process.env.http_proxy, delete process.env.HTTPS_PROXY, delete process.env.https_proxy, delete process.env.ALL_PROXY, delete process.env.all_proxy, delete process.env.NO_PROXY, delete process.env.no_proxy;
@@ -5456,27 +5650,29 @@ async function xt(r) {
     t.httpProxy && (process.env.HTTP_PROXY = t.httpProxy, process.env.http_proxy = t.httpProxy), t.httpsProxy && (process.env.HTTPS_PROXY = t.httpsProxy, process.env.https_proxy = t.httpsProxy), t.allProxy && (process.env.ALL_PROXY = t.allProxy, process.env.all_proxy = t.allProxy), t.noProxy && (process.env.NO_PROXY = t.noProxy, process.env.no_proxy = t.noProxy);
   };
   if (t.mode === "off") {
-    await _e.defaultSession.setProxy({ mode: "direct" }), e();
+    await Ee.defaultSession.setProxy({ mode: "direct" }), e();
     return;
   }
   if (t.mode === "custom") {
-    const a = [t.allProxy, t.httpsProxy, t.httpProxy].filter((o) => !!o).join(";");
-    await _e.defaultSession.setProxy({
+    const a = [t.allProxy, t.httpsProxy, t.httpProxy].filter((i) => !!i).join(";");
+    await Ee.defaultSession.setProxy({
       mode: a ? "fixed_servers" : "direct",
       proxyRules: a,
       proxyBypassRules: t.noProxy || ""
     }), e(), n();
     return;
   }
-  await _e.defaultSession.setProxy({ mode: "system" }), e();
+  await Ee.defaultSession.setProxy({ mode: "system" }), e();
 }
-function kt() {
-  T = new wt({
+function $t() {
+  const r = !b.isPackaged, t = gn();
+  k = new wt({
     width: 1200,
     height: 800,
-    icon: L.join(process.env.VITE_PUBLIC || "", "electron-vite.svg"),
+    ...t ? { icon: t } : {},
     webPreferences: {
-      preload: L.join(ve, "preload.mjs")
+      preload: N.join(we, "preload.mjs"),
+      devTools: r
     },
     // Win11 style & White Screen Fix
     frame: !0,
@@ -5487,27 +5683,29 @@ function kt() {
     // Wait for ready-to-show
     autoHideMenuBar: !0
     // Hide default menu bar
-  }), T.once("ready-to-show", () => {
-    T == null || T.show();
-  }), T.webContents.on("did-finish-load", () => {
-    T == null || T.webContents.send("main-process-message", (/* @__PURE__ */ new Date()).toLocaleString());
-  }), T.webContents.on("before-input-event", (r, t) => {
-    t.key === "F11" && (T == null || T.setFullScreen(!T.isFullScreen()), r.preventDefault()), (t.key === "F12" || t.control && t.shift && t.key.toLowerCase() === "i") && (T != null && T.webContents.isDevToolsOpened() ? T.webContents.closeDevTools() : T == null || T.webContents.openDevTools(), r.preventDefault());
-  }), qe ? T.loadURL(qe) : T.loadFile(L.join(Mt, "index.html")), T.on("enter-full-screen", () => {
-    T == null || T.webContents.send("app:fullscreen-change", !0);
-  }), T.on("leave-full-screen", () => {
-    T == null || T.webContents.send("app:fullscreen-change", !1);
+  }), k.once("ready-to-show", () => {
+    k == null || k.show();
+  }), k.webContents.on("did-finish-load", () => {
+    k == null || k.webContents.send("main-process-message", (/* @__PURE__ */ new Date()).toLocaleString());
+  }), k.webContents.on("devtools-opened", () => {
+    r || k == null || k.webContents.closeDevTools();
+  }), k.webContents.on("before-input-event", (e, n) => {
+    n.key === "F11" && (k == null || k.setFullScreen(!k.isFullScreen()), e.preventDefault()), r && (n.key === "F12" || n.control && n.shift && n.key.toLowerCase() === "i") && (k != null && k.webContents.isDevToolsOpened() ? k.webContents.closeDevTools() : k == null || k.webContents.openDevTools(), e.preventDefault());
+  }), He ? k.loadURL(He) : k.loadFile(N.join(bt, "index.html")), k.on("enter-full-screen", () => {
+    k == null || k.webContents.send("app:fullscreen-change", !0);
+  }), k.on("leave-full-screen", () => {
+    k == null || k.webContents.send("app:fullscreen-change", !1);
   });
 }
-S.handle("app:toggle-fullscreen", () => {
-  if (T) {
-    const r = T.isFullScreen();
-    return T.setFullScreen(!r), !r;
+A.handle("app:toggle-fullscreen", () => {
+  if (k) {
+    const r = k.isFullScreen();
+    return k.setFullScreen(!r), !r;
   }
   return !1;
 });
-S.handle("app:get-user-data-path", () => b.getPath("userData"));
-S.handle("db:get-novels", async () => {
+A.handle("app:get-user-data-path", () => b.getPath("userData"));
+A.handle("db:get-novels", async () => {
   console.log("[Main] Received db:get-novels");
   try {
     return (await h.novel.findMany({
@@ -5521,7 +5719,7 @@ S.handle("db:get-novels", async () => {
       orderBy: { updatedAt: "desc" }
     })).map((t) => {
       const e = t.volumes.reduce(
-        (o, c) => o + c.chapters.reduce((i, l) => i + l.wordCount, 0),
+        (i, c) => i + c.chapters.reduce((s, d) => s + d.wordCount, 0),
         0
       ), { volumes: n, ...a } = t;
       return {
@@ -5533,7 +5731,7 @@ S.handle("db:get-novels", async () => {
     throw console.error("[Main] db:get-novels failed:", r), r;
   }
 });
-S.handle("db:update-novel", async (r, { id: t, data: e }) => {
+A.handle("db:update-novel", async (r, { id: t, data: e }) => {
   console.log("[Main] Updating novel:", t, e);
   try {
     return await h.novel.update({
@@ -5547,26 +5745,26 @@ S.handle("db:update-novel", async (r, { id: t, data: e }) => {
     throw console.error("[Main] db:update-novel failed:", n), n;
   }
 });
-S.handle("db:upload-novel-cover", async (r, t) => {
+A.handle("db:upload-novel-cover", async (r, t) => {
   var e;
   try {
-    const n = await Ce.showOpenDialog(T, {
+    const n = await Ie.showOpenDialog(k, {
       title: "Select Cover Image",
       filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "webp", "gif", "bmp"] }],
       properties: ["openFile"]
     });
     if (n.canceled || n.filePaths.length === 0)
       return null;
-    const a = n.filePaths[0], o = L.extname(a), c = L.join(b.getPath("userData"), "covers");
-    x.existsSync(c) || x.mkdirSync(c, { recursive: !0 });
-    const i = await h.novel.findUnique({ where: { id: t }, select: { coverUrl: !0 } });
-    if ((e = i == null ? void 0 : i.coverUrl) != null && e.startsWith("covers/")) {
-      const E = L.join(b.getPath("userData"), i.coverUrl);
-      x.existsSync(E) && x.unlinkSync(E);
+    const a = n.filePaths[0], i = N.extname(a), c = N.join(b.getPath("userData"), "covers");
+    P.existsSync(c) || P.mkdirSync(c, { recursive: !0 });
+    const s = await h.novel.findUnique({ where: { id: t }, select: { coverUrl: !0 } });
+    if ((e = s == null ? void 0 : s.coverUrl) != null && e.startsWith("covers/")) {
+      const C = N.join(b.getPath("userData"), s.coverUrl);
+      P.existsSync(C) && P.unlinkSync(C);
     }
-    const l = `${t}${o}`, I = L.join(c, l);
-    x.copyFileSync(a, I);
-    const w = `covers/${l}`;
+    const d = `${t}${i}`, v = N.join(c, d);
+    P.copyFileSync(a, v);
+    const w = `covers/${d}`;
     return await h.novel.update({
       where: { id: t },
       data: { coverUrl: w }
@@ -5575,7 +5773,7 @@ S.handle("db:upload-novel-cover", async (r, t) => {
     throw console.error("[Main] db:upload-novel-cover failed:", n), n;
   }
 });
-S.handle("db:get-volumes", async (r, t) => {
+A.handle("db:get-volumes", async (r, t) => {
   try {
     return await h.volume.findMany({
       where: { novelId: t },
@@ -5588,7 +5786,7 @@ S.handle("db:get-volumes", async (r, t) => {
     throw console.error("[Main] db:get-volumes failed:", e), e;
   }
 });
-S.handle("db:create-volume", async (r, { novelId: t, title: e }) => {
+A.handle("db:create-volume", async (r, { novelId: t, title: e }) => {
   try {
     const n = await h.volume.findFirst({
       where: { novelId: t },
@@ -5601,7 +5799,7 @@ S.handle("db:create-volume", async (r, { novelId: t, title: e }) => {
     throw console.error("[Main] db:create-volume failed:", n), n;
   }
 });
-S.handle("db:create-chapter", async (r, { volumeId: t, title: e, order: n }) => {
+A.handle("db:create-chapter", async (r, { volumeId: t, title: e, order: n }) => {
   try {
     const a = await h.chapter.create({
       data: {
@@ -5613,12 +5811,12 @@ S.handle("db:create-chapter", async (r, { volumeId: t, title: e, order: n }) => 
       },
       include: { volume: { select: { novelId: !0 } } }
     });
-    return await Ee({ ...a, novelId: a.volume.novelId }), a;
+    return await Se({ ...a, novelId: a.volume.novelId }), a;
   } catch (a) {
     throw console.error("[Main] db:create-chapter failed:", a), a;
   }
 });
-S.handle("db:get-chapter", async (r, t) => {
+A.handle("db:get-chapter", async (r, t) => {
   try {
     return await h.chapter.findUnique({
       where: { id: t },
@@ -5628,7 +5826,7 @@ S.handle("db:get-chapter", async (r, t) => {
     throw console.error("[Main] db:get-chapter failed:", e), e;
   }
 });
-S.handle("db:rename-volume", async (r, { volumeId: t, title: e }) => {
+A.handle("db:rename-volume", async (r, { volumeId: t, title: e }) => {
   try {
     const n = await h.volume.update({
       where: { id: t },
@@ -5637,19 +5835,19 @@ S.handle("db:rename-volume", async (r, { volumeId: t, title: e }) => {
       where: { volumeId: t },
       include: { volume: { select: { novelId: !0, title: !0, order: !0 } } }
     });
-    for (const o of a)
-      await Ee({
-        ...o,
-        novelId: o.volume.novelId,
-        volumeTitle: o.volume.title,
-        volumeOrder: o.volume.order
+    for (const i of a)
+      await Se({
+        ...i,
+        novelId: i.volume.novelId,
+        volumeTitle: i.volume.title,
+        volumeOrder: i.volume.order
       });
     return n;
   } catch (n) {
     throw console.error("[Main] db:rename-volume failed:", n), n;
   }
 });
-S.handle("db:rename-chapter", async (r, { chapterId: t, title: e }) => {
+A.handle("db:rename-chapter", async (r, { chapterId: t, title: e }) => {
   try {
     const n = await h.chapter.update({
       where: { id: t },
@@ -5658,12 +5856,12 @@ S.handle("db:rename-chapter", async (r, { chapterId: t, title: e }) => {
       where: { id: t },
       select: { id: !0, title: !0, content: !0, volumeId: !0, order: !0, volume: { select: { novelId: !0 } } }
     });
-    return a && a.volume && await Ee({ ...a, novelId: a.volume.novelId }), n;
+    return a && a.volume && await Se({ ...a, novelId: a.volume.novelId }), n;
   } catch (n) {
     throw console.error("[Main] db:rename-chapter failed:", n), n;
   }
 });
-S.handle("db:create-novel", async (r, t) => {
+A.handle("db:create-novel", async (r, t) => {
   console.log("[Main] Received db:create-novel:", t);
   try {
     return await h.novel.create({
@@ -5692,7 +5890,7 @@ S.handle("db:create-novel", async (r, t) => {
     throw console.error("[Main] db:create-novel failed:", e), e;
   }
 });
-S.handle("db:save-chapter", async (r, { chapterId: t, content: e }) => {
+A.handle("db:save-chapter", async (r, { chapterId: t, content: e }) => {
   try {
     console.log("[Main] Saving chapter:", t);
     const n = await h.chapter.findUnique({
@@ -5704,7 +5902,7 @@ S.handle("db:save-chapter", async (r, { chapterId: t, content: e }) => {
     });
     if (!n || !n.volume)
       throw new Error("Chapter or Volume not found");
-    const a = n.volume.novelId, o = e.length, c = o - n.wordCount, [, i] = await h.$transaction([
+    const a = n.volume.novelId, i = e.length, c = i - n.wordCount, [, s] = await h.$transaction([
       // 1. Update Novel WordCount
       h.novel.update({
         where: { id: a },
@@ -5718,49 +5916,49 @@ S.handle("db:save-chapter", async (r, { chapterId: t, content: e }) => {
         where: { id: t },
         data: {
           content: e,
-          wordCount: o,
+          wordCount: i,
           updatedAt: /* @__PURE__ */ new Date()
         }
       })
-    ]), l = await h.chapter.findUnique({
+    ]), d = await h.chapter.findUnique({
       where: { id: t },
       select: { id: !0, title: !0, content: !0, volumeId: !0, order: !0 }
     });
-    return l && await Ee({ ...l, novelId: a }), Ge(t), i;
+    return d && await Se({ ...d, novelId: a }), We(t), s;
   } catch (n) {
     throw console.error("[Main] db:save-chapter failed:", n), n;
   }
 });
-S.handle("db:create-idea", async (r, t) => {
+A.handle("db:create-idea", async (r, t) => {
   try {
-    const { timestamp: e, tags: n, ...a } = t, o = a.novelId, c = await h.idea.create({
+    const { timestamp: e, tags: n, ...a } = t, i = a.novelId, c = await h.idea.create({
       data: {
         ...a,
         tags: {
-          connectOrCreate: (n || []).map((l) => ({
-            where: { name_novelId: { name: l, novelId: o } },
-            create: { name: l, novelId: o }
+          connectOrCreate: (n || []).map((d) => ({
+            where: { name_novelId: { name: d, novelId: i } },
+            create: { name: d, novelId: i }
           }))
         }
       },
       include: { tags: !0 }
-    }), i = {
+    }), s = {
       ...c,
-      tags: c.tags.map((l) => l.name),
+      tags: c.tags.map((d) => d.name),
       timestamp: c.createdAt.getTime()
     };
-    return await Ve({
+    return await qe({
       id: c.id,
       content: c.content,
       quote: c.quote,
       novelId: c.novelId,
       chapterId: c.chapterId
-    }), i;
+    }), s;
   } catch (e) {
     throw console.error("[Main] db:create-idea failed:", e), e;
   }
 });
-S.handle("db:get-ideas", async (r, t) => {
+A.handle("db:get-ideas", async (r, t) => {
   try {
     return (await h.idea.findMany({
       where: { novelId: t },
@@ -5778,57 +5976,57 @@ S.handle("db:get-ideas", async (r, t) => {
     throw console.error("[Main] db:get-ideas failed:", e), e;
   }
 });
-S.handle("db:update-idea", async (r, t, e) => {
+A.handle("db:update-idea", async (r, t, e) => {
   try {
-    const { timestamp: n, tags: a, ...o } = e, c = { ...o };
+    const { timestamp: n, tags: a, ...i } = e, c = { ...i };
     if (a !== void 0) {
-      const I = await h.idea.findUnique({ where: { id: t }, select: { novelId: !0 } });
-      if (I) {
-        const w = I.novelId;
+      const v = await h.idea.findUnique({ where: { id: t }, select: { novelId: !0 } });
+      if (v) {
+        const w = v.novelId;
         c.tags = {
           set: [],
           // Disconnect all existing
-          connectOrCreate: (a || []).map((E) => ({
-            where: { name_novelId: { name: E, novelId: w } },
-            create: { name: E, novelId: w }
+          connectOrCreate: (a || []).map((C) => ({
+            where: { name_novelId: { name: C, novelId: w } },
+            create: { name: C, novelId: w }
           }))
         };
       }
     }
-    const i = await h.idea.update({
+    const s = await h.idea.update({
       where: { id: t },
       data: {
         ...c,
         updatedAt: /* @__PURE__ */ new Date()
       },
       include: { tags: !0 }
-    }), l = {
-      ...i,
-      tags: i.tags.map((I) => I.name),
-      timestamp: i.createdAt.getTime()
+    }), d = {
+      ...s,
+      tags: s.tags.map((v) => v.name),
+      timestamp: s.createdAt.getTime()
     };
-    return await Ve({
-      id: i.id,
-      content: i.content,
-      quote: i.quote,
-      novelId: i.novelId,
-      chapterId: i.chapterId
-    }), l;
+    return await qe({
+      id: s.id,
+      content: s.content,
+      quote: s.quote,
+      novelId: s.novelId,
+      chapterId: s.chapterId
+    }), d;
   } catch (n) {
     throw console.error("[Main] db:update-idea failed:", n), n;
   }
 });
-S.handle("db:delete-idea", async (r, t) => {
+A.handle("db:delete-idea", async (r, t) => {
   try {
     const e = await h.idea.delete({ where: { id: t } });
-    return await Zt("idea", t), e;
+    return await Qt("idea", t), e;
   } catch (e) {
     throw console.error("[Main] db:delete-idea failed:", e), e;
   }
 });
-S.handle("db:check-index-status", async (r, t) => {
+A.handle("db:check-index-status", async (r, t) => {
   try {
-    const e = await Kt(t), n = await h.chapter.count({
+    const e = await er(t), n = await h.chapter.count({
       where: { volume: { novelId: t } }
     }), a = await h.idea.count({
       where: { novelId: t }
@@ -5843,256 +6041,256 @@ S.handle("db:check-index-status", async (r, t) => {
     throw console.error("[Main] db:check-index-status failed:", e), e;
   }
 });
-const Ot = new Lr();
-let R;
-S.handle("ai:get-settings", async () => {
+const Ft = new kr();
+let $;
+A.handle("ai:get-settings", async () => {
   try {
-    return R.getSettings();
+    return $.getSettings();
   } catch (r) {
     throw F("ai:get-settings", void 0, r), console.error("[Main] ai:get-settings failed:", r), r;
   }
 });
-S.handle("ai:get-map-image-stats", async () => {
+A.handle("ai:get-map-image-stats", async () => {
   try {
-    return R.getMapImageStats();
+    return $.getMapImageStats();
   } catch (r) {
     throw F("ai:get-map-image-stats", void 0, r), console.error("[Main] ai:get-map-image-stats failed:", r), r;
   }
 });
-S.handle("ai:list-actions", async () => {
+A.handle("ai:list-actions", async () => {
   try {
-    return R.listActions();
+    return $.listActions();
   } catch (r) {
     throw F("ai:list-actions", void 0, r), console.error("[Main] ai:list-actions failed:", r), r;
   }
 });
-S.handle("ai:get-capability-coverage", async () => {
+A.handle("ai:get-capability-coverage", async () => {
   try {
-    return R.getCapabilityCoverage();
+    return $.getCapabilityCoverage();
   } catch (r) {
     throw F("ai:get-capability-coverage", void 0, r), console.error("[Main] ai:get-capability-coverage failed:", r), r;
   }
 });
-S.handle("ai:get-mcp-manifest", async () => {
+A.handle("ai:get-mcp-manifest", async () => {
   try {
-    return R.getMcpToolsManifest();
+    return $.getMcpToolsManifest();
   } catch (r) {
     throw F("ai:get-mcp-manifest", void 0, r), console.error("[Main] ai:get-mcp-manifest failed:", r), r;
   }
 });
-S.handle("ai:get-openclaw-manifest", async () => {
+A.handle("ai:get-openclaw-manifest", async () => {
   try {
-    return R.getOpenClawManifest();
+    return $.getOpenClawManifest();
   } catch (r) {
     throw F("ai:get-openclaw-manifest", void 0, r), console.error("[Main] ai:get-openclaw-manifest failed:", r), r;
   }
 });
-S.handle("ai:get-openclaw-skill-manifest", async () => {
+A.handle("ai:get-openclaw-skill-manifest", async () => {
   try {
-    return R.getOpenClawSkillManifest();
+    return $.getOpenClawSkillManifest();
   } catch (r) {
     throw F("ai:get-openclaw-skill-manifest", void 0, r), console.error("[Main] ai:get-openclaw-skill-manifest failed:", r), r;
   }
 });
-S.handle("ai:update-settings", async (r, t) => {
+A.handle("ai:update-settings", async (r, t) => {
   try {
-    const e = R.updateSettings(t || {});
-    return await xt(e), e;
+    const e = $.updateSettings(t || {});
+    return await Rt(e), e;
   } catch (e) {
     throw F("ai:update-settings", t, e), console.error("[Main] ai:update-settings failed:", e), e;
   }
 });
-S.handle("ai:test-connection", async () => {
+A.handle("ai:test-connection", async () => {
   try {
-    return await R.testConnection();
+    return await $.testConnection();
   } catch (r) {
     throw F("ai:test-connection", void 0, r), console.error("[Main] ai:test-connection failed:", r), r;
   }
 });
-S.handle("ai:test-mcp", async () => {
+A.handle("ai:test-mcp", async () => {
   try {
-    return await R.testMcp();
+    return await $.testMcp();
   } catch (r) {
     throw F("ai:test-mcp", void 0, r), console.error("[Main] ai:test-mcp failed:", r), r;
   }
 });
-S.handle("ai:test-openclaw-mcp", async () => {
+A.handle("ai:test-openclaw-mcp", async () => {
   try {
-    return await R.testOpenClawMcp();
+    return await $.testOpenClawMcp();
   } catch (r) {
     throw F("ai:test-openclaw-mcp", void 0, r), console.error("[Main] ai:test-openclaw-mcp failed:", r), r;
   }
 });
-S.handle("ai:test-openclaw-skill", async () => {
+A.handle("ai:test-openclaw-skill", async () => {
   try {
-    return await R.testOpenClawSkill();
+    return await $.testOpenClawSkill();
   } catch (r) {
     throw F("ai:test-openclaw-skill", void 0, r), console.error("[Main] ai:test-openclaw-skill failed:", r), r;
   }
 });
-S.handle("ai:test-openclaw-smoke", async (r, t) => {
+A.handle("ai:test-openclaw-smoke", async (r, t) => {
   try {
     const e = (t == null ? void 0 : t.kind) === "skill" ? "skill" : "mcp";
-    return await R.testOpenClawSmoke({ kind: e });
+    return await $.testOpenClawSmoke({ kind: e });
   } catch (e) {
     throw F("ai:test-openclaw-smoke", t, e), console.error("[Main] ai:test-openclaw-smoke failed:", e), e;
   }
 });
-S.handle("ai:test-proxy", async () => {
+A.handle("ai:test-proxy", async () => {
   try {
-    return await R.testProxy();
+    return await $.testProxy();
   } catch (r) {
     throw F("ai:test-proxy", void 0, r), console.error("[Main] ai:test-proxy failed:", r), r;
   }
 });
-S.handle("ai:test-generate", async (r, t) => {
+A.handle("ai:test-generate", async (r, t) => {
   try {
-    return await R.testGenerate(t == null ? void 0 : t.prompt);
+    return await $.testGenerate(t == null ? void 0 : t.prompt);
   } catch (e) {
     throw F("ai:test-generate", t, e), console.error("[Main] ai:test-generate failed:", e), e;
   }
 });
-S.handle("ai:generate-title", async (r, t) => {
+A.handle("ai:generate-title", async (r, t) => {
   try {
-    return await R.generateTitle(t);
+    return await $.generateTitle(t);
   } catch (e) {
     throw F("ai:generate-title", t, e), console.error("[Main] ai:generate-title failed:", e), e;
   }
 });
-S.handle("ai:continue-writing", async (r, t) => {
+A.handle("ai:continue-writing", async (r, t) => {
   try {
-    return await R.continueWriting(t);
+    return await $.continueWriting(t);
   } catch (e) {
     throw F("ai:continue-writing", t, e), console.error("[Main] ai:continue-writing failed:", e), e;
   }
 });
-S.handle("ai:preview-continue-prompt", async (r, t) => {
+A.handle("ai:preview-continue-prompt", async (r, t) => {
   try {
-    return await R.previewContinuePrompt(t);
+    return await $.previewContinuePrompt(t);
   } catch (e) {
     throw F("ai:preview-continue-prompt", t, e), console.error("[Main] ai:preview-continue-prompt failed:", e), e;
   }
 });
-S.handle("ai:check-consistency", async (r, t) => {
+A.handle("ai:check-consistency", async (r, t) => {
   try {
-    return await R.checkConsistency(t);
+    return await $.checkConsistency(t);
   } catch (e) {
     throw F("ai:check-consistency", t, e), console.error("[Main] ai:check-consistency failed:", e), e;
   }
 });
-S.handle("ai:generate-creative-assets", async (r, t) => {
+A.handle("ai:generate-creative-assets", async (r, t) => {
   try {
-    return await R.generateCreativeAssets(t);
+    return await $.generateCreativeAssets(t);
   } catch (e) {
     throw F("ai:generate-creative-assets", t, e), console.error("[Main] ai:generate-creative-assets failed:", e), e;
   }
 });
-S.handle("ai:preview-creative-assets-prompt", async (r, t) => {
+A.handle("ai:preview-creative-assets-prompt", async (r, t) => {
   try {
-    return await R.previewCreativeAssetsPrompt(t);
+    return await $.previewCreativeAssetsPrompt(t);
   } catch (e) {
     throw F("ai:preview-creative-assets-prompt", t, e), console.error("[Main] ai:preview-creative-assets-prompt failed:", e), e;
   }
 });
-S.handle("ai:validate-creative-assets", async (r, t) => {
+A.handle("ai:validate-creative-assets", async (r, t) => {
   try {
-    return await R.validateCreativeAssetsDraft(t);
+    return await $.validateCreativeAssetsDraft(t);
   } catch (e) {
     throw F("ai:validate-creative-assets", t, e), console.error("[Main] ai:validate-creative-assets failed:", e), e;
   }
 });
-S.handle("ai:confirm-creative-assets", async (r, t) => {
+A.handle("ai:confirm-creative-assets", async (r, t) => {
   try {
-    return await R.confirmCreativeAssets(t);
+    return await $.confirmCreativeAssets(t);
   } catch (e) {
     throw F("ai:confirm-creative-assets", t, e), console.error("[Main] ai:confirm-creative-assets failed:", e), e;
   }
 });
-S.handle("ai:generate-map-image", async (r, t) => {
+A.handle("ai:generate-map-image", async (r, t) => {
   try {
-    return await R.generateMapImage(t);
+    return await $.generateMapImage(t);
   } catch (e) {
     return F("ai:generate-map-image", t, e), console.error("[Main] ai:generate-map-image failed:", e), { ok: !1, code: "UNKNOWN", detail: e instanceof Error ? e.message : String(e) };
   }
 });
-S.handle("ai:preview-map-prompt", async (r, t) => {
+A.handle("ai:preview-map-prompt", async (r, t) => {
   try {
-    return await R.previewMapPrompt(t);
+    return await $.previewMapPrompt(t);
   } catch (e) {
     throw F("ai:preview-map-prompt", t, e), console.error("[Main] ai:preview-map-prompt failed:", e), e;
   }
 });
-S.handle("ai:rebuild-chapter-summary", async (r, t) => {
+A.handle("ai:rebuild-chapter-summary", async (r, t) => {
   try {
-    return t != null && t.chapterId ? (Ge(t.chapterId, "manual"), { ok: !0, detail: "summary rebuild scheduled" }) : { ok: !1, detail: "chapterId is required" };
+    return t != null && t.chapterId ? (We(t.chapterId, "manual"), { ok: !0, detail: "summary rebuild scheduled" }) : { ok: !1, detail: "chapterId is required" };
   } catch (e) {
     return F("ai:rebuild-chapter-summary", t, e), console.error("[Main] ai:rebuild-chapter-summary failed:", e), { ok: !1, detail: e instanceof Error ? e.message : String(e) };
   }
 });
-S.handle("ai:execute-action", async (r, t) => {
+A.handle("ai:execute-action", async (r, t) => {
   try {
-    return await R.executeAction(t);
+    return await $.executeAction(t);
   } catch (e) {
     throw F("ai:execute-action", t, e), console.error("[Main] ai:execute-action failed:", e), e;
   }
 });
-S.handle("ai:openclaw-invoke", async (r, t) => {
+A.handle("ai:openclaw-invoke", async (r, t) => {
   try {
-    return await R.invokeOpenClawTool(t);
+    return await $.invokeOpenClawTool(t);
   } catch (e) {
     F("ai:openclaw-invoke", t, e), console.error("[Main] ai:openclaw-invoke failed:", e);
     const n = te(e);
     return {
       ok: !1,
       code: n.code,
-      error: ge(n.code, n.message)
+      error: he(n.code, n.message)
     };
   }
 });
-S.handle("ai:openclaw-mcp-invoke", async (r, t) => {
+A.handle("ai:openclaw-mcp-invoke", async (r, t) => {
   try {
-    return await R.invokeOpenClawTool(t);
+    return await $.invokeOpenClawTool(t);
   } catch (e) {
     F("ai:openclaw-mcp-invoke", t, e), console.error("[Main] ai:openclaw-mcp-invoke failed:", e);
     const n = te(e);
     return {
       ok: !1,
       code: n.code,
-      error: ge(n.code, n.message)
+      error: he(n.code, n.message)
     };
   }
 });
-S.handle("ai:openclaw-skill-invoke", async (r, t) => {
+A.handle("ai:openclaw-skill-invoke", async (r, t) => {
   try {
-    return await R.invokeOpenClawSkill(t);
+    return await $.invokeOpenClawSkill(t);
   } catch (e) {
     F("ai:openclaw-skill-invoke", t, e), console.error("[Main] ai:openclaw-skill-invoke failed:", e);
     const n = te(e);
     return {
       ok: !1,
       code: n.code,
-      error: ge(n.code, n.message)
+      error: he(n.code, n.message)
     };
   }
 });
-S.handle("sync:pull", async () => {
+A.handle("sync:pull", async () => {
   try {
-    return await Ot.pull();
+    return await Ft.pull();
   } catch (r) {
     throw console.error("[Main] sync:pull failed:", r), r;
   }
 });
-S.handle("backup:export", async (r, t) => {
+A.handle("backup:export", async (r, t) => {
   try {
-    return await Me.exportData(void 0, t);
+    return await xe.exportData(void 0, t);
   } catch (e) {
     throw console.error("[Main] backup:export failed:", e), e;
   }
 });
-S.handle("backup:import", async (r, { filePath: t, password: e }) => {
+A.handle("backup:import", async (r, { filePath: t, password: e }) => {
   try {
     if (!t) {
-      const n = await Ce.showOpenDialog({
+      const n = await Ie.showOpenDialog({
         title: "Import Backup",
         filters: [{ name: "Novel Editor Backup", extensions: ["nebak"] }],
         properties: ["openFile"]
@@ -6101,49 +6299,49 @@ S.handle("backup:import", async (r, { filePath: t, password: e }) => {
         return { success: !1, code: "CANCELLED" };
       t = n.filePaths[0];
     }
-    return await Me.importData(t, e), { success: !0 };
+    return await xe.importData(t, e), { success: !0 };
   } catch (n) {
     console.error("[Main] backup:import failed:", n);
     const a = n.message || n.toString();
     return a.includes("PASSWORD_REQUIRED") ? { success: !1, code: "PASSWORD_REQUIRED", filePath: t } : a.includes("PASSWORD_INVALID") ? { success: !1, code: "PASSWORD_INVALID", filePath: t } : { success: !1, message: a };
   }
 });
-S.handle("backup:get-auto", async () => {
+A.handle("backup:get-auto", async () => {
   try {
-    return await Me.getAutoBackups();
+    return await xe.getAutoBackups();
   } catch (r) {
     throw console.error("[Main] backup:get-auto failed:", r), r;
   }
 });
-S.handle("backup:restore-auto", async (r, t) => {
+A.handle("backup:restore-auto", async (r, t) => {
   try {
-    return await Me.restoreAutoBackup(t), !0;
+    return await xe.restoreAutoBackup(t), !0;
   } catch (e) {
     throw console.error("[Main] backup:restore-auto failed:", e), e;
   }
 });
-S.handle("sync:push", async () => {
+A.handle("sync:push", async () => {
   try {
-    return await Ot.push();
+    return await Ft.push();
   } catch (r) {
     throw console.error("[Main] sync:push failed:", r), r;
   }
 });
-S.handle("db:search", async (r, { novelId: t, keyword: e, limit: n = 20, offset: a = 0 }) => {
+A.handle("db:search", async (r, { novelId: t, keyword: e, limit: n = 20, offset: a = 0 }) => {
   try {
-    return await Ct(t, e, n, a);
-  } catch (o) {
-    throw console.error("[Main] db:search failed:", o), o;
+    return await St(t, e, n, a);
+  } catch (i) {
+    throw console.error("[Main] db:search failed:", i), i;
   }
 });
-S.handle("db:rebuild-search-index", async (r, t) => {
+A.handle("db:rebuild-search-index", async (r, t) => {
   try {
-    return await Jt(t);
+    return await Ct(t);
   } catch (e) {
     throw console.error("[Main] db:rebuild-search-index failed:", e), e;
   }
 });
-S.handle("db:get-all-tags", async (r, t) => {
+A.handle("db:get-all-tags", async (r, t) => {
   try {
     return t ? (await h.tag.findMany({
       where: { novelId: t },
@@ -6154,7 +6352,7 @@ S.handle("db:get-all-tags", async (r, t) => {
     throw console.error("[Main] db:get-all-tags failed:", e), e;
   }
 });
-S.handle("db:get-plot-lines", async (r, t) => {
+A.handle("db:get-plot-lines", async (r, t) => {
   try {
     return await h.plotLine.findMany({
       where: { novelId: t },
@@ -6170,7 +6368,7 @@ S.handle("db:get-plot-lines", async (r, t) => {
     throw console.error("[Main] db:get-plot-lines failed:", e), e;
   }
 });
-S.handle("db:create-plot-line", async (r, t) => {
+A.handle("db:create-plot-line", async (r, t) => {
   try {
     const n = ((await h.plotLine.aggregate({
       where: { novelId: t.novelId },
@@ -6183,7 +6381,7 @@ S.handle("db:create-plot-line", async (r, t) => {
     throw console.error("[Main] db:create-plot-line failed. Data:", t, "Error:", e), e;
   }
 });
-S.handle("db:update-plot-line", async (r, t) => {
+A.handle("db:update-plot-line", async (r, t) => {
   try {
     return await h.plotLine.update({
       where: { id: t.id },
@@ -6193,14 +6391,14 @@ S.handle("db:update-plot-line", async (r, t) => {
     throw console.error("[Main] db:update-plot-line failed. ID:", t.id, "Error:", e), e;
   }
 });
-S.handle("db:delete-plot-line", async (r, t) => {
+A.handle("db:delete-plot-line", async (r, t) => {
   try {
     return await h.plotLine.delete({ where: { id: t } });
   } catch (e) {
     throw console.error("[Main] db:delete-plot-line failed. ID:", t, "Error:", e), e;
   }
 });
-S.handle("db:create-plot-point", async (r, t) => {
+A.handle("db:create-plot-point", async (r, t) => {
   try {
     const { plotLineId: e } = t, a = ((await h.plotPoint.aggregate({
       where: { plotLineId: e },
@@ -6213,7 +6411,7 @@ S.handle("db:create-plot-point", async (r, t) => {
     throw console.error("[Main] db:create-plot-point failed. Data:", t, "Error:", e), e;
   }
 });
-S.handle("db:update-plot-point", async (r, t) => {
+A.handle("db:update-plot-point", async (r, t) => {
   try {
     return await h.plotPoint.update({
       where: { id: t.id },
@@ -6223,28 +6421,28 @@ S.handle("db:update-plot-point", async (r, t) => {
     throw console.error("[Main] db:update-plot-point failed. ID:", t.id, "Error:", e), e;
   }
 });
-S.handle("db:delete-plot-point", async (r, t) => {
+A.handle("db:delete-plot-point", async (r, t) => {
   try {
     return await h.plotPoint.delete({ where: { id: t } });
   } catch (e) {
     throw console.error("[Main] db:delete-plot-point failed. ID:", t, "Error:", e), e;
   }
 });
-S.handle("db:create-plot-point-anchor", async (r, t) => {
+A.handle("db:create-plot-point-anchor", async (r, t) => {
   try {
     return await h.plotPointAnchor.create({ data: t });
   } catch (e) {
     throw console.error("[Main] db:create-plot-point-anchor failed. Data:", t, "Error:", e), e;
   }
 });
-S.handle("db:delete-plot-point-anchor", async (r, t) => {
+A.handle("db:delete-plot-point-anchor", async (r, t) => {
   try {
     return await h.plotPointAnchor.delete({ where: { id: t } });
   } catch (e) {
     throw console.error("[Main] db:delete-plot-point-anchor failed. ID:", t, "Error:", e), e;
   }
 });
-S.handle("db:reorder-plot-lines", async (r, { lineIds: t }) => {
+A.handle("db:reorder-plot-lines", async (r, { lineIds: t }) => {
   try {
     const e = t.map(
       (n, a) => h.plotLine.update({
@@ -6257,12 +6455,12 @@ S.handle("db:reorder-plot-lines", async (r, { lineIds: t }) => {
     throw console.error("[Main] db:reorder-plot-lines failed:", e), e;
   }
 });
-S.handle("db:reorder-plot-points", async (r, { plotLineId: t, pointIds: e }) => {
+A.handle("db:reorder-plot-points", async (r, { plotLineId: t, pointIds: e }) => {
   try {
     const n = e.map(
-      (a, o) => h.plotPoint.update({
+      (a, i) => h.plotPoint.update({
         where: { id: a },
-        data: { order: o, plotLineId: t }
+        data: { order: i, plotLineId: t }
       })
     );
     return await h.$transaction(n), { success: !0 };
@@ -6270,63 +6468,63 @@ S.handle("db:reorder-plot-points", async (r, { plotLineId: t, pointIds: e }) => 
     throw console.error("[Main] db:reorder-plot-points failed:", n), n;
   }
 });
-S.handle("db:upload-character-image", async (r, { characterId: t, type: e }) => {
+A.handle("db:upload-character-image", async (r, { characterId: t, type: e }) => {
   try {
-    const n = await Ce.showOpenDialog(T, {
+    const n = await Ie.showOpenDialog(k, {
       title: e === "avatar" ? "Select Avatar Image" : "Select Full Body Image",
       filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "webp", "gif", "bmp"] }],
       properties: ["openFile"]
     });
     if (n.canceled || n.filePaths.length === 0)
       return null;
-    const a = n.filePaths[0], o = L.extname(a), c = L.join(b.getPath("userData"), "characters", t);
-    if (x.existsSync(c) || x.mkdirSync(c, { recursive: !0 }), e === "avatar") {
-      const i = `avatar${o}`, l = L.join(c, i);
-      x.readdirSync(c).filter((E) => E.startsWith("avatar.")).forEach((E) => {
+    const a = n.filePaths[0], i = N.extname(a), c = N.join(b.getPath("userData"), "characters", t);
+    if (P.existsSync(c) || P.mkdirSync(c, { recursive: !0 }), e === "avatar") {
+      const s = `avatar${i}`, d = N.join(c, s);
+      P.readdirSync(c).filter((C) => C.startsWith("avatar.")).forEach((C) => {
         try {
-          x.unlinkSync(L.join(c, E));
+          P.unlinkSync(N.join(c, C));
         } catch {
         }
-      }), x.copyFileSync(a, l);
-      const w = `characters/${t}/${i}`;
+      }), P.copyFileSync(a, d);
+      const w = `characters/${t}/${s}`;
       return await h.character.update({
         where: { id: t },
         data: { avatar: w }
       }), { path: w };
     } else {
-      const l = `fullbody_${Date.now()}${o}`, I = L.join(c, l);
-      x.copyFileSync(a, I);
-      const w = `characters/${t}/${l}`, E = await h.character.findUnique({ where: { id: t }, select: { fullBodyImages: !0 } });
-      let C = [];
+      const d = `fullbody_${Date.now()}${i}`, v = N.join(c, d);
+      P.copyFileSync(a, v);
+      const w = `characters/${t}/${d}`, C = await h.character.findUnique({ where: { id: t }, select: { fullBodyImages: !0 } });
+      let S = [];
       try {
-        C = JSON.parse((E == null ? void 0 : E.fullBodyImages) || "[]");
+        S = JSON.parse((C == null ? void 0 : C.fullBodyImages) || "[]");
       } catch {
       }
-      return C.push(w), await h.character.update({
+      return S.push(w), await h.character.update({
         where: { id: t },
-        data: { fullBodyImages: JSON.stringify(C) }
-      }), { path: w, images: C };
+        data: { fullBodyImages: JSON.stringify(S) }
+      }), { path: w, images: S };
     }
   } catch (n) {
     throw console.error("[Main] db:upload-character-image failed:", n), n;
   }
 });
-S.handle("db:delete-character-image", async (r, { characterId: t, imagePath: e, type: n }) => {
+A.handle("db:delete-character-image", async (r, { characterId: t, imagePath: e, type: n }) => {
   try {
-    const a = L.join(b.getPath("userData"), e);
-    if (x.existsSync(a) && x.unlinkSync(a), n === "avatar")
+    const a = N.join(b.getPath("userData"), e);
+    if (P.existsSync(a) && P.unlinkSync(a), n === "avatar")
       await h.character.update({
         where: { id: t },
         data: { avatar: null }
       });
     else {
-      const o = await h.character.findUnique({ where: { id: t }, select: { fullBodyImages: !0 } });
+      const i = await h.character.findUnique({ where: { id: t }, select: { fullBodyImages: !0 } });
       let c = [];
       try {
-        c = JSON.parse((o == null ? void 0 : o.fullBodyImages) || "[]");
+        c = JSON.parse((i == null ? void 0 : i.fullBodyImages) || "[]");
       } catch {
       }
-      c = c.filter((i) => i !== e), await h.character.update({
+      c = c.filter((s) => s !== e), await h.character.update({
         where: { id: t },
         data: { fullBodyImages: JSON.stringify(c) }
       });
@@ -6335,7 +6533,7 @@ S.handle("db:delete-character-image", async (r, { characterId: t, imagePath: e, 
     throw console.error("[Main] db:delete-character-image failed:", a), a;
   }
 });
-S.handle("db:get-character-map-locations", async (r, t) => {
+A.handle("db:get-character-map-locations", async (r, t) => {
   try {
     return (await h.characterMapMarker.findMany({
       where: { characterId: t },
@@ -6351,7 +6549,7 @@ S.handle("db:get-character-map-locations", async (r, t) => {
     return console.error("[Main] db:get-character-map-locations failed:", e), [];
   }
 });
-S.handle("db:get-characters", async (r, t) => {
+A.handle("db:get-characters", async (r, t) => {
   try {
     return await h.character.findMany({
       where: { novelId: t },
@@ -6369,7 +6567,7 @@ S.handle("db:get-characters", async (r, t) => {
     throw console.error("[Main] db:get-characters failed:", e), e;
   }
 });
-S.handle("db:get-character", async (r, t) => {
+A.handle("db:get-character", async (r, t) => {
   try {
     return await h.character.findUnique({
       where: { id: t },
@@ -6383,7 +6581,7 @@ S.handle("db:get-character", async (r, t) => {
     throw console.error("[Main] db:get-character failed:", e), e;
   }
 });
-S.handle("db:create-character", async (r, t) => {
+A.handle("db:create-character", async (r, t) => {
   try {
     const e = typeof t.profile == "object" ? JSON.stringify(t.profile) : t.profile;
     return await h.character.create({
@@ -6393,7 +6591,7 @@ S.handle("db:create-character", async (r, t) => {
     throw console.error("[Main] db:create-character failed:", e), e;
   }
 });
-S.handle("db:update-character", async (r, { id: t, data: e }) => {
+A.handle("db:update-character", async (r, { id: t, data: e }) => {
   try {
     const n = typeof e.profile == "object" ? JSON.stringify(e.profile) : e.profile;
     return await h.character.update({
@@ -6404,14 +6602,14 @@ S.handle("db:update-character", async (r, { id: t, data: e }) => {
     throw console.error("[Main] db:update-character failed:", n), n;
   }
 });
-S.handle("db:delete-character", async (r, t) => {
+A.handle("db:delete-character", async (r, t) => {
   try {
     await h.character.delete({ where: { id: t } });
   } catch (e) {
     throw console.error("[Main] db:delete-character failed:", e), e;
   }
 });
-S.handle("db:get-items", async (r, t) => {
+A.handle("db:get-items", async (r, t) => {
   try {
     return await h.item.findMany({
       where: { novelId: t },
@@ -6421,14 +6619,14 @@ S.handle("db:get-items", async (r, t) => {
     throw console.error("[Main] db:get-items failed:", e), e;
   }
 });
-S.handle("db:get-item", async (r, t) => {
+A.handle("db:get-item", async (r, t) => {
   try {
     return await h.item.findUnique({ where: { id: t } });
   } catch (e) {
     throw console.error("[Main] db:get-item failed:", e), e;
   }
 });
-S.handle("db:create-item", async (r, t) => {
+A.handle("db:create-item", async (r, t) => {
   try {
     const n = ((await h.item.aggregate({
       where: { novelId: t.novelId },
@@ -6441,7 +6639,7 @@ S.handle("db:create-item", async (r, t) => {
     throw console.error("[Main] db:create-item failed:", e), e;
   }
 });
-S.handle("db:update-item", async (r, { id: t, data: e }) => {
+A.handle("db:update-item", async (r, { id: t, data: e }) => {
   try {
     return await h.item.update({
       where: { id: t },
@@ -6451,16 +6649,16 @@ S.handle("db:update-item", async (r, { id: t, data: e }) => {
     throw console.error("[Main] db:update-item failed:", n), n;
   }
 });
-S.handle("db:delete-item", async (r, t) => {
+A.handle("db:delete-item", async (r, t) => {
   try {
     return await h.item.delete({ where: { id: t } });
   } catch (e) {
     throw console.error("[Main] db:delete-item failed:", e), e;
   }
 });
-S.handle("db:get-mentionables", async (r, t) => {
+A.handle("db:get-mentionables", async (r, t) => {
   try {
-    const [e, n, a, o] = await Promise.all([
+    const [e, n, a, i] = await Promise.all([
       h.character.findMany({
         where: { novelId: t },
         select: { id: !0, name: !0, avatar: !0, role: !0, isStarred: !0 },
@@ -6489,13 +6687,13 @@ S.handle("db:get-mentionables", async (r, t) => {
       ...e.map((c) => ({ ...c, type: "character" })),
       ...n.map((c) => ({ ...c, type: "item" })),
       ...a.map((c) => ({ id: c.id, name: c.name, icon: c.icon, type: "world", role: c.type })),
-      ...o.map((c) => ({ id: c.id, name: c.name, type: "map", role: c.type }))
+      ...i.map((c) => ({ id: c.id, name: c.name, type: "map", role: c.type }))
     ];
   } catch (e) {
     throw console.error("[Main] db:get-mentionables failed:", e), e;
   }
 });
-S.handle("db:get-world-settings", async (r, t) => {
+A.handle("db:get-world-settings", async (r, t) => {
   try {
     return await h.worldSetting.findMany({
       where: { novelId: t },
@@ -6505,7 +6703,7 @@ S.handle("db:get-world-settings", async (r, t) => {
     throw console.error("[Main] db:get-world-settings failed:", e), e;
   }
 });
-S.handle("db:create-world-setting", async (r, t) => {
+A.handle("db:create-world-setting", async (r, t) => {
   try {
     const e = await h.worldSetting.findFirst({
       where: { novelId: t.novelId },
@@ -6523,7 +6721,7 @@ S.handle("db:create-world-setting", async (r, t) => {
     throw console.error("[Main] db:create-world-setting failed:", e), e;
   }
 });
-S.handle("db:update-world-setting", async (r, t, e) => {
+A.handle("db:update-world-setting", async (r, t, e) => {
   try {
     return await h.worldSetting.update({
       where: { id: t },
@@ -6533,14 +6731,14 @@ S.handle("db:update-world-setting", async (r, t, e) => {
     throw console.error("[Main] db:update-world-setting failed:", n), n;
   }
 });
-S.handle("db:delete-world-setting", async (r, t) => {
+A.handle("db:delete-world-setting", async (r, t) => {
   try {
     return await h.worldSetting.delete({ where: { id: t } });
   } catch (e) {
     throw console.error("[Main] db:delete-world-setting failed:", e), e;
   }
 });
-S.handle("db:get-maps", async (r, t) => {
+A.handle("db:get-maps", async (r, t) => {
   try {
     return await h.mapCanvas.findMany({
       where: { novelId: t },
@@ -6550,7 +6748,7 @@ S.handle("db:get-maps", async (r, t) => {
     throw console.error("[Main] db:get-maps failed:", e), e;
   }
 });
-S.handle("db:get-map", async (r, t) => {
+A.handle("db:get-map", async (r, t) => {
   try {
     return await h.mapCanvas.findUnique({
       where: { id: t },
@@ -6563,62 +6761,62 @@ S.handle("db:get-map", async (r, t) => {
     throw console.error("[Main] db:get-map failed:", e), e;
   }
 });
-S.handle("db:create-map", async (r, t) => {
+A.handle("db:create-map", async (r, t) => {
   try {
     return await h.mapCanvas.create({ data: t });
   } catch (e) {
     throw console.error("[Main] db:create-map failed:", e), e;
   }
 });
-S.handle("db:update-map", async (r, { id: t, data: e }) => {
+A.handle("db:update-map", async (r, { id: t, data: e }) => {
   try {
-    const { markers: n, elements: a, createdAt: o, updatedAt: c, ...i } = e;
-    return await h.mapCanvas.update({ where: { id: t }, data: i });
+    const { markers: n, elements: a, createdAt: i, updatedAt: c, ...s } = e;
+    return await h.mapCanvas.update({ where: { id: t }, data: s });
   } catch (n) {
     throw console.error("[Main] db:update-map failed:", n), n;
   }
 });
-S.handle("db:delete-map", async (r, t) => {
+A.handle("db:delete-map", async (r, t) => {
   try {
     const e = await h.mapCanvas.findUnique({ where: { id: t }, select: { background: !0, novelId: !0 } });
     if (e != null && e.background) {
-      const n = L.join(b.getPath("userData"), e.background);
-      x.existsSync(n) && x.unlinkSync(n);
+      const n = N.join(b.getPath("userData"), e.background);
+      P.existsSync(n) && P.unlinkSync(n);
     }
     return await h.mapCanvas.delete({ where: { id: t } });
   } catch (e) {
     throw console.error("[Main] db:delete-map failed:", e), e;
   }
 });
-S.handle("db:upload-map-bg", async (r, t) => {
+A.handle("db:upload-map-bg", async (r, t) => {
   try {
     const e = await h.mapCanvas.findUnique({ where: { id: t }, select: { novelId: !0, background: !0 } });
     if (!e)
       return null;
-    const n = await Ce.showOpenDialog(T, {
+    const n = await Ie.showOpenDialog(k, {
       title: "Select Map Image",
       filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "webp", "gif", "bmp"] }],
       properties: ["openFile"]
     });
     if (n.canceled || n.filePaths.length === 0)
       return null;
-    const a = n.filePaths[0], o = L.extname(a), c = L.join(b.getPath("userData"), "maps", e.novelId);
-    if (x.existsSync(c) || x.mkdirSync(c, { recursive: !0 }), e.background) {
-      const g = L.join(b.getPath("userData"), e.background);
-      x.existsSync(g) && x.unlinkSync(g);
+    const a = n.filePaths[0], i = N.extname(a), c = N.join(b.getPath("userData"), "maps", e.novelId);
+    if (P.existsSync(c) || P.mkdirSync(c, { recursive: !0 }), e.background) {
+      const g = N.join(b.getPath("userData"), e.background);
+      P.existsSync(g) && P.unlinkSync(g);
     }
-    const i = `${t}${o}`, l = L.join(c, i);
-    x.copyFileSync(a, l);
-    const I = `maps/${e.novelId}/${i}`, E = Ft.createFromPath(l).getSize(), C = E.width || 1200, p = E.height || 800;
+    const s = `${t}${i}`, d = N.join(c, s);
+    P.copyFileSync(a, d);
+    const v = `maps/${e.novelId}/${s}`, C = jt.createFromPath(d).getSize(), S = C.width || 1200, p = C.height || 800;
     return await h.mapCanvas.update({
       where: { id: t },
-      data: { background: I, width: C, height: p }
-    }), { path: I, width: C, height: p };
+      data: { background: v, width: S, height: p }
+    }), { path: v, width: S, height: p };
   } catch (e) {
     throw console.error("[Main] db:upload-map-bg failed:", e), e;
   }
 });
-S.handle("db:get-map-markers", async (r, t) => {
+A.handle("db:get-map-markers", async (r, t) => {
   try {
     return await h.characterMapMarker.findMany({
       where: { mapId: t },
@@ -6628,7 +6826,7 @@ S.handle("db:get-map-markers", async (r, t) => {
     throw console.error("[Main] db:get-map-markers failed:", e), e;
   }
 });
-S.handle("db:create-map-marker", async (r, t) => {
+A.handle("db:create-map-marker", async (r, t) => {
   try {
     return await h.characterMapMarker.create({
       data: t,
@@ -6638,7 +6836,7 @@ S.handle("db:create-map-marker", async (r, t) => {
     throw console.error("[Main] db:create-map-marker failed:", e), e;
   }
 });
-S.handle("db:update-map-marker", async (r, { id: t, data: e }) => {
+A.handle("db:update-map-marker", async (r, { id: t, data: e }) => {
   try {
     return await h.characterMapMarker.update({
       where: { id: t },
@@ -6649,14 +6847,14 @@ S.handle("db:update-map-marker", async (r, { id: t, data: e }) => {
     throw console.error("[Main] db:update-map-marker failed:", n), n;
   }
 });
-S.handle("db:delete-map-marker", async (r, t) => {
+A.handle("db:delete-map-marker", async (r, t) => {
   try {
     return await h.characterMapMarker.delete({ where: { id: t } });
   } catch (e) {
     throw console.error("[Main] db:delete-map-marker failed:", e), e;
   }
 });
-S.handle("db:get-map-elements", async (r, t) => {
+A.handle("db:get-map-elements", async (r, t) => {
   try {
     return await h.mapElement.findMany({
       where: { mapId: t },
@@ -6666,29 +6864,29 @@ S.handle("db:get-map-elements", async (r, t) => {
     throw console.error("[Main] db:get-map-elements failed:", e), e;
   }
 });
-S.handle("db:create-map-element", async (r, t) => {
+A.handle("db:create-map-element", async (r, t) => {
   try {
     return await h.mapElement.create({ data: t });
   } catch (e) {
     throw console.error("[Main] db:create-map-element failed:", e), e;
   }
 });
-S.handle("db:update-map-element", async (r, { id: t, data: e }) => {
+A.handle("db:update-map-element", async (r, { id: t, data: e }) => {
   try {
-    const { createdAt: n, updatedAt: a, map: o, ...c } = e;
+    const { createdAt: n, updatedAt: a, map: i, ...c } = e;
     return await h.mapElement.update({ where: { id: t }, data: c });
   } catch (n) {
     throw console.error("[Main] db:update-map-element failed:", n), n;
   }
 });
-S.handle("db:delete-map-element", async (r, t) => {
+A.handle("db:delete-map-element", async (r, t) => {
   try {
     return await h.mapElement.delete({ where: { id: t } });
   } catch (e) {
     throw console.error("[Main] db:delete-map-element failed:", e), e;
   }
 });
-S.handle("db:get-relationships", async (r, t) => {
+A.handle("db:get-relationships", async (r, t) => {
   try {
     const [e, n] = await Promise.all([
       h.relationship.findMany({
@@ -6705,7 +6903,7 @@ S.handle("db:get-relationships", async (r, t) => {
     throw console.error("[Main] db:get-relationships failed:", e), e;
   }
 });
-S.handle("db:create-relationship", async (r, t) => {
+A.handle("db:create-relationship", async (r, t) => {
   try {
     return await h.relationship.create({
       data: t,
@@ -6718,14 +6916,14 @@ S.handle("db:create-relationship", async (r, t) => {
     throw console.error("[Main] db:create-relationship failed:", e), e;
   }
 });
-S.handle("db:delete-relationship", async (r, t) => {
+A.handle("db:delete-relationship", async (r, t) => {
   try {
     return await h.relationship.delete({ where: { id: t } });
   } catch (e) {
     throw console.error("[Main] db:delete-relationship failed:", e), e;
   }
 });
-S.handle("db:get-character-items", async (r, t) => {
+A.handle("db:get-character-items", async (r, t) => {
   try {
     return await h.itemOwnership.findMany({
       where: { characterId: t },
@@ -6735,7 +6933,7 @@ S.handle("db:get-character-items", async (r, t) => {
     throw console.error("[Main] db:get-character-items failed:", e), e;
   }
 });
-S.handle("db:add-item-to-character", async (r, t) => {
+A.handle("db:add-item-to-character", async (r, t) => {
   try {
     return await h.itemOwnership.create({
       data: t,
@@ -6745,14 +6943,14 @@ S.handle("db:add-item-to-character", async (r, t) => {
     throw console.error("[Main] db:add-item-to-character failed:", e), e;
   }
 });
-S.handle("db:remove-item-from-character", async (r, t) => {
+A.handle("db:remove-item-from-character", async (r, t) => {
   try {
     return await h.itemOwnership.delete({ where: { id: t } });
   } catch (e) {
     throw console.error("[Main] db:remove-item-from-character failed:", e), e;
   }
 });
-S.handle("db:update-item-ownership", async (r, t, e) => {
+A.handle("db:update-item-ownership", async (r, t, e) => {
   try {
     return await h.itemOwnership.update({
       where: { id: t },
@@ -6763,7 +6961,7 @@ S.handle("db:update-item-ownership", async (r, t, e) => {
     throw console.error("[Main] db:update-item-ownership failed:", n), n;
   }
 });
-S.handle("db:get-character-timeline", async (r, t) => {
+A.handle("db:get-character-timeline", async (r, t) => {
   try {
     const e = await h.character.findUnique({ where: { id: t }, select: { name: !0, novelId: !0 } });
     if (!e)
@@ -6781,22 +6979,22 @@ S.handle("db:get-character-timeline", async (r, t) => {
       },
       orderBy: [{ chapter: { volume: { order: "asc" } } }, { chapter: { order: "asc" } }]
     }), a = /* @__PURE__ */ new Set();
-    return n.filter((o) => o.chapter && !a.has(o.chapter.id) && a.add(o.chapter.id)).map((o) => {
+    return n.filter((i) => i.chapter && !a.has(i.chapter.id) && a.add(i.chapter.id)).map((i) => {
       var c;
       return {
-        chapterId: o.chapter.id,
-        chapterTitle: o.chapter.title,
-        volumeTitle: o.chapter.volume.title,
-        order: o.chapter.order,
-        volumeOrder: o.chapter.volume.order,
-        snippet: ((c = o.plotPoint.description) == null ? void 0 : c.substring(0, 100)) || o.plotPoint.title
+        chapterId: i.chapter.id,
+        chapterTitle: i.chapter.title,
+        volumeTitle: i.chapter.volume.title,
+        order: i.chapter.order,
+        volumeOrder: i.chapter.volume.order,
+        snippet: ((c = i.plotPoint.description) == null ? void 0 : c.substring(0, 100)) || i.plotPoint.title
       };
     });
   } catch (e) {
     throw console.error("[Main] db:get-character-timeline failed:", e), e;
   }
 });
-function un(r) {
+function Sn(r) {
   if (!r)
     return "";
   try {
@@ -6811,7 +7009,7 @@ function un(r) {
     return r;
   }
 }
-S.handle("db:get-character-chapter-appearances", async (r, t) => {
+A.handle("db:get-character-chapter-appearances", async (r, t) => {
   try {
     const e = await h.character.findUnique({ where: { id: t }, select: { name: !0, novelId: !0 } });
     return e ? (await h.chapter.findMany({
@@ -6829,12 +7027,12 @@ S.handle("db:get-character-chapter-appearances", async (r, t) => {
       },
       orderBy: [{ volume: { order: "asc" } }, { order: "asc" }]
     })).map((a) => {
-      const o = un(a.content || "");
+      const i = Sn(a.content || "");
       let c = "";
-      const i = o.indexOf(e.name);
-      if (i >= 0) {
-        const l = Math.max(0, i - 30), I = Math.min(o.length, i + e.name.length + 50);
-        c = (l > 0 ? "..." : "") + o.substring(l, I) + (I < o.length ? "..." : "");
+      const s = i.indexOf(e.name);
+      if (s >= 0) {
+        const d = Math.max(0, s - 30), v = Math.min(i.length, s + e.name.length + 50);
+        c = (d > 0 ? "..." : "") + i.substring(d, v) + (v < i.length ? "..." : "");
       }
       return {
         chapterId: a.id,
@@ -6849,7 +7047,7 @@ S.handle("db:get-character-chapter-appearances", async (r, t) => {
     throw console.error("[Main] db:get-character-chapter-appearances failed:", e), e;
   }
 });
-S.handle("db:get-recent-chapters", async (r, t, e, n = 5) => {
+A.handle("db:get-recent-chapters", async (r, t, e, n = 5) => {
   try {
     return await h.chapter.findMany({
       where: {
@@ -6871,91 +7069,87 @@ S.handle("db:get-recent-chapters", async (r, t, e, n = 5) => {
   }
 });
 b.on("window-all-closed", () => {
-  process.platform !== "darwin" && (b.quit(), T = null);
+  process.platform !== "darwin" && (b.quit(), k = null);
 });
 b.on("activate", () => {
-  wt.getAllWindows().length === 0 && kt();
+  wt.getAllWindows().length === 0 && $t();
 });
 b.whenReady().then(async () => {
-  var a, o, c;
+  var a, i, c;
   if (re.error) {
-    Ke(b.getPath("userData")), yt(), console.error(`[AI-Diag] Invalid arguments: ${re.error}`), b.exit(2);
+    Xe(b.getPath("userData")), yt(), console.error(`[AI-Diag] Invalid arguments: ${re.error}`), b.exit(2);
     return;
   }
-  b.setAppUserModelId("com.noveleditor.app"), b.setName(b.isPackaged ? bt : on);
-  const r = (a = re.command) != null && a.userDataPath ? L.resolve(re.command.userDataPath) : sn();
-  if (b.setPath("userData", r), Ke(b.getPath("userData")), yt(), console.log("[Main] App Ready. Starting DB Setup..."), console.log("[Main] User Data Path:", b.getPath("userData")), re.command && b.isPackaged) {
+  b.setAppUserModelId(mn()), b.setName(b.isPackaged ? kt : un);
+  const r = (a = re.command) != null && a.userDataPath ? N.resolve(re.command.userDataPath) : yn();
+  if (b.setPath("userData", r), Xe(b.getPath("userData")), yt(), console.log("[Main] App Ready. Starting DB Setup..."), console.log("[Main] User Data Path:", b.getPath("userData")), re.command && b.isPackaged) {
     console.error("[AI-Diag] --ai-diag is only available in development mode."), b.exit(1);
     return;
   }
-  (o = re.command) != null && o.userDataPath && console.log("[AI-Diag] userData override:", r), Ut.handle("local-resource", (i) => {
-    const l = decodeURIComponent(i.url.replace("local-resource://", "")), I = L.join(b.getPath("userData"), l);
-    return Bt.fetch("file:///" + I.replace(/\\/g, "/"));
+  (i = re.command) != null && i.userDataPath && console.log("[AI-Diag] userData override:", r), zt.handle("local-resource", (s) => {
+    const d = decodeURIComponent(s.url.replace("local-resource://", "")), v = N.join(b.getPath("userData"), d);
+    return Ht.fetch("file:///" + v.replace(/\\/g, "/"));
   });
   let t;
-  if (b.isPackaged) {
-    const i = L.dirname(b.getPath("exe"));
-    t = L.join(i, "data");
-  } else
-    t = b.getPath("userData");
-  const e = (c = re.command) != null && c.dbPath ? L.resolve(re.command.dbPath) : L.join(t, "novel_editor.db"), n = `file:${e}`;
-  if (console.log("[Main] Database Path:", e), x.existsSync(L.dirname(e)) || x.mkdirSync(L.dirname(e), { recursive: !0 }), !b.isPackaged) {
-    const i = L.resolve(ve, "../../../packages/core/prisma/schema.prisma");
-    if (console.log("[Main] Development mode detected (unpackaged). Checking schema at:", i), x.existsSync(i)) {
-      const l = L.dirname(e);
-      x.existsSync(l) || x.mkdirSync(l, { recursive: !0 }), console.log("[Main] Schema found."), console.log("[Main] Cleaning up FTS tables before migration..."), Ze(n);
+  b.isPackaged && Mt() ? t = pn() : t = b.getPath("userData"), hn();
+  const e = (c = re.command) != null && c.dbPath ? N.resolve(re.command.dbPath) : N.join(t, "novel_editor.db"), n = `file:${e}`;
+  if (console.log("[Main] Database Path:", e), P.existsSync(N.dirname(e)) || P.mkdirSync(N.dirname(e), { recursive: !0 }), !b.isPackaged) {
+    const s = N.resolve(we, "../../../packages/core/prisma/schema.prisma");
+    if (console.log("[Main] Development mode detected (unpackaged). Checking schema at:", s), P.existsSync(s)) {
+      const d = N.dirname(e);
+      P.existsSync(d) || P.mkdirSync(d, { recursive: !0 }), console.log("[Main] Schema found."), console.log("[Main] Cleaning up FTS tables before migration..."), Ge(n);
       try {
         await h.$executeRawUnsafe("DROP TABLE IF EXISTS search_index;"), console.log("[Main] FTS tables dropped successfully.");
       } catch (w) {
         console.warn("[Main] Failed to drop FTS table (non-critical):", w);
       }
       await h.$disconnect(), console.log("[Main] Attempting synchronous DB push to:", e);
-      const I = L.resolve(ve, "../../../packages/core/node_modules/.bin/prisma.cmd");
-      if (console.log("[Main] Using Prisma binary at:", I), !x.existsSync(I))
-        console.error("[Main] Prisma binary NOT found at:", I);
+      const v = N.resolve(we, "../../../packages/core/node_modules/.bin/prisma.cmd");
+      if (console.log("[Main] Using Prisma binary at:", v), !P.existsSync(v))
+        console.error("[Main] Prisma binary NOT found at:", v);
       else
         try {
-          const w = `"${I}" db push --schema="${i}" --accept-data-loss`;
+          const w = `"${v}" db push --schema="${s}" --accept-data-loss`;
           console.log("[Main] Executing command:", w);
-          const E = Ht(w, {
+          const C = Wt(w, {
             env: { ...process.env, DATABASE_URL: n },
-            cwd: L.resolve(ve, "../../../packages/core"),
+            cwd: N.resolve(we, "../../../packages/core"),
             stdio: "pipe",
             // Avoid inherit to prevent encoding issues
             windowsHide: !0
           });
-          console.log("[Main] DB Push output:", E.toString()), console.log("[Main] DB Push completed successfully.");
+          console.log("[Main] DB Push output:", C.toString()), console.log("[Main] DB Push completed successfully.");
         } catch (w) {
           console.error("[Main] DB Push failed."), w.stdout && console.log("[Main] stdout:", w.stdout.toString()), w.stderr && console.error("[Main] stderr:", w.stderr.toString());
         }
     } else
-      console.warn("[Main] Schema file NOT found at:", i);
+      console.warn("[Main] Schema file NOT found at:", s);
   }
-  Ze(n);
+  Ge(n);
   try {
-    await zt() && console.log("[Main] Bundled database schema applied successfully.");
-  } catch (i) {
-    throw console.error("[Main] Failed to ensure bundled database schema:", i), i;
+    await qt() && console.log("[Main] Bundled database schema applied successfully.");
+  } catch (s) {
+    throw console.error("[Main] Failed to ensure bundled database schema:", s), s;
   }
-  if (R = new Nr(() => b.getPath("userData")), re.command)
+  if ($ = new br(() => b.getPath("userData")), re.command)
     try {
-      const i = await dn(R, re.command);
-      await h.$disconnect(), b.exit(i);
+      const s = await In($, re.command);
+      await h.$disconnect(), b.exit(s);
       return;
-    } catch (i) {
-      console.error("[AI-Diag] Execution failed:", i), await h.$disconnect(), b.exit(1);
+    } catch (s) {
+      console.error("[AI-Diag] Execution failed:", s), await h.$disconnect(), b.exit(1);
       return;
     }
-  await Wt(), console.log("[Main] Search index initialized");
+  await Xt(), console.log("[Main] Search index initialized");
   try {
-    await xt(R.getSettings());
-  } catch (i) {
-    console.warn("[Main] Failed to apply AI proxy settings:", i);
+    await Rt($.getSettings());
+  } catch (s) {
+    console.warn("[Main] Failed to apply AI proxy settings:", s);
   }
-  kt();
+  $t();
 });
 export {
-  An as MAIN_DIST,
-  Mt as RENDERER_DIST,
-  qe as VITE_DEV_SERVER_URL
+  On as MAIN_DIST,
+  bt as RENDERER_DIST,
+  He as VITE_DEV_SERVER_URL
 };

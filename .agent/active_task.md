@@ -4,6 +4,7 @@
 - [ ] 聚焦主线：完成 Phase G 验收收尾 + Phase H 覆盖矩阵补缺
 - [x] 文档同步：AI `apiKey/apiToken` 仅本地保存，不写入数据库，也不参与备份恢复
 - [x] 文档同步：开发模式 debug 日志与 Prisma 打包初始化方案已写入开发文档
+- [ ] 打包与发布收尾：图标/安装目录/备份隔离/默认主题/AI 设置页优化
 
 ## 执行清单（按顺序）
 
@@ -117,9 +118,33 @@
 - [ ] 手工测试：AI 地图图片是否成功落盘并可在地图工作台打开
 - [ ] 手工测试：打包版首启自动建库 + 创建小说成功
 - [ ] 手工测试：打包版升级路径设计评审（migration runner，不依赖运行时 `db push`）
+- [ ] 手工测试：`win-unpacked` / 安装版应用图标、快捷方式图标、任务栏图标均使用正式图标
+- [ ] 手工测试：安装版默认安装目录不再使用 `@novel-editor/desktop` 风格包名目录
+- [ ] 手工测试：打包版备份页不再读取历史开发环境自动备份记录
 - [ ] 终端验收：`ai:diag smoke mcp|skill|coverage` 与 `--json` 输出符合预期
 - [ ] 补充用户文档（AI 设置与故障排查）
 - [x] 文档同步：`.agent/*`、`DEVELOPMENT.md`、`README.md`、`USER_GUIDE*.md`、`apps/backend/README.md`
+
+### Packaging Follow-up: 图标/路径/主题/设置页（新增）
+- [ ] 图标修复：
+    - [ ] `electron-builder` 产物图标核对：安装包、快捷方式、资源管理器 `.exe` 图标
+    - [ ] `BrowserWindow` 运行时图标改为正式应用图标，不能继续指向 `electron-vite.svg`
+    - [ ] 验证 `win-unpacked` 与安装版图标一致
+- [ ] 安装目录命名修复：
+    - [ ] 检查 `apps/desktop/package.json` 的 `name` 对安装目录命名的影响
+    - [ ] 避免安装目录继续出现 `@novel-editor/desktop` / `@novel-editordesktop`
+    - [ ] 保持内部包名与用户可见安装目录解耦
+- [ ] 备份缓存隔离：
+    - [ ] 明确备份缓存位置：`app.getPath('userData')/backups/auto`
+    - [ ] 核查旧开发环境备份为何仍被打包版读取
+    - [ ] 设计开发版/打包版备份目录隔离与旧缓存迁移/忽略策略
+- [ ] 默认主题：
+    - [ ] 将 `useEditorPreferences` 默认主题从 `dark` 改为 `light`
+    - [ ] 验证首启、重装、已有偏好升级时的主题行为
+- [ ] AI 设置页优化：
+    - [ ] 文案中文化与术语统一（面向作者，不暴露技术表达）
+    - [ ] 配置项说明补齐（模型、超时、图片格式、水印、创意程度等）
+    - [ ] 重新梳理分组与视觉层级，减少当前表单拥挤感
 
 ### Phase H: AI 全域操作平台（新增）
 - [x] 设计 Capability Registry：`feature -> actions -> input schema -> output schema -> permissions`

@@ -4,13 +4,16 @@
 
 ## 1. 基本原则
 - 架构：Electron + React + TypeScript（ESM）。
+- 包管理器基线：`pnpm 8.15.9`。
 - i18n：用户可见文案必须走国际化键，不直接硬编码。
 - 分层：`packages/core` 保持纯逻辑/数据层，不引入 UI 依赖。
 
 ## 2. 数据库与模型变更流程
 开发阶段修改 `packages/core/prisma/schema.prisma` 后，不再手工依赖运行时 `@prisma/client` 目录结构。当前流程是：
 
-```bash
+终端管理员运行打包：
+pnpm --filter novel-editor-desktop run build
+```bash 
 pnpm --filter @novel-editor/core run build
 ```
 
@@ -23,6 +26,7 @@ pnpm --filter @novel-editor/core run build
 - Desktop 的 `predev` / `prebuild` 已自动执行 `prepare:core`，正常情况下无需额外手工运行。
 - 开发环境需要同步本地数据库结构时，仍可使用 `pnpm db:push`，但打包版不依赖运行时 `prisma db push`。
 - 打包版首次启动发现数据库缺表时，会执行内置的 `schema-init.sql` 自动建表。
+- 仓库初始化命令使用 `pnpm run setup`，不要使用 `pnpm setup`（后者会命中 pnpm 自带命令）。
 
 ## 3. Electron IPC 约定
 - Main：`ipcMain.handle('namespace:action')`
@@ -98,6 +102,23 @@ pnpm --filter @novel-editor/desktop run ai:diag -- coverage
 ## 6. 打包与发布注意事项
 - 诊断脚本放在 `apps/desktop/scripts`，不作为用户可见功能入口。
 - 打包前确认 `packages/core` 已可用，避免 Prisma Client 缺失。
+- 平台化打包命令：
+  - Windows：`pnpm --filter novel-editor-desktop run build:win`
+  - macOS DMG（universal）：`pnpm --filter novel-editor-desktop run build:mac`
+- Windows 图标链路：
+  - `build:win` 会先生成 `release/win-unpacked`
+  - 再执行 `apps/desktop/scripts/fix-win-exe-icon.ps1` 修正主程序 `.exe` 图标
+  - 最后基于 `--prepackaged release/win-unpacked` 生成安装版与便携版，确保资源管理器中的 `.exe` 图标与窗口/任务栏图标一致
+- `build:mac` 需要在 macOS 环境执行；当前 Windows 开发机不作为生成正式 mac 安装包的目标环境。
+- GitHub 自动发布：
+  - 工作流：`.github/workflows/release.yml`
+  - 触发方式：推送版本标签，例如 `git tag v0.1.1 && git push origin v0.1.1`
+  - CI 中的 pnpm 版本与仓库声明保持一致，当前为 `8.15.9`
+  - 行为：自动构建 Windows / macOS 产物，并上传到 GitHub Releases
+- 打包体积控制：
+  - `apps/desktop/package.json` 中仅保留主进程/预加载真正需要的运行时依赖在 `dependencies`
+  - React、Lexical、UI 组件库等渲染层依赖应放在 `devDependencies`
+  - `electron-builder.yml` 采用白名单 `files`，避免把 workspace 包源码、缓存和无关 `node_modules` 整包打入安装包
 - 开发诊断参数（如 `--ai-diag`）仅开发环境可用，打包环境应拒绝。
 - Prisma 打包策略已切换为：
   - 构建期生成 `packages/core/generated/client`
@@ -124,4 +145,3 @@ pnpm --filter @novel-editor/desktop run ai:diag -- coverage
 - 诊断脚本：`apps/desktop/scripts/ai-dev-diagnostics.mjs`
 - Core Prisma 生成脚本：`packages/core/scripts/generate-prisma-client.mjs`
 - 生成产物：`packages/core/generated/client`
-

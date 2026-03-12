@@ -97,7 +97,7 @@ export default function AIWorkbenchPanel({
   onSelectionChange,
   onDraftGenerated,
 }: Props) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const isDark = theme === 'dark';
   const [brief, setBrief] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
@@ -113,9 +113,14 @@ export default function AIWorkbenchPanel({
   const [promptPreviewLoading, setPromptPreviewLoading] = useState(false);
   const [promptPreviewError, setPromptPreviewError] = useState('');
   const [promptOverride, setPromptOverride] = useState('');
+  const [promptDirty, setPromptDirty] = useState(false);
   const [generationMode, setGenerationMode] = useState<'auto' | 'manual'>('auto');
   const [targetSections, setTargetSections] = useState<CreativeSection[]>([...ALL_SECTIONS]);
   const [showAdvancedSettings, setShowAdvancedSettings] = useState(false);
+  const [contextChapterCount, setContextChapterCount] = useState(0);
+  const [includeExistingEntities, setIncludeExistingEntities] = useState(true);
+  const [filterCompletedPlotLines, setFilterCompletedPlotLines] = useState(true);
+  const [estimatedTokens, setEstimatedTokens] = useState(0);
 
   const selectedCounts = useMemo(
     () => ({
@@ -230,8 +235,12 @@ export default function AIWorkbenchPanel({
       const result = await window.ai.generateCreativeAssets({
         novelId,
         brief,
-        overrideUserPrompt: promptOverride.trim() || undefined,
+        locale: i18n.language,
+        overrideUserPrompt: promptDirty && promptOverride.trim() ? promptOverride.trim() : undefined,
         targetSections: generationMode === 'manual' ? targetSections : undefined,
+        contextChapterCount,
+        includeExistingEntities,
+        filterCompletedPlotLines,
       });
       const normalized = normalizeDraft(result?.draft);
       const sanitized = sanitizeGeneratedDraft(normalized);
@@ -273,10 +282,16 @@ export default function AIWorkbenchPanel({
       const preview = await window.ai.previewCreativeAssetsPrompt({
         novelId,
         brief,
+        locale: i18n.language,
         targetSections: generationMode === 'manual' ? targetSections : undefined,
+        contextChapterCount,
+        includeExistingEntities,
+        filterCompletedPlotLines,
       });
       setPromptPreview(preview as unknown as PromptPreviewData);
       setPromptOverride((prev) => prev || preview.editableUserPrompt || '');
+      const tokens = (preview as any)?.structured?.params?.estimatedContextTokens;
+      if (typeof tokens === 'number') setEstimatedTokens(tokens);
     } catch (error) {
       console.error('[AIWorkbenchPanel] prompt preview failed:', error);
       setPromptPreviewError(t('aiWorkbench.promptPreviewFailed'));
@@ -364,6 +379,10 @@ export default function AIWorkbenchPanel({
       if (hasPlotUpdates) {
         window.dispatchEvent(new Event('plot-update'));
       }
+
+      // 入库成功后清空草稿
+      onDraftChange({ plotLines: [], plotPoints: [], characters: [], items: [], skills: [], maps: [] });
+      onSelectionChange({ plotLines: [], plotPoints: [], characters: [], items: [], skills: [], maps: [] });
 
       setFlowStatus('success', 'success', t('aiWorkbench.persistSuccess'));
     } catch (error) {
@@ -482,6 +501,67 @@ export default function AIWorkbenchPanel({
                   </div>
                 </div>
               )}
+
+              {/* 上下文配置 */}
+              <div className="space-y-2 pt-1">
+                <div className={clsx('text-[11px] font-medium', isDark ? 'text-neutral-300' : 'text-gray-700')}>
+                  {t('aiWorkbench.contextSettings', '上下文配置')}
+                </div>
+
+                {/* 包含已有实体 */}
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={includeExistingEntities}
+                    onChange={(e) => setIncludeExistingEntities(e.target.checked)}
+                    className="rounded"
+                  />
+                  <span className={clsx('text-[11px]', isDark ? 'text-neutral-300' : 'text-gray-700')}>
+                    {t('aiWorkbench.includeExistingEntities', '包含已有角色/物品/情节线')}
+                  </span>
+                </label>
+
+                {/* 过滤已完成情节 */}
+                {includeExistingEntities && (
+                  <label className="flex items-center gap-2 cursor-pointer ml-4">
+                    <input
+                      type="checkbox"
+                      checked={filterCompletedPlotLines}
+                      onChange={(e) => setFilterCompletedPlotLines(e.target.checked)}
+                      className="rounded"
+                    />
+                    <span className={clsx('text-[11px]', isDark ? 'text-neutral-400' : 'text-gray-600')}>
+                      {t('aiWorkbench.filterCompletedPlotLines', '过滤已完成的情节点')}
+                    </span>
+                  </label>
+                )}
+
+                {/* 参考章节数 */}
+                <div className="flex items-center gap-2">
+                  <span className={clsx('text-[11px]', isDark ? 'text-neutral-300' : 'text-gray-700')}>
+                    {t('aiWorkbench.contextChapterCount', '参考章节摘要数')}
+                  </span>
+                  <select
+                    value={contextChapterCount}
+                    onChange={(e) => setContextChapterCount(Number(e.target.value))}
+                    className={clsx(
+                      'text-[11px] rounded px-1.5 py-0.5 border',
+                      isDark ? 'bg-white/5 border-white/10 text-neutral-200' : 'bg-white border-gray-200 text-gray-700',
+                    )}
+                  >
+                    {[0, 1, 2, 3, 4, 5, 6, 7, 8].map((n) => (
+                      <option key={n} value={n}>{n === 0 ? t('aiWorkbench.contextChapterNone', '不参考') : n}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Token 预估 */}
+                {estimatedTokens > 0 && (
+                  <div className={clsx('text-[10px] flex items-center gap-1', isDark ? 'text-neutral-500' : 'text-gray-400')}>
+                    {t('aiWorkbench.estimatedContextTokens', '预估上下文 Token')}: ~{estimatedTokens.toLocaleString()}
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </div>
@@ -512,7 +592,7 @@ export default function AIWorkbenchPanel({
           error={promptPreviewError}
           data={promptPreview}
           editablePrompt={promptOverride}
-          onEditablePromptChange={setPromptOverride}
+          onEditablePromptChange={(val) => { setPromptOverride(val); setPromptDirty(true); }}
           onRefresh={() => void refreshPromptPreview()}
         />
 
@@ -549,14 +629,7 @@ export default function AIWorkbenchPanel({
           )}
         </div>
 
-        <div className={clsx('rounded-lg border px-2.5 py-2', isDark ? 'border-white/10 bg-black/10' : 'border-gray-200 bg-white')}>
-          <div className={clsx('text-[11px] font-medium', isDark ? 'text-neutral-200' : 'text-gray-800')}>
-            {t('aiWorkbench.rightDockHintTitle')}
-          </div>
-          <div className={clsx('mt-1 text-[11px] leading-5', isDark ? 'text-neutral-500' : 'text-gray-500')}>
-            {t('aiWorkbench.editInRightDockHintCompact')}
-          </div>
-        </div>
+
 
         {progressMeta.visible && (
           <div className="space-y-1">
@@ -567,7 +640,7 @@ export default function AIWorkbenchPanel({
           </div>
         )}
 
-        {statusText && <div className={clsx('rounded-lg border px-2 py-1.5 text-[11px]', statusClassName)}>{statusText}</div>}
+        {statusText && !progressMeta.visible && <div className={clsx('rounded-lg border px-2 py-1.5 text-[11px]', statusClassName)}>{statusText}</div>}
 
         {created && (
           <div className={clsx('rounded-lg border p-2 space-y-1', flowStage === 'success' ? (isDark ? 'border-emerald-300/30 bg-emerald-500/10' : 'border-emerald-300 bg-emerald-50') : (isDark ? 'border-white/10 bg-white/5' : 'border-gray-200 bg-gray-50'))}>
