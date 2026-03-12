@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, and this project follows Semantic Versioning in release tags.
 
+## [0.1.3] - 2026-03-12
+
+### Fixed
+- GitHub Actions release workflow no longer asks `actions/setup-node` to prime the pnpm cache before pnpm is installed, avoiding the `Unable to locate executable file: pnpm` bootstrap failure on both Windows and macOS jobs.
+
 ## [0.1.2] - 2026-03-12
 
 ### Fixed
