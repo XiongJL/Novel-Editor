@@ -276,6 +276,24 @@ export default function SearchSidebar({
         }
     }, [novelId, offset, searchFrontendEntities]);
 
+    useEffect(() => {
+        const unsubscribeAutomation = window.automation?.onDataChanged?.(({ method }) => {
+            if (!searchQuery.trim()) return;
+            if (
+                method === 'outline.write' ||
+                method === 'character.create_batch' ||
+                method === 'story_patch.apply' ||
+                method === 'chapter.create' ||
+                method === 'chapter.save' ||
+                method === 'draft.commit'
+            ) {
+                void searchFrontendEntities(searchQuery);
+                void performSearch(searchQuery, true);
+            }
+        });
+        return () => unsubscribeAutomation?.();
+    }, [performSearch, searchFrontendEntities, searchQuery]);
+
     // Debounced input
     const handleInputChange = useCallback((value: string) => {
         setSearchQuery(value);

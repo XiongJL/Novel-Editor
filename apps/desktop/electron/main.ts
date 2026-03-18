@@ -2,6 +2,8 @@
 import { initDb, db, ensureDbSchema } from '@novel-editor/core'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
+import { randomUUID } from 'node:crypto'
+import http from 'node:http'
 import { execSync } from 'child_process'
 import fs from 'fs'
 import * as searchIndex from './search/searchIndex'
@@ -9,6 +11,8 @@ import { AiService } from './ai/AiService'
 import { scheduleChapterSummaryRebuild } from './ai/summary/chapterSummary'
 import { formatAiErrorForDisplay, normalizeAiError } from './ai/errors'
 import { devLog, devLogError, initDevLogger, isDevDebugEnabled, redactForLog } from './debug/devLogger'
+import { AutomationService } from './automation/AutomationService'
+import { AutomationServer } from './automation/AutomationServer'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -134,6 +138,204 @@ function resolveDefaultUserDataPath(): string {
 type AiDiagCommand =
     | { action: 'smoke'; kind: 'mcp' | 'skill'; json: boolean; dbPath?: string; userDataPath?: string }
     | { action: 'coverage'; json: boolean; dbPath?: string; userDataPath?: string };
+
+type McpCliSetupPayload = {
+    commandPath: string;
+    launcherExists: boolean;
+    command: string;
+    args: string[];
+    codexToml: string;
+    claudeCommand: string;
+    jsonConfig: string;
+};
+
+type AutomationRuntimeDescriptor = {
+    version: number;
+    port: number;
+    token: string;
+    pid: number;
+    startedAt: string;
+};
+
+function quoteWindowsArg(value: string): string {
+    if (!value) return '""';
+    if (!/[ \t"]/u.test(value)) return value;
+    return `"${value.replace(/"/gu, '\\"')}"`;
+}
+
+function resolveMcpLauncherPath(): string {
+    if (app.isPackaged) {
+        if (process.platform === 'win32') {
+            return path.join(process.resourcesPath, 'mcp', 'novel-editor-mcp.cmd');
+        }
+        return path.join(process.resourcesPath, 'mcp', 'novel-editor-mcp.mjs');
+    }
+
+    if (process.platform === 'win32') {
+        return path.join(process.env.APP_ROOT || '', 'scripts', 'novel-editor-mcp.cmd');
+    }
+    return path.join(process.env.APP_ROOT || '', 'scripts', 'novel-editor-mcp.mjs');
+}
+
+function buildMcpCliSetupPayload(): McpCliSetupPayload {
+    const commandPath = resolveMcpLauncherPath();
+    const launcherExists = fs.existsSync(commandPath);
+    const serverName = 'novel_editor';
+    const startupTimeoutSec = 60;
+    const toolTimeoutSec = 120;
+
+    const command = process.platform === 'win32' ? 'cmd' : 'node';
+    const args = process.platform === 'win32' ? ['/c', commandPath] : [commandPath];
+    const codexToml = process.platform === 'win32'
+        ? [
+            `[mcp_servers.${serverName}]`,
+            'command = "cmd"',
+            `args = ["/c", "${commandPath.replace(/\\/gu, '\\\\')}"]`,
+            `startup_timeout_sec = ${startupTimeoutSec}`,
+            `tool_timeout_sec = ${toolTimeoutSec}`,
+        ].join('\n')
+        : [
+            `[mcp_servers.${serverName}]`,
+            'command = "node"',
+            `args = ["${commandPath}"]`,
+            `startup_timeout_sec = ${startupTimeoutSec}`,
+            `tool_timeout_sec = ${toolTimeoutSec}`,
+        ].join('\n');
+    const claudeCommand = process.platform === 'win32'
+        ? `claude mcp add novel-editor --scope local -- cmd /c ${quoteWindowsArg(commandPath)}`
+        : `claude mcp add novel-editor --scope local -- node ${quoteWindowsArg(commandPath)}`;
+    const jsonConfig = JSON.stringify(
+        {
+            mcpServers: {
+                [serverName]: {
+                    command,
+                    args,
+                },
+            },
+        },
+        null,
+        2,
+    );
+
+    return {
+        commandPath,
+        launcherExists,
+        command,
+        args,
+        codexToml,
+        claudeCommand,
+        jsonConfig,
+    };
+}
+
+function getAutomationRuntimePath(): string {
+    return path.join(app.getPath('userData'), 'automation', 'runtime.json');
+}
+
+function readAutomationRuntimeDescriptor(): AutomationRuntimeDescriptor {
+    const runtimePath = getAutomationRuntimePath();
+    if (!fs.existsSync(runtimePath)) {
+        throw new Error(`Automation runtime file not found: ${runtimePath}`);
+    }
+    let parsed: unknown;
+    try {
+        parsed = JSON.parse(fs.readFileSync(runtimePath, 'utf8'));
+    } catch (error: any) {
+        throw new Error(`Failed to parse automation runtime: ${error?.message || 'unknown error'}`);
+    }
+    const runtime = parsed as Partial<AutomationRuntimeDescriptor>;
+    if (!runtime || typeof runtime !== 'object') {
+        throw new Error('Automation runtime is empty');
+    }
+    if (!Number.isFinite(runtime.port) || !runtime.port || runtime.port <= 0) {
+        throw new Error('Automation runtime port is invalid');
+    }
+    if (typeof runtime.token !== 'string' || !runtime.token.trim()) {
+        throw new Error('Automation runtime token is invalid');
+    }
+    return {
+        version: Number(runtime.version || 1),
+        port: Number(runtime.port),
+        token: runtime.token,
+        pid: Number(runtime.pid || 0),
+        startedAt: String(runtime.startedAt || ''),
+    };
+}
+
+async function invokeAutomationForHealth(runtime: AutomationRuntimeDescriptor): Promise<{ ok: boolean; code?: string; message?: string; data?: unknown }> {
+    const payload = {
+        method: 'novel.list',
+        params: {},
+        origin: 'desktop-ui',
+    };
+    const body = JSON.stringify(payload);
+
+    return await new Promise((resolve, reject) => {
+        const request = http.request(
+            {
+                hostname: '127.0.0.1',
+                port: runtime.port,
+                path: '/invoke',
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Content-Length': Buffer.byteLength(body, 'utf8'),
+                    Authorization: `Bearer ${runtime.token}`,
+                },
+            },
+            (response) => {
+                const chunks: Buffer[] = [];
+                response.on('data', (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+                response.on('end', () => {
+                    const text = Buffer.concat(chunks).toString('utf8');
+                    try {
+                        resolve(JSON.parse(text));
+                    } catch (error: any) {
+                        reject(new Error(`Automation health response parse failed: ${error?.message || 'unknown error'}`));
+                    }
+                });
+            },
+        );
+
+        request.setTimeout(8000, () => {
+            request.destroy(new Error('Automation health request timeout'));
+        });
+        request.on('error', (error) => reject(error));
+        request.write(body);
+        request.end();
+    });
+}
+
+async function testNovelEditorMcpBridge(): Promise<{ ok: boolean; detail: string }> {
+    const setup = buildMcpCliSetupPayload();
+    if (!setup.launcherExists) {
+        return { ok: false, detail: `MCP launcher missing: ${setup.commandPath}` };
+    }
+
+    let runtime: AutomationRuntimeDescriptor;
+    try {
+        runtime = readAutomationRuntimeDescriptor();
+    } catch (error: any) {
+        return { ok: false, detail: error?.message || 'Automation runtime unavailable' };
+    }
+
+    try {
+        const response = await invokeAutomationForHealth(runtime);
+        if (!response?.ok) {
+            return {
+                ok: false,
+                detail: `Automation invoke failed: ${response?.code || 'UNKNOWN'} ${response?.message || ''}`.trim(),
+            };
+        }
+        const count = Array.isArray(response.data) ? response.data.length : 0;
+        return {
+            ok: true,
+            detail: `MCP bridge ready. launcher=ok runtime=ok invoke=ok novels=${count}`,
+        };
+    } catch (error: any) {
+        return { ok: false, detail: `Automation invoke error: ${error?.message || 'unknown error'}` };
+    }
+}
 
 function parseAiDiagCommand(argv: string[]): { command?: AiDiagCommand; error?: string } {
     const markerIndex = argv.indexOf('--ai-diag');
@@ -874,6 +1076,8 @@ ipcMain.handle('db:check-index-status', async (_, novelId: string) => {
 import { SyncManager } from './sync/SyncManager';
 const syncManager = new SyncManager();
 let aiService!: AiService;
+let automationService!: AutomationService;
+let automationServer: AutomationServer | null = null;
 
 // --- AI IPC ---
 ipcMain.handle('ai:get-settings', async () => {
@@ -926,6 +1130,16 @@ ipcMain.handle('ai:get-mcp-manifest', async () => {
     }
 });
 
+ipcMain.handle('ai:get-mcp-cli-setup', async () => {
+    try {
+        return buildMcpCliSetupPayload();
+    } catch (e) {
+        logAiIpcError('ai:get-mcp-cli-setup', undefined, e);
+        console.error('[Main] ai:get-mcp-cli-setup failed:', e);
+        throw e;
+    }
+});
+
 ipcMain.handle('ai:get-openclaw-manifest', async () => {
     try {
         return aiService.getOpenClawManifest();
@@ -970,7 +1184,7 @@ ipcMain.handle('ai:test-connection', async () => {
 
 ipcMain.handle('ai:test-mcp', async () => {
     try {
-        return await aiService.testMcp();
+        return await testNovelEditorMcpBridge();
     } catch (e) {
         logAiIpcError('ai:test-mcp', undefined, e);
         console.error('[Main] ai:test-mcp failed:', e);
@@ -1196,6 +1410,58 @@ ipcMain.handle('ai:openclaw-skill-invoke', async (_, payload: { name: string; in
             code: normalized.code,
             error: formatAiErrorForDisplay(normalized.code, normalized.message),
         };
+    }
+});
+
+ipcMain.handle('automation:invoke', async (_, payload: { method: string; params?: unknown; origin?: 'desktop-ui' | 'unknown' }) => {
+    const requestId = randomUUID();
+    const startedAt = Date.now();
+    try {
+        devLog('INFO', 'Main.automation:invoke.start', 'Renderer automation invoke start', {
+            requestId,
+            method: payload.method,
+            origin: payload.origin ?? 'desktop-ui',
+            params: redactForLog(payload.params),
+        });
+        const result = await automationService.invoke(payload.method, payload.params, {
+            source: 'renderer',
+            origin: payload.origin ?? 'desktop-ui',
+            requestId,
+        });
+        devLog('INFO', 'Main.automation:invoke.success', 'Renderer automation invoke success', {
+            requestId,
+            method: payload.method,
+            elapsedMs: Date.now() - startedAt,
+            result: redactForLog(result),
+        });
+        const dataChangingMethods = new Set([
+            'outline.write',
+            'character.create_batch',
+            'story_patch.apply',
+            'worldsetting.create',
+            'worldsetting.update',
+            'chapter.create',
+            'chapter.save',
+            'creative_assets.generate_draft',
+            'outline.generate_draft',
+            'chapter.generate_draft',
+            'draft.update',
+            'draft.commit',
+            'draft.discard',
+        ]);
+        if (dataChangingMethods.has(payload.method)) {
+            win?.webContents.send('automation:data-changed', { method: payload.method });
+        }
+        return result;
+    } catch (e) {
+        devLogError('Main.automation:invoke.error', e, {
+            requestId,
+            method: payload.method,
+            elapsedMs: Date.now() - startedAt,
+            payload: redactForLog(payload),
+        });
+        logAiIpcError('automation:invoke', payload, e);
+        throw e;
     }
 });
 
@@ -2234,6 +2500,14 @@ app.on('window-all-closed', () => {
     }
 })
 
+app.on('before-quit', () => {
+    if (automationServer) {
+        void automationServer.stop().catch((error) => {
+            console.error('[Main] Failed to stop automation server:', error);
+        });
+    }
+});
+
 app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
         createWindow()
@@ -2378,6 +2652,15 @@ app.whenReady().then(async () => {
         throw error;
     }
     aiService = new AiService(() => app.getPath('userData'));
+    automationService = new AutomationService(aiService, () => app.getPath('userData'));
+    automationServer = new AutomationServer(
+        automationService,
+        () => app.getPath('userData'),
+        (method) => {
+            win?.webContents.send('automation:data-changed', { method });
+        },
+    );
+    await automationServer.start();
 
     if (aiDiagParse.command) {
         try {

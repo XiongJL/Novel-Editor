@@ -26,6 +26,7 @@ const IMAGE_MODELS = [
 
 type CreativityLevel = 'safe' | 'balanced' | 'creative';
 type StatusTone = 'neutral' | 'error' | 'success';
+type CopyTone = 'neutral' | 'error' | 'success';
 
 type SettingFieldProps = {
     label: string;
@@ -67,6 +68,14 @@ export function AISettingsPanel({ isDark }: Props) {
     const [isTesting, setIsTesting] = useState(false);
     const [testPrompt, setTestPrompt] = useState('请用一句话生成一个玄幻小说章节标题');
     const [creativityLevel, setCreativityLevel] = useState<CreativityLevel>('balanced');
+    const [mcpSetup, setMcpSetup] = useState<McpCliSetupPayload | null>(null);
+    const [copyStatus, setCopyStatus] = useState('');
+    const [copyTone, setCopyTone] = useState<CopyTone>('neutral');
+    const [expandedCards, setExpandedCards] = useState({
+        httpAdvanced: false,
+        summary: false,
+        proxy: false,
+    });
 
     useEffect(() => {
         let mounted = true;
@@ -94,6 +103,37 @@ export function AISettingsPanel({ isDark }: Props) {
                 if (!mounted) return;
                 setStatusTone('error');
                 setStatus(formatAiErrorFromUnknown(error, t('settings.ai.status.loadFailed')));
+            });
+
+        return () => {
+            mounted = false;
+        };
+    }, [t]);
+
+    useEffect(() => {
+        if (!settings) return;
+        if (settings.providerType === 'mcp-cli') {
+            setExpandedCards((prev) => ({
+                ...prev,
+                httpAdvanced: false,
+                summary: false,
+                proxy: false,
+            }));
+        }
+    }, [settings?.providerType]);
+
+    useEffect(() => {
+        let mounted = true;
+        window.ai.getMcpCliSetup()
+            .then((result) => {
+                if (!mounted) return;
+                setMcpSetup(result);
+            })
+            .catch((error) => {
+                console.error('[AISettingsPanel] load mcp setup failed:', error);
+                if (!mounted) return;
+                setCopyTone('error');
+                setCopyStatus(t('settings.ai.mcpCopy.loadFailed'));
             });
 
         return () => {
@@ -206,10 +246,20 @@ export function AISettingsPanel({ isDark }: Props) {
         }
     };
 
+    const syncSettingsBeforeTest = async (): Promise<AISettings | null> => {
+        if (!settings) return null;
+        const synced = await window.ai.updateSettings(settings);
+        setSettings(synced);
+        setCreativityLevel(temperatureToCreativityLevel(synced.http.temperature));
+        return synced;
+    };
+
     const runCheck = async (kind: 'connection' | 'mcp' | 'proxy') => {
         if (isTesting) return;
         setIsTesting(true);
         try {
+            const synced = await syncSettingsBeforeTest();
+            if (!synced) return;
             const result = kind === 'connection' ? await window.ai.testConnection() : kind === 'mcp' ? await window.ai.testMcp() : await window.ai.testProxy();
             setStatusTone(result.ok ? 'success' : 'error');
             setStatus(`${t(`settings.ai.check.${kind}`)}: ${result.ok ? t('settings.ai.status.ok') : t('settings.ai.status.failed')}${result.detail ? ` - ${result.detail}` : ''}`);
@@ -226,6 +276,8 @@ export function AISettingsPanel({ isDark }: Props) {
         if (isTesting) return;
         setIsTesting(true);
         try {
+            const synced = await syncSettingsBeforeTest();
+            if (!synced) return;
             const result = await window.ai.testGenerate(testPrompt);
             if (result.ok) {
                 setStatusTone('success');
@@ -243,6 +295,24 @@ export function AISettingsPanel({ isDark }: Props) {
         }
     };
 
+    const copyMcpContent = async (kind: 'codex' | 'claude' | 'json') => {
+        if (!mcpSetup) return;
+        const content = kind === 'codex'
+            ? mcpSetup.codexToml
+            : kind === 'claude'
+                ? mcpSetup.claudeCommand
+                : mcpSetup.jsonConfig;
+        try {
+            await navigator.clipboard.writeText(content);
+            setCopyTone('success');
+            setCopyStatus(t(`settings.ai.mcpCopy.copyOk.${kind}`));
+        } catch (error) {
+            console.error('[AISettingsPanel] copy mcp setup failed:', error);
+            setCopyTone('error');
+            setCopyStatus(t('settings.ai.mcpCopy.copyFailed'));
+        }
+    };
+
     if (!settings) {
         return <div className={clsx('text-sm', isDark ? 'text-neutral-400' : 'text-gray-500')}>{t('common.loading')}</div>;
     }
@@ -250,6 +320,11 @@ export function AISettingsPanel({ isDark }: Props) {
     const inputClass = clsx('w-full border rounded-xl px-4 py-3 outline-none focus:border-indigo-500 transition-colors text-sm', isDark ? 'bg-[#0a0a0f] border-white/10 text-white' : 'bg-white border-gray-200 text-gray-900');
     const textareaClass = clsx('w-full border rounded-xl px-4 py-3 outline-none focus:border-indigo-500 transition-colors text-sm resize-y', isDark ? 'bg-[#0a0a0f] border-white/10 text-white placeholder:text-neutral-600' : 'bg-white border-gray-200 text-gray-900 placeholder:text-gray-400');
     const statusClass = statusTone === 'error' ? (isDark ? 'border-rose-400/30 bg-rose-400/10 text-rose-300' : 'border-rose-200 bg-rose-50 text-rose-700') : statusTone === 'success' ? (isDark ? 'border-emerald-400/30 bg-emerald-400/10 text-emerald-300' : 'border-emerald-200 bg-emerald-50 text-emerald-700') : (isDark ? 'border-white/10 bg-white/5 text-neutral-300' : 'border-gray-200 bg-gray-50 text-gray-600');
+    const copyStatusClass = copyTone === 'error'
+        ? (isDark ? 'text-rose-300' : 'text-rose-700')
+        : copyTone === 'success'
+            ? (isDark ? 'text-emerald-300' : 'text-emerald-700')
+            : (isDark ? 'text-neutral-400' : 'text-gray-500');
 
     return (
         <div className="space-y-8">
@@ -265,11 +340,13 @@ export function AISettingsPanel({ isDark }: Props) {
                     <button onClick={() => updateProviderType('http')} className={clsx('px-4 py-2 rounded-lg border text-sm transition-colors', settings.providerType === 'http' ? 'bg-indigo-600 text-white border-indigo-500' : (isDark ? 'border-white/10 text-neutral-300 hover:bg-white/5' : 'border-gray-300 text-gray-700 hover:bg-gray-50'))}>{t('settings.ai.providerHttp')}</button>
                     <button onClick={() => updateProviderType('mcp-cli')} className={clsx('px-4 py-2 rounded-lg border text-sm transition-colors', settings.providerType === 'mcp-cli' ? 'bg-indigo-600 text-white border-indigo-500' : (isDark ? 'border-white/10 text-neutral-300 hover:bg-white/5' : 'border-gray-300 text-gray-700 hover:bg-gray-50'))}>{t('settings.ai.providerMcp')}</button>
                 </div>
-                <div className="flex flex-wrap gap-2 pt-1">
-                    <button onClick={() => applyPreset('doubao-ark')} className={clsx('px-3 py-1.5 rounded-lg border text-xs transition-colors', isDark ? 'border-amber-400/30 text-amber-300 hover:bg-white/5' : 'border-amber-300 text-amber-700 hover:bg-amber-50')}>{t('settings.ai.preset.doubao')}</button>
-                    <button onClick={() => applyPreset('openai-compatible')} className={clsx('px-3 py-1.5 rounded-lg border text-xs transition-colors', isDark ? 'border-indigo-400/30 text-indigo-300 hover:bg-white/5' : 'border-indigo-200 text-indigo-700 hover:bg-indigo-50')}>{t('settings.ai.preset.openai')}</button>
-                    <button onClick={() => applyPreset('gemini-openai-compatible')} className={clsx('px-3 py-1.5 rounded-lg border text-xs transition-colors', isDark ? 'border-emerald-400/30 text-emerald-300 hover:bg-white/5' : 'border-emerald-200 text-emerald-700 hover:bg-emerald-50')}>{t('settings.ai.preset.gemini')}</button>
-                </div>
+                {settings.providerType === 'http' ? (
+                    <div className="flex flex-wrap gap-2 pt-1">
+                        <button onClick={() => applyPreset('doubao-ark')} className={clsx('px-3 py-1.5 rounded-lg border text-xs transition-colors', isDark ? 'border-amber-400/30 text-amber-300 hover:bg-white/5' : 'border-amber-300 text-amber-700 hover:bg-amber-50')}>{t('settings.ai.preset.doubao')}</button>
+                        <button onClick={() => applyPreset('openai-compatible')} className={clsx('px-3 py-1.5 rounded-lg border text-xs transition-colors', isDark ? 'border-indigo-400/30 text-indigo-300 hover:bg-white/5' : 'border-indigo-200 text-indigo-700 hover:bg-indigo-50')}>{t('settings.ai.preset.openai')}</button>
+                        <button onClick={() => applyPreset('gemini-openai-compatible')} className={clsx('px-3 py-1.5 rounded-lg border text-xs transition-colors', isDark ? 'border-emerald-400/30 text-emerald-300 hover:bg-white/5' : 'border-emerald-200 text-emerald-700 hover:bg-emerald-50')}>{t('settings.ai.preset.gemini')}</button>
+                    </div>
+                ) : null}
             </div>
 
             {settings.providerType === 'http' ? (
@@ -363,121 +440,185 @@ export function AISettingsPanel({ isDark }: Props) {
 
                     {/* 其他高级配置区块 */}
                     <div className="space-y-3">
-                        <div className={clsx('text-xs font-medium uppercase tracking-widest', isDark ? 'text-neutral-500' : 'text-gray-500')}>{t('settings.ai.section.httpAdvanced')}</div>
-                        <div className={clsx('p-4 rounded-xl border', isDark ? 'bg-white/5 border-white/5' : 'bg-gray-50/50 border-gray-100')}>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <SettingField label={t('settings.ai.timeoutMs')}>
-                                    <input type="number" value={settings.http.timeoutMs} onChange={(e) => setSettings({ ...settings, http: { ...settings.http, timeoutMs: Number(e.target.value) || 60000 } })} placeholder="60000" className={inputClass} />
-                                </SettingField>
+                        <div className={clsx('rounded-xl border', isDark ? 'bg-white/5 border-white/5' : 'bg-gray-50/50 border-gray-100')}>
+                            <button
+                                type="button"
+                                onClick={() => setExpandedCards((prev) => ({ ...prev, httpAdvanced: !prev.httpAdvanced }))}
+                                className="w-full flex items-center justify-between px-4 py-3 text-left"
+                            >
+                                <div className={clsx('text-xs font-medium uppercase tracking-widest', isDark ? 'text-neutral-300' : 'text-gray-700')}>
+                                    {t('settings.ai.section.httpAdvanced')}
+                                </div>
+                                <span className={clsx('text-xs', isDark ? 'text-neutral-400' : 'text-gray-500')}>
+                                    {expandedCards.httpAdvanced ? '▾' : '▸'}
+                                </span>
+                            </button>
+                            <div className={clsx('px-4 pb-4', expandedCards.httpAdvanced ? 'block' : 'hidden')}>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <SettingField label={t('settings.ai.timeoutMs')}>
+                                        <input type="number" value={settings.http.timeoutMs} onChange={(e) => setSettings({ ...settings, http: { ...settings.http, timeoutMs: Number(e.target.value) || 60000 } })} placeholder="60000" className={inputClass} />
+                                    </SettingField>
+                                </div>
                             </div>
                         </div>
                     </div>
 
-                    <div className="md:col-span-2 rounded-xl border px-4 py-3 space-y-3 border-amber-300/40 bg-amber-50/50 dark:bg-amber-400/5 dark:border-amber-300/20">
-                        <div className={clsx('text-xs font-medium', isDark ? 'text-amber-200' : 'text-amber-800')}>{t('settings.ai.summary.title')}</div>
-                        <div className="grid grid-cols-1 gap-3">
-                            <SettingField label={t('settings.ai.summary.mode')}>
-                                <select value={settings.summary.summaryMode} onChange={(e) => setSettings({ ...settings, summary: { ...settings.summary, summaryMode: e.target.value as 'local' | 'ai' } })} className={inputClass}>
-                                    <option value="local">{t('settings.ai.summary.modeLocal')}</option>
-                                    <option value="ai">{t('settings.ai.summary.modeAi')}</option>
-                                </select>
+                    <div className="md:col-span-2 rounded-xl border border-amber-300/40 bg-amber-50/50 dark:bg-amber-400/5 dark:border-amber-300/20">
+                        <button
+                            type="button"
+                            onClick={() => setExpandedCards((prev) => ({ ...prev, summary: !prev.summary }))}
+                            className="w-full flex items-center justify-between px-4 py-3 text-left"
+                        >
+                            <div className={clsx('text-xs font-medium', isDark ? 'text-amber-200' : 'text-amber-800')}>
+                                {t('settings.ai.summary.title')}
+                            </div>
+                            <span className={clsx('text-xs', isDark ? 'text-amber-200/80' : 'text-amber-700')}>
+                                {expandedCards.summary ? '▾' : '▸'}
+                            </span>
+                        </button>
+                        <div className={clsx('px-4 pb-4 space-y-3', expandedCards.summary ? 'block' : 'hidden')}>
+                            <div className="grid grid-cols-1 gap-3">
+                                <SettingField label={t('settings.ai.summary.mode')}>
+                                    <select value={settings.summary.summaryMode} onChange={(e) => setSettings({ ...settings, summary: { ...settings.summary, summaryMode: e.target.value as 'local' | 'ai' } })} className={inputClass}>
+                                        <option value="local">{t('settings.ai.summary.modeLocal')}</option>
+                                        <option value="ai">{t('settings.ai.summary.modeAi')}</option>
+                                    </select>
+                                </SettingField>
+                                <SettingField label={t('settings.ai.summary.trigger')}>
+                                    <select value={settings.summary.summaryTriggerPolicy} onChange={(e) => setSettings({ ...settings, summary: { ...settings.summary, summaryTriggerPolicy: e.target.value as 'auto' | 'manual' | 'finalized' } })} className={inputClass}>
+                                        <option value="manual">{t('settings.ai.summary.trigger.manual')}</option>
+                                        <option value="finalized">{t('settings.ai.summary.trigger.finalized')}</option>
+                                        <option value="auto">{t('settings.ai.summary.trigger.auto')}</option>
+                                    </select>
+                                </SettingField>
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                                <SettingField label={t('settings.ai.summary.debounceMs')}>
+                                    <input type="number" value={settings.summary.summaryDebounceMs} onChange={(e) => setSettings({ ...settings, summary: { ...settings.summary, summaryDebounceMs: Number(e.target.value) || 30000 } })} placeholder="30000" className={inputClass} />
+                                </SettingField>
+                                <SettingField label={t('settings.ai.summary.minIntervalMs')}>
+                                    <input type="number" value={settings.summary.summaryMinIntervalMs} onChange={(e) => setSettings({ ...settings, summary: { ...settings.summary, summaryMinIntervalMs: Number(e.target.value) || 180000 } })} placeholder="180000" className={inputClass} />
+                                </SettingField>
+                                <SettingField label={t('settings.ai.summary.minWordDelta')}>
+                                    <input type="number" value={settings.summary.summaryMinWordDelta} onChange={(e) => setSettings({ ...settings, summary: { ...settings.summary, summaryMinWordDelta: Number(e.target.value) || 120 } })} placeholder="120" className={inputClass} />
+                                </SettingField>
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                                <SettingField label={t('settings.ai.summary.finalizeStableMs')}>
+                                    <input type="number" value={settings.summary.summaryFinalizeStableMs} onChange={(e) => setSettings({ ...settings, summary: { ...settings.summary, summaryFinalizeStableMs: Number(e.target.value) || 600000 } })} placeholder="600000" className={inputClass} />
+                                </SettingField>
+                                <SettingField label={t('settings.ai.summary.finalizeMinWords')}>
+                                    <input type="number" value={settings.summary.summaryFinalizeMinWords} onChange={(e) => setSettings({ ...settings, summary: { ...settings.summary, summaryFinalizeMinWords: Number(e.target.value) || 1200 } })} placeholder="1200" className={inputClass} />
+                                </SettingField>
+                            </div>
+                            <SettingField label={t('settings.ai.summary.recentRawCount')}>
+                                <input type="number" min={0} max={8} value={settings.summary.recentChapterRawCount} onChange={(e) => setSettings({ ...settings, summary: { ...settings.summary, recentChapterRawCount: Math.max(0, Math.min(8, Number(e.target.value) || 2)) } })} placeholder="2" className={inputClass} />
                             </SettingField>
-                            <SettingField label={t('settings.ai.summary.trigger')}>
-                                <select value={settings.summary.summaryTriggerPolicy} onChange={(e) => setSettings({ ...settings, summary: { ...settings.summary, summaryTriggerPolicy: e.target.value as 'auto' | 'manual' | 'finalized' } })} className={inputClass}>
-                                    <option value="manual">{t('settings.ai.summary.trigger.manual')}</option>
-                                    <option value="finalized">{t('settings.ai.summary.trigger.finalized')}</option>
-                                    <option value="auto">{t('settings.ai.summary.trigger.auto')}</option>
-                                </select>
-                            </SettingField>
+                            <p className={clsx('text-xs', isDark ? 'text-amber-200/80' : 'text-amber-800')}>{t('settings.ai.summary.notice')}</p>
+                            <p className={clsx('text-xs', isDark ? 'text-neutral-400' : 'text-gray-500')}>{t('settings.ai.summary.notice2')}</p>
                         </div>
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-                            <SettingField label={t('settings.ai.summary.debounceMs')}>
-                                <input type="number" value={settings.summary.summaryDebounceMs} onChange={(e) => setSettings({ ...settings, summary: { ...settings.summary, summaryDebounceMs: Number(e.target.value) || 30000 } })} placeholder="30000" className={inputClass} />
-                            </SettingField>
-                            <SettingField label={t('settings.ai.summary.minIntervalMs')}>
-                                <input type="number" value={settings.summary.summaryMinIntervalMs} onChange={(e) => setSettings({ ...settings, summary: { ...settings.summary, summaryMinIntervalMs: Number(e.target.value) || 180000 } })} placeholder="180000" className={inputClass} />
-                            </SettingField>
-                            <SettingField label={t('settings.ai.summary.minWordDelta')}>
-                                <input type="number" value={settings.summary.summaryMinWordDelta} onChange={(e) => setSettings({ ...settings, summary: { ...settings.summary, summaryMinWordDelta: Number(e.target.value) || 120 } })} placeholder="120" className={inputClass} />
-                            </SettingField>
-                        </div>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                            <SettingField label={t('settings.ai.summary.finalizeStableMs')}>
-                                <input type="number" value={settings.summary.summaryFinalizeStableMs} onChange={(e) => setSettings({ ...settings, summary: { ...settings.summary, summaryFinalizeStableMs: Number(e.target.value) || 600000 } })} placeholder="600000" className={inputClass} />
-                            </SettingField>
-                            <SettingField label={t('settings.ai.summary.finalizeMinWords')}>
-                                <input type="number" value={settings.summary.summaryFinalizeMinWords} onChange={(e) => setSettings({ ...settings, summary: { ...settings.summary, summaryFinalizeMinWords: Number(e.target.value) || 1200 } })} placeholder="1200" className={inputClass} />
-                            </SettingField>
-                        </div>
-                        <SettingField label={t('settings.ai.summary.recentRawCount')}>
-                            <input type="number" min={0} max={8} value={settings.summary.recentChapterRawCount} onChange={(e) => setSettings({ ...settings, summary: { ...settings.summary, recentChapterRawCount: Math.max(0, Math.min(8, Number(e.target.value) || 2)) } })} placeholder="2" className={inputClass} />
-                        </SettingField>
-                        <p className={clsx('text-xs', isDark ? 'text-amber-200/80' : 'text-amber-800')}>{t('settings.ai.summary.notice')}</p>
-                        <p className={clsx('text-xs', isDark ? 'text-neutral-400' : 'text-gray-500')}>{t('settings.ai.summary.notice2')}</p>
                     </div>
                 </div>
             ) : (
                 <div className="space-y-3">
                     <div className={clsx('text-xs font-medium uppercase tracking-widest', isDark ? 'text-neutral-500' : 'text-gray-500')}>{t('settings.ai.section.mcp')}</div>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <SettingField label={t('settings.ai.cliPath')}>
-                            <input value={settings.mcpCli.cliPath} onChange={(e) => setSettings({ ...settings, mcpCli: { ...settings.mcpCli, cliPath: e.target.value } })} placeholder="npx openclaw ..." className={inputClass} />
-                        </SettingField>
-                        <SettingField label={t('settings.ai.workingDir')}>
-                            <input value={settings.mcpCli.workingDir} onChange={(e) => setSettings({ ...settings, mcpCli: { ...settings.mcpCli, workingDir: e.target.value } })} placeholder="D:\workspace\openclaw" className={inputClass} />
-                        </SettingField>
-                        <SettingField label={t('settings.ai.argsTemplate')} className="md:col-span-2">
-                            <input value={settings.mcpCli.argsTemplate} onChange={(e) => setSettings({ ...settings, mcpCli: { ...settings.mcpCli, argsTemplate: e.target.value } })} placeholder="run {prompt}" className={inputClass} />
-                        </SettingField>
-                        <SettingField label={t('settings.ai.envJson')} className="md:col-span-2">
-                            <textarea value={settings.mcpCli.envJson} onChange={(e) => setSettings({ ...settings, mcpCli: { ...settings.mcpCli, envJson: e.target.value } })} placeholder='{"OPENAI_API_KEY":"***"}' rows={4} className={textareaClass} />
-                        </SettingField>
+                        <div className={clsx('md:col-span-2 rounded-xl border px-4 py-3 space-y-3', isDark ? 'border-white/10 bg-white/5' : 'border-gray-200 bg-gray-50')}>
+                            <div className="space-y-1">
+                                <p className={clsx('text-sm font-medium', isDark ? 'text-white' : 'text-gray-900')}>{t('settings.ai.mcpCopy.title')}</p>
+                                <p className={clsx('text-xs leading-5', isDark ? 'text-neutral-400' : 'text-gray-600')}>{t('settings.ai.mcpCopy.desc')}</p>
+                            </div>
+                            <SettingField label={t('settings.ai.mcpCopy.codexLabel')} hint={t('settings.ai.mcpCopy.codexHint')}>
+                                <textarea value={mcpSetup?.codexToml || ''} readOnly placeholder={t('settings.ai.mcpCopy.loading')} rows={5} className={textareaClass} />
+                            </SettingField>
+                            <div className="flex flex-wrap gap-2">
+                                <button onClick={() => copyMcpContent('codex')} disabled={!mcpSetup} className={clsx('px-3 py-1.5 rounded-lg border text-xs transition-colors', !mcpSetup ? (isDark ? 'border-white/5 text-neutral-600 bg-white/5 cursor-not-allowed' : 'border-gray-200 text-gray-400 bg-gray-50 cursor-not-allowed') : (isDark ? 'border-indigo-400/30 text-indigo-300 hover:bg-indigo-400/10' : 'border-indigo-200 text-indigo-700 hover:bg-indigo-50'))}>{t('settings.ai.mcpCopy.copyCodex')}</button>
+                            </div>
+                            <SettingField label={t('settings.ai.mcpCopy.claudeLabel')} hint={t('settings.ai.mcpCopy.claudeHint')}>
+                                <input value={mcpSetup?.claudeCommand || ''} readOnly placeholder={t('settings.ai.mcpCopy.loading')} className={inputClass} />
+                            </SettingField>
+                            <div className="flex flex-wrap gap-2">
+                                <button onClick={() => copyMcpContent('claude')} disabled={!mcpSetup} className={clsx('px-3 py-1.5 rounded-lg border text-xs transition-colors', !mcpSetup ? (isDark ? 'border-white/5 text-neutral-600 bg-white/5 cursor-not-allowed' : 'border-gray-200 text-gray-400 bg-gray-50 cursor-not-allowed') : (isDark ? 'border-indigo-400/30 text-indigo-300 hover:bg-indigo-400/10' : 'border-indigo-200 text-indigo-700 hover:bg-indigo-50'))}>{t('settings.ai.mcpCopy.copyClaude')}</button>
+                            </div>
+                            <SettingField label={t('settings.ai.mcpCopy.jsonLabel')} hint={t('settings.ai.mcpCopy.jsonHint')}>
+                                <textarea value={mcpSetup?.jsonConfig || ''} readOnly placeholder={t('settings.ai.mcpCopy.loading')} rows={6} className={textareaClass} />
+                            </SettingField>
+                            <div className="flex flex-wrap gap-2">
+                                <button onClick={() => copyMcpContent('json')} disabled={!mcpSetup} className={clsx('px-3 py-1.5 rounded-lg border text-xs transition-colors', !mcpSetup ? (isDark ? 'border-white/5 text-neutral-600 bg-white/5 cursor-not-allowed' : 'border-gray-200 text-gray-400 bg-gray-50 cursor-not-allowed') : (isDark ? 'border-indigo-400/30 text-indigo-300 hover:bg-indigo-400/10' : 'border-indigo-200 text-indigo-700 hover:bg-indigo-50'))}>{t('settings.ai.mcpCopy.copyJson')}</button>
+                            </div>
+                            {!mcpSetup?.launcherExists ? (
+                                <p className={clsx('text-xs', isDark ? 'text-amber-300' : 'text-amber-700')}>{t('settings.ai.mcpCopy.pathMissing')}</p>
+                            ) : null}
+                            {copyStatus ? <p className={clsx('text-xs', copyStatusClass)}>{copyStatus}</p> : null}
+                        </div>
                     </div>
                 </div>
             )}
 
-            <div className="space-y-3">
-                <div className={clsx('text-xs font-medium uppercase tracking-widest', isDark ? 'text-neutral-500' : 'text-gray-500')}>{t('settings.ai.section.proxy')}</div>
-                <div className={clsx('p-4 rounded-xl border', isDark ? 'bg-white/5 border-white/5' : 'bg-gray-50/50 border-gray-100')}>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <SettingField label={t('settings.ai.proxy.mode')}>
-                            <select value={settings.proxy.mode} onChange={(e) => setSettings({ ...settings, proxy: { ...settings.proxy, mode: e.target.value as AISettings['proxy']['mode'] } })} className={inputClass}>
-                                <option value="system">{t('settings.ai.proxy.system')}</option>
-                                <option value="off">{t('settings.ai.proxy.off')}</option>
-                                <option value="custom">{t('settings.ai.proxy.custom')}</option>
-                            </select>
-                        </SettingField>
-                        <SettingField label={t('settings.ai.proxy.all')}>
-                            <input value={settings.proxy.allProxy || ''} onChange={(e) => setSettings({ ...settings, proxy: { ...settings.proxy, allProxy: e.target.value } })} placeholder="socks5://127.0.0.1:7890" className={inputClass} />
-                        </SettingField>
-                        <SettingField label={t('settings.ai.proxy.http')}>
-                            <input value={settings.proxy.httpProxy || ''} onChange={(e) => setSettings({ ...settings, proxy: { ...settings.proxy, httpProxy: e.target.value } })} placeholder="http://127.0.0.1:7890" className={inputClass} />
-                        </SettingField>
-                        <SettingField label={t('settings.ai.proxy.https')}>
-                            <input value={settings.proxy.httpsProxy || ''} onChange={(e) => setSettings({ ...settings, proxy: { ...settings.proxy, httpsProxy: e.target.value } })} placeholder="http://127.0.0.1:7890" className={inputClass} />
-                        </SettingField>
-                        <SettingField label={t('settings.ai.proxy.no')} hint={t('settings.ai.proxy.noHint')} className="md:col-span-2">
-                            <input value={settings.proxy.noProxy || ''} onChange={(e) => setSettings({ ...settings, proxy: { ...settings.proxy, noProxy: e.target.value } })} placeholder="localhost,127.0.0.1" className={inputClass} />
-                        </SettingField>
+            {settings.providerType === 'http' ? (
+                <div className="space-y-3">
+                    <div className={clsx('rounded-xl border', isDark ? 'bg-white/5 border-white/5' : 'bg-gray-50/50 border-gray-100')}>
+                        <button
+                            type="button"
+                            onClick={() => setExpandedCards((prev) => ({ ...prev, proxy: !prev.proxy }))}
+                            className="w-full flex items-center justify-between px-4 py-3 text-left"
+                        >
+                            <div className={clsx('text-xs font-medium uppercase tracking-widest', isDark ? 'text-neutral-300' : 'text-gray-700')}>
+                                {t('settings.ai.section.proxy')}
+                            </div>
+                            <span className={clsx('text-xs', isDark ? 'text-neutral-400' : 'text-gray-500')}>
+                                {expandedCards.proxy ? '▾' : '▸'}
+                            </span>
+                        </button>
+                        <div className={clsx('px-4 pb-4', expandedCards.proxy ? 'block' : 'hidden')}>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <SettingField label={t('settings.ai.proxy.mode')}>
+                                    <select value={settings.proxy.mode} onChange={(e) => setSettings({ ...settings, proxy: { ...settings.proxy, mode: e.target.value as AISettings['proxy']['mode'] } })} className={inputClass}>
+                                        <option value="system">{t('settings.ai.proxy.system')}</option>
+                                        <option value="off">{t('settings.ai.proxy.off')}</option>
+                                        <option value="custom">{t('settings.ai.proxy.custom')}</option>
+                                    </select>
+                                </SettingField>
+                                <SettingField label={t('settings.ai.proxy.all')}>
+                                    <input value={settings.proxy.allProxy || ''} onChange={(e) => setSettings({ ...settings, proxy: { ...settings.proxy, allProxy: e.target.value } })} placeholder="socks5://127.0.0.1:7890" className={inputClass} />
+                                </SettingField>
+                                <SettingField label={t('settings.ai.proxy.http')}>
+                                    <input value={settings.proxy.httpProxy || ''} onChange={(e) => setSettings({ ...settings, proxy: { ...settings.proxy, httpProxy: e.target.value } })} placeholder="http://127.0.0.1:7890" className={inputClass} />
+                                </SettingField>
+                                <SettingField label={t('settings.ai.proxy.https')}>
+                                    <input value={settings.proxy.httpsProxy || ''} onChange={(e) => setSettings({ ...settings, proxy: { ...settings.proxy, httpsProxy: e.target.value } })} placeholder="http://127.0.0.1:7890" className={inputClass} />
+                                </SettingField>
+                                <SettingField label={t('settings.ai.proxy.no')} hint={t('settings.ai.proxy.noHint')} className="md:col-span-2">
+                                    <input value={settings.proxy.noProxy || ''} onChange={(e) => setSettings({ ...settings, proxy: { ...settings.proxy, noProxy: e.target.value } })} placeholder="localhost,127.0.0.1" className={inputClass} />
+                                </SettingField>
+                            </div>
+                        </div>
                     </div>
                 </div>
-            </div>
+            ) : null}
             <div className="space-y-3">
                 <div className={clsx('text-xs font-medium uppercase tracking-widest', isDark ? 'text-neutral-500' : 'text-gray-500')}>{t('settings.ai.section.testAndSave')}</div>
                 <div className={clsx('p-4 rounded-xl border space-y-4', isDark ? 'bg-white/5 border-white/5' : 'bg-gray-50/50 border-gray-100')}>
                     <div className="flex flex-wrap gap-3">
-                        <button onClick={() => runCheck('connection')} disabled={isTesting || isSaving} className={clsx("px-4 py-2 rounded-lg border text-sm transition-colors", isTesting ? (isDark ? 'border-white/5 text-neutral-600 bg-white/5 cursor-not-allowed' : 'border-gray-200 text-gray-400 bg-gray-50 cursor-not-allowed') : "border-indigo-400/40 hover:bg-indigo-500/10")}>{isTesting ? t('common.loading') : t('settings.ai.testConnection')}</button>
-                        <button onClick={() => runCheck('mcp')} disabled={isTesting || isSaving} className={clsx("px-4 py-2 rounded-lg border text-sm transition-colors", isTesting ? (isDark ? 'border-white/5 text-neutral-600 bg-white/5 cursor-not-allowed' : 'border-gray-200 text-gray-400 bg-gray-50 cursor-not-allowed') : "border-indigo-400/40 hover:bg-indigo-500/10")}>{isTesting ? t('common.loading') : t('settings.ai.testMcp')}</button>
-                        <button onClick={() => runCheck('proxy')} disabled={isTesting || isSaving} className={clsx("px-4 py-2 rounded-lg border text-sm transition-colors", isTesting ? (isDark ? 'border-white/5 text-neutral-600 bg-white/5 cursor-not-allowed' : 'border-gray-200 text-gray-400 bg-gray-50 cursor-not-allowed') : "border-indigo-400/40 hover:bg-indigo-500/10")}>{isTesting ? t('common.loading') : t('settings.ai.testProxy')}</button>
-                        <button onClick={runGenerateCheck} disabled={isTesting || isSaving} className={clsx("px-4 py-2 rounded-lg border text-sm transition-colors", isTesting ? (isDark ? 'border-white/5 text-neutral-600 bg-white/5 cursor-not-allowed' : 'border-gray-200 text-gray-400 bg-gray-50 cursor-not-allowed') : "border-emerald-400/40 hover:bg-emerald-500/10")}>{isTesting ? t('common.loading') : t('settings.ai.testGenerate')}</button>
+                        {settings.providerType === 'http' ? (
+                            <>
+                                <button onClick={() => runCheck('connection')} disabled={isTesting || isSaving} className={clsx("px-4 py-2 rounded-lg border text-sm transition-colors", isTesting ? (isDark ? 'border-white/5 text-neutral-600 bg-white/5 cursor-not-allowed' : 'border-gray-200 text-gray-400 bg-gray-50 cursor-not-allowed') : "border-indigo-400/40 hover:bg-indigo-500/10")}>{isTesting ? t('common.loading') : t('settings.ai.testConnection')}</button>
+                                <button onClick={() => runCheck('proxy')} disabled={isTesting || isSaving} className={clsx("px-4 py-2 rounded-lg border text-sm transition-colors", isTesting ? (isDark ? 'border-white/5 text-neutral-600 bg-white/5 cursor-not-allowed' : 'border-gray-200 text-gray-400 bg-gray-50 cursor-not-allowed') : "border-indigo-400/40 hover:bg-indigo-500/10")}>{isTesting ? t('common.loading') : t('settings.ai.testProxy')}</button>
+                                <button onClick={runGenerateCheck} disabled={isTesting || isSaving} className={clsx("px-4 py-2 rounded-lg border text-sm transition-colors", isTesting ? (isDark ? 'border-white/5 text-neutral-600 bg-white/5 cursor-not-allowed' : 'border-gray-200 text-gray-400 bg-gray-50 cursor-not-allowed') : "border-emerald-400/40 hover:bg-emerald-500/10")}>{isTesting ? t('common.loading') : t('settings.ai.testGenerate')}</button>
+                            </>
+                        ) : (
+                            <button onClick={() => runCheck('mcp')} disabled={isTesting || isSaving} className={clsx("px-4 py-2 rounded-lg border text-sm transition-colors", isTesting ? (isDark ? 'border-white/5 text-neutral-600 bg-white/5 cursor-not-allowed' : 'border-gray-200 text-gray-400 bg-gray-50 cursor-not-allowed') : "border-indigo-400/40 hover:bg-indigo-500/10")}>{isTesting ? t('common.loading') : t('settings.ai.testMcp')}</button>
+                        )}
                         <button onClick={saveSettings} disabled={isSaving} className={clsx('px-4 py-2 rounded-lg text-sm text-white', isSaving ? 'bg-indigo-400 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-500')}>
                             {isSaving ? t('common.loading') : t('common.save')}
                         </button>
                     </div>
                     {status ? <div className={clsx('rounded-xl border px-4 py-3 text-xs leading-6', statusClass)}>{status}</div> : null}
-                    <SettingField label={t('settings.ai.testPrompt')}>
-                        <textarea value={testPrompt} onChange={(e) => setTestPrompt(e.target.value)} rows={2} placeholder={t('settings.ai.testPrompt')} className={clsx(textareaClass, 'text-xs')} />
-                    </SettingField>
+                    {settings.providerType === 'http' ? (
+                        <SettingField label={t('settings.ai.testPrompt')}>
+                            <textarea value={testPrompt} onChange={(e) => setTestPrompt(e.target.value)} rows={2} placeholder={t('settings.ai.testPrompt')} className={clsx(textareaClass, 'text-xs')} />
+                        </SettingField>
+                    ) : null}
                 </div>
             </div>
         </div>

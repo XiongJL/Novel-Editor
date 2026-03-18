@@ -416,6 +416,136 @@ export function createCapabilityDefinitions(deps: CapabilityDeps): CapabilityDef
             },
         },
         {
+            actionId: 'worldsetting.create',
+            title: 'Create world setting',
+            description: 'Create a world setting under a novel.',
+            permission: 'write',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    novelId: { type: 'string' },
+                    name: { type: 'string' },
+                    content: { type: 'string' },
+                    type: { type: 'string' },
+                    icon: { type: 'string' },
+                    sortOrder: { type: 'number' },
+                },
+                required: ['novelId', 'name'],
+            },
+            outputSchema: { type: 'object' },
+            handler: async (payload) => {
+                const input = payload as {
+                    novelId?: string;
+                    name?: string;
+                    content?: string;
+                    type?: string;
+                    icon?: string;
+                    sortOrder?: number;
+                };
+                const novelId = String(input?.novelId || '').trim();
+                const name = String(input?.name || '').trim();
+                if (!novelId) {
+                    throw new AiActionError('INVALID_INPUT', 'novelId is required');
+                }
+                if (!name) {
+                    throw new AiActionError('INVALID_INPUT', 'name is required');
+                }
+
+                let sortOrder = input?.sortOrder;
+                if (typeof sortOrder !== 'number' || !Number.isFinite(sortOrder)) {
+                    const last = await (db as any).worldSetting.findFirst({
+                        where: { novelId },
+                        orderBy: { sortOrder: 'desc' },
+                    });
+                    sortOrder = (last?.sortOrder || 0) + 1;
+                }
+
+                const content = typeof input?.content === 'string' ? input.content : '';
+                const type = typeof input?.type === 'string' && input.type.trim() ? input.type.trim() : 'other';
+                const icon = typeof input?.icon === 'string' && input.icon.trim() ? input.icon.trim() : null;
+
+                return (db as any).worldSetting.create({
+                    data: {
+                        novelId,
+                        name,
+                        content,
+                        type,
+                        icon,
+                        sortOrder,
+                    },
+                });
+            },
+        },
+        {
+            actionId: 'worldsetting.update',
+            title: 'Update world setting',
+            description: 'Update a world setting by id.',
+            permission: 'write',
+            inputSchema: {
+                type: 'object',
+                properties: {
+                    id: { type: 'string' },
+                    name: { type: 'string' },
+                    content: { type: 'string' },
+                    type: { type: 'string' },
+                    icon: { type: 'string' },
+                    sortOrder: { type: 'number' },
+                },
+                required: ['id'],
+            },
+            outputSchema: { type: 'object' },
+            handler: async (payload) => {
+                const input = payload as {
+                    id?: string;
+                    name?: string;
+                    content?: string;
+                    type?: string;
+                    icon?: string | null;
+                    sortOrder?: number;
+                };
+                const id = String(input?.id || '').trim();
+                if (!id) {
+                    throw new AiActionError('INVALID_INPUT', 'id is required');
+                }
+
+                const data: Record<string, unknown> = {};
+                if (Object.prototype.hasOwnProperty.call(input, 'name')) {
+                    const nextName = String(input?.name || '').trim();
+                    if (!nextName) {
+                        throw new AiActionError('INVALID_INPUT', 'name cannot be empty');
+                    }
+                    data.name = nextName;
+                }
+                if (Object.prototype.hasOwnProperty.call(input, 'content')) {
+                    data.content = typeof input?.content === 'string' ? input.content : '';
+                }
+                if (Object.prototype.hasOwnProperty.call(input, 'type')) {
+                    data.type = typeof input?.type === 'string' && input.type.trim() ? input.type.trim() : 'other';
+                }
+                if (Object.prototype.hasOwnProperty.call(input, 'icon')) {
+                    if (input?.icon === null) {
+                        data.icon = null;
+                    } else {
+                        data.icon = typeof input?.icon === 'string' && input.icon.trim() ? input.icon.trim() : null;
+                    }
+                }
+                if (Object.prototype.hasOwnProperty.call(input, 'sortOrder')) {
+                    if (typeof input?.sortOrder !== 'number' || !Number.isFinite(input.sortOrder)) {
+                        throw new AiActionError('INVALID_INPUT', 'sortOrder must be a finite number');
+                    }
+                    data.sortOrder = input.sortOrder;
+                }
+                if (Object.keys(data).length === 0) {
+                    throw new AiActionError('INVALID_INPUT', 'At least one updatable field is required');
+                }
+
+                return (db as any).worldSetting.update({
+                    where: { id },
+                    data,
+                });
+            },
+        },
+        {
             actionId: 'character.list',
             title: 'List characters',
             description: 'Return all characters under a novel.',

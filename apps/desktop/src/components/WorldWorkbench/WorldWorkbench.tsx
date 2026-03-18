@@ -58,6 +58,19 @@ export default function WorldWorkbench({ novelId, theme }: WorldWorkbenchProps) 
     }, [loadCharacters, loadItems]);
 
     useEffect(() => {
+        const unsubscribeAutomation = window.automation?.onDataChanged?.(({ method }) => {
+            if (
+                method === 'character.create_batch' ||
+                method === 'story_patch.apply' ||
+                method === 'draft.commit'
+            ) {
+                void Promise.all([loadCharacters(), loadItems()]);
+            }
+        });
+        return () => unsubscribeAutomation?.();
+    }, [loadCharacters, loadItems]);
+
+    useEffect(() => {
         const handleRefresh = async (event: Event) => {
             const detail = (event as CustomEvent<{ novelId?: string }>).detail;
             if (detail?.novelId && detail.novelId !== novelId) return;

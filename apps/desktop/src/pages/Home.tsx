@@ -8,18 +8,42 @@ import { useTranslation } from 'react-i18next';
 import { useEditorPreferences } from '../hooks/useEditorPreferences';
 import { clsx } from 'clsx';
 
+const ACTIVE_NOVEL_STORAGE_KEY = 'novel_editor_active_novel_id';
+
 export default function Home() {
     const { t } = useTranslation();
     const { preferences } = useEditorPreferences();
     const isDark = preferences.theme === 'dark';
 
-    const [selectedNovelId, setSelectedNovelId] = useState<string | null>(null);
+    const [selectedNovelId, setSelectedNovelId] = useState<string | null>(() => {
+        try {
+            return sessionStorage.getItem(ACTIVE_NOVEL_STORAGE_KEY);
+        } catch {
+            return null;
+        }
+    });
     const [novels, setNovels] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
 
     const [editingNovel, setEditingNovel] = useState<Novel | null>(null);
     const [editForm, setEditForm] = useState({ title: '', coverUrl: '' });
     const [isGlobalSettingsOpen, setIsGlobalSettingsOpen] = useState(false);
+
+    useEffect(() => {
+        loadNovels();
+    }, []);
+
+    useEffect(() => {
+        try {
+            if (selectedNovelId) {
+                sessionStorage.setItem(ACTIVE_NOVEL_STORAGE_KEY, selectedNovelId);
+            } else {
+                sessionStorage.removeItem(ACTIVE_NOVEL_STORAGE_KEY);
+            }
+        } catch (error) {
+            console.warn('[Home] failed to persist active novel id', error);
+        }
+    }, [selectedNovelId]);
 
     useEffect(() => {
         if (!selectedNovelId) {
@@ -31,6 +55,9 @@ export default function Home() {
         try {
             const data = await window.db.getNovels();
             setNovels(data);
+            if (selectedNovelId && !data.some((novel) => novel.id === selectedNovelId)) {
+                setSelectedNovelId(null);
+            }
         } catch (error) {
             console.error('Failed to load novels', error);
         } finally {

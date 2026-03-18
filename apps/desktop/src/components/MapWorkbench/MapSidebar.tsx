@@ -50,6 +50,18 @@ export default function MapSidebar({ novelId, theme, onSelectMap, activeMapId }:
     }, [loadMaps]);
 
     useEffect(() => {
+        const unsubscribeAutomation = window.automation?.onDataChanged?.(({ method }) => {
+            if (
+                method === 'story_patch.apply' ||
+                method === 'draft.commit'
+            ) {
+                void loadMaps();
+            }
+        });
+        return () => unsubscribeAutomation?.();
+    }, [loadMaps]);
+
+    useEffect(() => {
         const handleRefresh = async (event: Event) => {
             const detail = (event as CustomEvent<{ novelId?: string }>).detail;
             if (detail?.novelId && detail.novelId !== novelId) return;

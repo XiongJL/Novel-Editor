@@ -11,6 +11,10 @@ compression: maximum
 extraResources:
   - from: build/icon_ink_pen_256.ico
     to: icon_ink_pen_256.ico
+  - from: scripts/novel-editor-mcp.mjs
+    to: mcp/novel-editor-mcp.mjs
+  - from: scripts/novel-editor-mcp.cmd
+    to: mcp/novel-editor-mcp.cmd
 
 files:
   - dist/**/*

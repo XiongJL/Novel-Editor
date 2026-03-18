@@ -30,7 +30,19 @@ export function usePlotSystem(novelId: string) {
         };
 
         window.addEventListener('plot-update', handleUpdate);
-        return () => window.removeEventListener('plot-update', handleUpdate);
+        const unsubscribeAutomation = window.automation?.onDataChanged?.(({ method }) => {
+            if (
+                method === 'outline.write' ||
+                method === 'story_patch.apply' ||
+                method === 'draft.commit'
+            ) {
+                void loadPlotLines();
+            }
+        });
+        return () => {
+            window.removeEventListener('plot-update', handleUpdate);
+            unsubscribeAutomation?.();
+        };
     }, [loadPlotLines]);
 
     const dispatchUpdate = () => {

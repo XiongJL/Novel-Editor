@@ -180,6 +180,34 @@
     - [x] 新增 `ai:test-openclaw-smoke`：校验 manifest 关键 action 覆盖 + 读链路冒烟（`novel.list -> volume.list -> chapter.list`）
     - [x] 开发诊断收口：设置页移除 smoke/coverage 可视化，仅保留终端 `ai:diag` 输出
 
+### Phase H.2: 面向最终用户的 MCP 产品化交付（for-cli，新增）
+- [ ] 交付形态确定：
+    - [ ] 不再要求用户配置仓库脚本路径
+    - [ ] 安装包内自带 `novel-editor-mcp` 启动入口（`.cmd` 或 `.exe` launcher）
+    - [ ] 启动入口从安装后固定位置运行，并自动读取 `userData/automation/runtime.json`
+- [ ] 打包集成：
+    - [ ] 将 `apps/desktop/scripts/novel-editor-mcp.mjs`
+    - [ ] 将 `apps/desktop/scripts/novel-editor-mcp.cmd`
+    - [ ] 一并纳入桌面端安装产物
+    - [ ] 校验安装版与便携版均可直接启动 MCP bridge
+- [ ] 用户配置体验：
+    - [ ] 设置页新增“CLI / MCP 接入”分组
+    - [ ] 提供“一键复制 Codex 配置”
+    - [ ] 提供“一键复制 Claude Code 配置”
+    - [ ] 提供通用 `mcpServers` JSON 示例
+- [ ] 运行时稳态：
+    - [ ] 外部写入后主界面相关列表自动刷新（主线/角色/物品/地图等）
+    - [ ] bridge 日志保留调试模式开关，避免正式版默认噪音
+    - [ ] 客户端异常后可恢复：重连/重新握手/超时后不中断后续调用
+- [ ] 协议兼容：
+    - [ ] Codex Windows bare JSON / NDJSON 兼容继续稳态化
+    - [ ] Claude Code `structuredContent` 兼容继续验收
+    - [ ] `resources/list` / `resources/templates/list` 保持空成功响应
+- [ ] 文档交付：
+    - [ ] 将当前开发期接入文档升级为“安装后用户接入文档”
+    - [ ] README 补充“安装版如何配置 Codex / Claude Code”
+    - [ ] 区分“开发联调配置”和“最终用户配置”
+
 ### Phase I: AI 启用式输入入口（未来计划）
 - [x] 当前版本策略：`Space` 启用 Chat 模式暂不开放，已屏蔽入口与触发；统一延后至 2.0
 - [ ] 空白态/章节顶部提示文案：`按 Space（空格）以启用 AI，或按 / 启用命令`

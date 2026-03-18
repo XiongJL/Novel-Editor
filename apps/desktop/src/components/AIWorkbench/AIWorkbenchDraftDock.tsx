@@ -10,6 +10,7 @@ type Props = {
   selection: DraftSelection;
   onDraftChange: (next: CreativeAssetsDraft) => void;
   onSelectionChange: (next: DraftSelection) => void;
+  onDraftAndSelectionChange?: (nextDraft: CreativeAssetsDraft, nextSelection: DraftSelection) => void;
 };
 
 export default function AIWorkbenchDraftDock({
@@ -18,6 +19,7 @@ export default function AIWorkbenchDraftDock({
   selection,
   onDraftChange,
   onSelectionChange,
+  onDraftAndSelectionChange,
 }: Props) {
   const { t } = useTranslation();
   const isDark = theme === 'dark';
@@ -36,6 +38,11 @@ export default function AIWorkbenchDraftDock({
 
     const nextSelection = { ...selection, [category]: [...selection[category]] };
     nextSelection[category].splice(index, 1);
+
+    if (onDraftAndSelectionChange) {
+      onDraftAndSelectionChange(nextDraft, nextSelection);
+      return;
+    }
 
     onDraftChange(nextDraft);
     onSelectionChange(nextSelection);
