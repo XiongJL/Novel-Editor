@@ -84,3 +84,23 @@ export type ConfirmResult = {
     errors?: CreativeDraftIssue[];
     transactionMode: 'atomic';
 };
+
+export type DraftSessionStatus = 'draft' | 'committed' | 'discarded' | 'failed';
+
+export type DraftSessionRecord = {
+    draftSessionId: string;
+    workspace: 'ai-workbench' | 'chapter-editor';
+    type: 'creative-assets' | 'chapter-draft' | 'outline-draft';
+    source: 'internal-ai' | 'external-cli';
+    origin: 'codex' | 'claude-code' | 'openclaw' | 'desktop-ui' | 'mcp-bridge' | 'unknown';
+    novelId: string;
+    chapterId?: string;
+    status: DraftSessionStatus;
+    payload: CreativeAssetsDraft | Record<string, unknown>;
+    selection?: DraftSelection;
+    validation?: ValidationResult | null;
+    previewSummary: string;
+    version: number;
+    createdAt: string;
+    updatedAt: string;
+};

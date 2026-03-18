@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { clsx } from 'clsx';
 import { Check, ChevronDown, ChevronUp, Loader2, Settings2, Sparkles } from 'lucide-react';
-import type { ConfirmResult, CreativeAssetsDraft, CreativeDraftIssue, CreativeSection, DraftSelection, ValidationResult } from './types';
+import type { ConfirmResult, CreativeAssetsDraft, CreativeDraftIssue, CreativeSection, DraftSelection, DraftSessionRecord, ValidationResult } from './types';
 import PromptInlinePanel from '../AIPromptPreview/PromptInlinePanel';
 import type { PromptPreviewData } from '../AIPromptPreview/types';
 
@@ -11,8 +11,10 @@ type Props = {
   theme: 'dark' | 'light';
   draft: CreativeAssetsDraft;
   selection: DraftSelection;
+  draftSession: DraftSessionRecord | null;
   onDraftChange: (next: CreativeAssetsDraft) => void;
   onSelectionChange: (next: DraftSelection) => void;
+  onDraftSessionChange: (next: DraftSessionRecord | null) => void;
   onDraftGenerated?: () => void;
 };
 
@@ -93,8 +95,10 @@ export default function AIWorkbenchPanel({
   theme,
   draft,
   selection,
+  draftSession,
   onDraftChange,
   onSelectionChange,
+  onDraftSessionChange,
   onDraftGenerated,
 }: Props) {
   const { t, i18n } = useTranslation();
@@ -232,7 +236,7 @@ export default function AIWorkbenchPanel({
     setFlowStatus('generating', 'info', t('aiWorkbench.statusGenerating'));
 
     try {
-      const result = await window.ai.generateCreativeAssets({
+      const session = await window.automation.invoke('creative_assets.generate_draft', {
         novelId,
         brief,
         locale: i18n.language,
@@ -241,11 +245,16 @@ export default function AIWorkbenchPanel({
         contextChapterCount,
         includeExistingEntities,
         filterCompletedPlotLines,
-      });
-      const normalized = normalizeDraft(result?.draft);
+      }, 'desktop-ui') as DraftSessionRecord;
+      const normalized = normalizeDraft(session?.payload);
       const sanitized = sanitizeGeneratedDraft(normalized);
+      onDraftSessionChange({
+        ...session,
+        payload: sanitized.draft,
+        selection: session.selection ?? createSelection(sanitized.draft),
+      });
       onDraftChange(sanitized.draft);
-      onSelectionChange(createSelection(sanitized.draft));
+      onSelectionChange(session.selection ?? createSelection(sanitized.draft));
       if (sanitized.dropped > 0) {
         setWarnings((prev) => [t('aiWorkbench.filteredInvalidCount', { count: sanitized.dropped }), ...prev]);
       }
@@ -312,18 +321,8 @@ export default function AIWorkbenchPanel({
     setPromptOverride('');
   }, [novelId]);
 
-  const buildSelectedDraft = (): CreativeAssetsDraft => ({
-    plotLines: (draft.plotLines ?? []).filter((_, index) => selection.plotLines[index]),
-    plotPoints: (draft.plotPoints ?? []).filter((_, index) => selection.plotPoints[index]),
-    characters: (draft.characters ?? []).filter((_, index) => selection.characters[index]),
-    items: (draft.items ?? []).filter((_, index) => selection.items[index]),
-    skills: (draft.skills ?? []).filter((_, index) => selection.skills[index]),
-    maps: (draft.maps ?? []).filter((_, index) => selection.maps[index]),
-  });
-
   const handleConfirm = async () => {
     if (isConfirming) return;
-    const selectedDraft = buildSelectedDraft();
     if (totalSelected <= 0) {
       setFlowStatus('error', 'warning', t('aiWorkbench.selectAtLeastOne'));
       return;
@@ -334,25 +333,47 @@ export default function AIWorkbenchPanel({
     setCreated(null);
 
     try {
+      if (!draftSession?.draftSessionId || typeof draftSession.version !== 'number') {
+        setFlowStatus('error', 'warning', t('aiWorkbench.selectAtLeastOne'));
+        return;
+      }
+
       setFlowStatus('validating', 'info', t('aiWorkbench.statusValidating'));
-      const validation: ValidationResult = await window.ai.validateCreativeAssetsDraft({
-        novelId,
-        draft: selectedDraft as unknown as Record<string, unknown>,
-      });
+      const syncedSession = await window.automation.invoke('draft.update', {
+        draftSessionId: draftSession.draftSessionId,
+        version: draftSession.version,
+        payload: draft,
+        selection,
+      }, 'desktop-ui') as DraftSessionRecord;
+      onDraftSessionChange(syncedSession);
 
-      setWarnings(validation.warnings || []);
-      setErrors(validation.errors || []);
+      const response = await window.automation.invoke('draft.commit', {
+        draftSessionId: syncedSession.draftSessionId,
+        version: syncedSession.version,
+      }, 'desktop-ui') as {
+        session: DraftSessionRecord;
+        validation?: ValidationResult;
+        confirmResult?: ConfirmResult;
+      };
 
-      if (!validation.ok) {
+      onDraftSessionChange(response.session);
+      const validation = response.validation;
+      if (validation) {
+        setWarnings(validation.warnings || []);
+        setErrors(validation.errors || []);
+      }
+
+      if (validation && !validation.ok) {
         setFlowStatus('error', 'error', t('aiWorkbench.validationFailed'));
         return;
       }
 
       setFlowStatus('persisting', 'info', t('aiWorkbench.statusPersisting'));
-      const result: ConfirmResult = await window.ai.confirmCreativeAssets({
-        novelId,
-        draft: validation.normalizedDraft,
-      });
+      const result = response.confirmResult;
+      if (!result) {
+        setFlowStatus('error', 'error', t('aiWorkbench.persistFailedAtomic'));
+        return;
+      }
 
       setCreated(result.created || null);
       setWarnings(result.warnings || []);
@@ -381,6 +402,7 @@ export default function AIWorkbenchPanel({
       }
 
       // 入库成功后清空草稿
+      onDraftSessionChange(null);
       onDraftChange({ plotLines: [], plotPoints: [], characters: [], items: [], skills: [], maps: [] });
       onSelectionChange({ plotLines: [], plotPoints: [], characters: [], items: [], skills: [], maps: [] });
 

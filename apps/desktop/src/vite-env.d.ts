@@ -343,6 +343,16 @@ interface AISettings {
     }
 }
 
+interface McpCliSetupPayload {
+    commandPath: string
+    launcherExists: boolean
+    command: string
+    args: string[]
+    codexToml: string
+    claudeCommand: string
+    jsonConfig: string
+}
+
 interface AIAPI {
     previewContinuePrompt: (payload: {
         locale?: string
@@ -374,6 +384,7 @@ interface AIAPI {
         warnings?: string[]
     }>
     getSettings: () => Promise<AISettings>
+    getMcpCliSetup: () => Promise<McpCliSetupPayload>
     getMapImageStats: () => Promise<{
         totalCalls: number
         successCalls: number
@@ -511,6 +522,57 @@ interface AIAPI {
     openClawSkillInvoke: (name: string, input?: unknown) => Promise<{ ok: boolean; data?: unknown; error?: string; code?: string }>
 }
 
+interface CreativeDraftSelection {
+    plotLines: boolean[]
+    plotPoints: boolean[]
+    characters: boolean[]
+    items: boolean[]
+    skills: boolean[]
+    maps: boolean[]
+}
+
+interface ChapterDraftPayload {
+    chapterId: string
+    baseContent: string
+    generatedText: string
+    content: string
+    presentation?: 'silent' | 'toast' | 'modal'
+    usedContext: string[]
+    consistency: {
+        ok: boolean
+        issues: string[]
+    }
+    warnings?: string[]
+}
+
+interface DraftSessionRecord {
+    draftSessionId: string
+    workspace: 'ai-workbench' | 'chapter-editor'
+    type: 'creative-assets' | 'chapter-draft' | 'outline-draft'
+    source: 'internal-ai' | 'external-cli'
+    origin: 'codex' | 'claude-code' | 'openclaw' | 'desktop-ui' | 'mcp-bridge' | 'unknown'
+    novelId: string
+    chapterId?: string
+    status: 'draft' | 'committed' | 'discarded' | 'failed'
+    payload: Record<string, unknown> | ChapterDraftPayload
+    selection?: CreativeDraftSelection
+    validation?: {
+        ok: boolean
+        errors: Array<{ scope: string; name?: string; code: string; detail: string }>
+        warnings: string[]
+        normalizedDraft: Record<string, unknown>
+    } | null
+    previewSummary: string
+    version: number
+    createdAt: string
+    updatedAt: string
+}
+
+interface AutomationAPI {
+    invoke: (method: string, params?: unknown, origin?: 'desktop-ui' | 'unknown') => Promise<unknown>
+    onDataChanged: (callback: (payload: { method: string }) => void) => () => void
+}
+
 interface Window {
     ipcRenderer: import('electron').IpcRenderer
     db: DBAPI
@@ -527,4 +589,5 @@ interface Window {
         restoreAutoBackup: (filename: string) => Promise<void>;
     }
     ai: AIAPI
+    automation: AutomationAPI
 }

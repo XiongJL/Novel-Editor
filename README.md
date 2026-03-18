@@ -105,6 +105,40 @@ git push origin v0.1.3
 
 ## 文档
 - 开发文档：`DEVELOPMENT.md`
+- MCP CLI 接入：`docs/mcp-cli-setup.md`
 - 用户指南（中文）：`USER_GUIDE.md`
 - User Guide (English)：`USER_GUIDE_EN.md`
 - 后端说明：`apps/backend/README.md`
+
+## CLI / MCP 接入
+
+项目现在提供本地 MCP bridge，适合接入：
+
+- Codex
+- Claude Code
+- 兼容标准 MCP 的其他本地 CLI
+
+使用方式是：
+
+1. 先启动桌面应用：`pnpm dev`
+2. 再让 CLI 启动本地 MCP bridge
+3. CLI 通过 MCP 调用软件能力，而不是直接访问 SQLite
+
+完整配置说明见：
+
+- `docs/mcp-cli-setup.md`
+
+当前已经验证可用的接入方式包括：
+
+- Codex 通过本地 `config.toml` 注册 `novel_editor`
+- Claude Code 通过 `claude mcp add ...` 注册本地服务
+
+当前推荐流程：
+
+1. 启动桌面应用
+2. 启动已配置好的 CLI
+3. 先调用 `novel_list`
+4. 再调用 `draft_list`
+5. 然后调用 `creative_assets_generate_draft`
+
+这样可以把软件内置 AI 生成的草稿同时返回给 CLI，并同步显示到软件右侧草稿区，之后再由 CLI 或用户决定是否入库。

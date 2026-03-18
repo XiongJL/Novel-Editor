@@ -82,6 +82,18 @@ export default function WorldSettingList({ novelId, theme }: WorldSettingListPro
         loadSettings();
     }, [loadSettings]);
 
+    useEffect(() => {
+        const unsubscribeAutomation = window.automation?.onDataChanged?.(({ method }) => {
+            if (
+                method === 'story_patch.apply' ||
+                method === 'draft.commit'
+            ) {
+                void loadSettings();
+            }
+        });
+        return () => unsubscribeAutomation?.();
+    }, [loadSettings]);
+
     const handleCreate = async () => {
         try {
             const newSetting = await window.db.createWorldSetting({

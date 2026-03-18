@@ -130,6 +130,8 @@ interface LexicalChapterEditorProps {
     onCreateIdea?: () => void; // Callback for Ctrl+I global idea creation
     headerContent?: React.ReactNode;
     toolbarActions?: React.ReactNode;
+    saveIndicatorState?: 'idle' | 'saving' | 'saved' | 'error';
+    saveIndicatorText?: string;
     language?: string; // 'zh' | 'en'
     onAddIdea: (id: string, quote: string, cursor: string, note: string) => void;
     onIdeaClick?: (ideaId: string) => void;
@@ -156,6 +158,8 @@ export default function LexicalChapterEditor({
     onCreateIdea,
     headerContent,
     toolbarActions,
+    saveIndicatorState = 'idle',
+    saveIndicatorText = '',
     language = 'zh',
     onAddIdea,
     onIdeaClick,
@@ -248,7 +252,11 @@ export default function LexicalChapterEditor({
                 <InitialStatePlugin content={initialContent} />
                 {editorRef && <EditorRefPlugin editorRef={editorRef} />}
 
-                <WordCountPlugin isDark={isDark} />
+                <WordCountPlugin
+                    isDark={isDark}
+                    saveState={saveIndicatorState}
+                    saveStatusText={saveIndicatorText}
+                />
 
                 {/* Advanced Feature Plugins */}
                 <StylePlugin

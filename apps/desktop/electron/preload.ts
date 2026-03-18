@@ -126,6 +126,7 @@ contextBridge.exposeInMainWorld('backup', {
 
 contextBridge.exposeInMainWorld('ai', {
     getSettings: () => ipcRenderer.invoke('ai:get-settings'),
+    getMcpCliSetup: () => ipcRenderer.invoke('ai:get-mcp-cli-setup'),
     getMapImageStats: () => ipcRenderer.invoke('ai:get-map-image-stats'),
     updateSettings: (partial: any) => ipcRenderer.invoke('ai:update-settings', partial),
     testConnection: () => ipcRenderer.invoke('ai:test-connection'),
@@ -147,4 +148,14 @@ contextBridge.exposeInMainWorld('ai', {
     openClawInvoke: (name: string, args?: unknown) => ipcRenderer.invoke('ai:openclaw-invoke', { name, arguments: args }),
     openClawMcpInvoke: (name: string, args?: unknown) => ipcRenderer.invoke('ai:openclaw-mcp-invoke', { name, arguments: args }),
     openClawSkillInvoke: (name: string, input?: unknown) => ipcRenderer.invoke('ai:openclaw-skill-invoke', { name, input }),
+})
+
+contextBridge.exposeInMainWorld('automation', {
+    invoke: (method: string, params?: unknown, origin?: 'desktop-ui' | 'unknown') =>
+        ipcRenderer.invoke('automation:invoke', { method, params, origin }),
+    onDataChanged: (callback: (payload: { method: string }) => void) => {
+        const listener = (_event: unknown, payload: { method: string }) => callback(payload);
+        ipcRenderer.on('automation:data-changed', listener);
+        return () => ipcRenderer.removeListener('automation:data-changed', listener);
+    },
 })

@@ -1,5 +1,6 @@
 import { AiGenerateRequest, AiGenerateResponse, AiHealthCheckResult, AiImageRequest, AiImageResponse, AiProvider, AiSettings } from '../types';
 import { devLog, devLogError, redactForLog } from '../../debug/devLogger';
+import { net } from 'electron';
 
 function joinUrl(baseUrl: string, path: string): string {
     return `${baseUrl.replace(/\/+$/, '')}/${path.replace(/^\/+/, '')}`;
@@ -10,6 +11,28 @@ function parseJsonSafe(text: string): any {
         return JSON.parse(text);
     } catch {
         return null;
+    }
+}
+
+function describeNetworkError(error: any): string {
+    const message = String(error?.message || 'unknown error');
+    const causeCode = error?.cause?.code || error?.code;
+    const causeMessage = error?.cause?.message;
+    const parts = [message];
+    if (causeCode) {
+        parts.push(`code=${causeCode}`);
+    }
+    if (causeMessage && causeMessage !== message) {
+        parts.push(`cause=${causeMessage}`);
+    }
+    return parts.join(' | ');
+}
+
+async function transportFetch(url: string, init: RequestInit): Promise<Response> {
+    try {
+        return await net.fetch(url, init as any);
+    } catch {
+        return await fetch(url, init);
     }
 }
 
@@ -50,7 +73,7 @@ export class HttpProvider implements AiProvider {
                 timeoutMs: effectiveTimeout,
                 headers: { Authorization: `Bearer ${apiKey}` },
             });
-            const res = await fetch(url, {
+            const res = await transportFetch(url, {
                 method: 'GET',
                 headers: {
                     Authorization: `Bearer ${apiKey}`,
@@ -81,7 +104,7 @@ export class HttpProvider implements AiProvider {
             if (didTimeout) {
                 return { ok: false, detail: `HTTP health check timed out after ${effectiveTimeout}ms` };
             }
-            return { ok: false, detail: `HTTP health check failed: ${error?.message || 'unknown error'}` };
+            return { ok: false, detail: `HTTP health check failed: ${describeNetworkError(error)} | url=${url}` };
         } finally {
             clearTimeout(timer);
         }
@@ -119,7 +142,7 @@ export class HttpProvider implements AiProvider {
                 timeoutMs: timeout,
                 body: redactForLog(body),
             });
-            const res = await fetch(url, {
+            const res = await transportFetch(url, {
                 method: 'POST',
                 headers: {
                     Authorization: `Bearer ${this.settings.http.apiKey}`,
@@ -162,7 +185,7 @@ export class HttpProvider implements AiProvider {
             if (didTimeout || error?.name === 'AbortError') {
                 throw new Error(`HTTP request timeout after ${timeout}ms`);
             }
-            throw error;
+            throw new Error(`HTTP request failed: ${describeNetworkError(error)} | url=${url}`);
         } finally {
             clearTimeout(timer);
         }
@@ -197,7 +220,7 @@ export class HttpProvider implements AiProvider {
                 timeoutMs: timeout,
                 body: redactForLog(body),
             });
-            const res = await fetch(url, {
+            const res = await transportFetch(url, {
                 method: 'POST',
                 headers: {
                     Authorization: `Bearer ${this.settings.http.apiKey}`,
@@ -236,7 +259,7 @@ export class HttpProvider implements AiProvider {
             if (didTimeout || error?.name === 'AbortError') {
                 throw new Error(`HTTP request timeout after ${timeout}ms`);
             }
-            throw error;
+            throw new Error(`HTTP request failed: ${describeNetworkError(error)} | url=${url}`);
         } finally {
             clearTimeout(timer);
         }

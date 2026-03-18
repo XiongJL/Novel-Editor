@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowLeft, Save, PanelLeftClose, PanelLeftOpen, Settings, ChevronRight, LayoutGrid, FileText, Sparkles, ScrollText, Loader2 } from 'lucide-react';
+import { ArrowLeft, PanelLeftClose, PanelLeftOpen, Settings, ChevronRight, LayoutGrid, FileText, Sparkles, ScrollText, Loader2 } from 'lucide-react';
 import NarrativeMatrix from '../components/StoryWorkbench/NarrativeMatrix';
 import Sidebar from '../components/Sidebar';
 import ActivityBar, { ActivityTab } from '../components/ActivityBar';
@@ -11,6 +11,7 @@ import { useTranslation } from 'react-i18next';
 import { useEditorPreferences } from '../hooks/useEditorPreferences';
 import { useShortcuts } from '../hooks/useShortcuts';
 import { clsx } from 'clsx';
+import { toast } from 'sonner';
 import LexicalChapterEditor from '../components/LexicalEditor';
 import { LexicalEditor, $getRoot, $getSelection, $isRangeSelection, $getNodeByKey, $isTextNode, $createRangeSelection, $setSelection, $createParagraphNode, $createTextNode } from 'lexical';
 import { $isMarkNode, $unwrapMarkNode, $wrapSelectionInMarkNode } from '@lexical/mark';
@@ -23,7 +24,7 @@ import { RecentFile } from '../components/RecentFilesDropdown';
 import WorldWorkbench from '../components/WorldWorkbench/WorldWorkbench';
 import AIWorkbenchPanel from '../components/AIWorkbench/AIWorkbenchPanel';
 import AIWorkbenchDraftDock from '../components/AIWorkbench/AIWorkbenchDraftDock';
-import type { CreativeAssetsDraft, DraftSelection } from '../components/AIWorkbench/types';
+import type { CreativeAssetsDraft, DraftSelection, DraftSessionRecord } from '../components/AIWorkbench/types';
 import PlotSidebar from '../components/StoryWorkbench/PlotSidebar';
 import PlotContextMenu from '../components/StoryWorkbench/PlotContextMenu';
 import PlotAnchorModal from '../components/StoryWorkbench/PlotAnchorModal';
@@ -176,12 +177,17 @@ export default function Editor({ novelId, onBack }: EditorProps) {
     const [lastCreatedVolumeId, setLastCreatedVolumeId] = useState<string | null>(null);
     const [creativeDraft, setCreativeDraft] = useState<CreativeAssetsDraft>({ ...EMPTY_CREATIVE_DRAFT });
     const [creativeSelection, setCreativeSelection] = useState<DraftSelection>({ ...EMPTY_DRAFT_SELECTION });
+    const [creativeDraftSession, setCreativeDraftSession] = useState<DraftSessionRecord | null>(null);
     const [isDraftDockOpen, setIsDraftDockOpen] = useState(false);
     const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
+    const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+    const [saveStatusText, setSaveStatusText] = useState('');
+    const [editorRefreshToken, setEditorRefreshToken] = useState(0);
 
     useEffect(() => {
         setCreativeDraft({ ...EMPTY_CREATIVE_DRAFT });
         setCreativeSelection({ ...EMPTY_DRAFT_SELECTION });
+        setCreativeDraftSession(null);
         setIsDraftDockOpen(false);
     }, [novelId]);
 
@@ -190,6 +196,179 @@ export default function Editor({ novelId, onBack }: EditorProps) {
         window.addEventListener('resize', onResize);
         return () => window.removeEventListener('resize', onResize);
     }, []);
+
+    useEffect(() => {
+        const reloadMapCharacters = async () => {
+            try {
+                const next = await window.db.getCharacters(novelId);
+                setMapCharacters(next);
+            } catch (error) {
+                console.error('[Editor] failed to refresh map characters:', error);
+            }
+        };
+        const unsubscribeAutomation = window.automation?.onDataChanged?.(({ method }) => {
+            if (
+                method === 'character.create_batch' ||
+                method === 'story_patch.apply' ||
+                method === 'draft.commit'
+            ) {
+                void reloadMapCharacters();
+            }
+            if (
+                method === 'creative_assets.generate_draft' ||
+                method === 'outline.generate_draft' ||
+                method === 'draft.update' ||
+                method === 'draft.commit' ||
+                method === 'draft.discard'
+            ) {
+                void (async () => {
+                    try {
+                        const session = await window.automation.invoke('draft.get_active', {
+                            novelId,
+                            workspace: 'ai-workbench',
+                        }, 'desktop-ui') as DraftSessionRecord | null;
+
+                        creativeDraftSessionRef.current = session;
+                        setCreativeDraftSession(session);
+                        if (!session || session.status !== 'draft') {
+                            setCreativeDraft({ ...EMPTY_CREATIVE_DRAFT });
+                            setCreativeSelection({ ...EMPTY_DRAFT_SELECTION });
+                            return;
+                        }
+                        const payload = session.payload as CreativeAssetsDraft;
+                        setCreativeDraft({
+                            plotLines: Array.isArray(payload.plotLines) ? payload.plotLines : [],
+                            plotPoints: Array.isArray(payload.plotPoints) ? payload.plotPoints : [],
+                            characters: Array.isArray(payload.characters) ? payload.characters : [],
+                            items: Array.isArray(payload.items) ? payload.items : [],
+                            skills: Array.isArray(payload.skills) ? payload.skills : [],
+                            maps: Array.isArray(payload.maps) ? payload.maps : [],
+                        });
+                        setCreativeSelection(session.selection ?? { ...EMPTY_DRAFT_SELECTION });
+
+                        if (method === 'creative_assets.generate_draft' || method === 'outline.generate_draft') {
+                            setIsDraftDockOpen(true);
+                            setViewMode('editor');
+                        }
+                    } catch (error) {
+                        console.error('[Editor] failed to refresh creative draft session:', error);
+                    }
+                })();
+            }
+            if (method === 'chapter.create' || method === 'chapter.save') {
+                void (async () => {
+                    try {
+                        const refreshedVolumes = await window.db.getVolumes(novelId);
+                        setVolumes(refreshedVolumes);
+
+                        const current = chapterRef.current;
+                        if (!current) return;
+                        const latest = await window.db.getChapter(current.id);
+                        if (!latest) return;
+                        const shouldRefreshEditor =
+                            latest.content !== contentRef.current ||
+                            latest.title !== titleRef.current;
+
+                        setCurrentChapter(latest);
+                        setTitle(latest.title);
+                        setContent(latest.content);
+                        contentRef.current = latest.content;
+                        titleRef.current = latest.title;
+                        if (shouldRefreshEditor) {
+                            setEditorRefreshToken((prev) => prev + 1);
+                        }
+                    } catch (error) {
+                        console.error('[Editor] failed to refresh chapter after automation update:', error);
+                    }
+                })();
+            }
+            if (method === 'chapter.generate_draft') {
+                if (!chapterRef.current) return;
+                void (async () => {
+                    try {
+                        const current = chapterRef.current;
+                        if (!current) return;
+                        const session = await window.automation.invoke('draft.get_active', {
+                            novelId,
+                            workspace: 'chapter-editor',
+                            type: 'chapter-draft',
+                        }, 'desktop-ui') as DraftSessionRecord | null;
+                        if (!session || session.status !== 'draft' || session.chapterId !== current.id) {
+                            return;
+                        }
+                        const payload = session.payload as ChapterDraftPayload;
+                        const generatedText = (payload.generatedText || '').trim();
+                        if (!generatedText) return;
+
+                        setContinuePreviewText(generatedText);
+                        setContinuePreviewBaseTail((payload.baseContent || '').slice(-600));
+
+                        const requestedPresentation = payload.presentation;
+                        const normalizedPresentation = requestedPresentation === 'silent' || requestedPresentation === 'toast' || requestedPresentation === 'modal'
+                            ? requestedPresentation
+                            : undefined;
+                        const defaultPresentation = session.origin === 'mcp-bridge' ? 'toast' : 'modal';
+                        const presentation = normalizedPresentation ?? defaultPresentation;
+
+                        if (presentation === 'modal') {
+                            setIsContinuePreviewOpen(true);
+                            setContinueStatus(t('editor.continueNeedConfirm'));
+                            return;
+                        }
+
+                        if (presentation === 'toast') {
+                            setContinueStatus(t('editor.continueDraftReadyToast', '续写草稿已生成（未自动弹窗）'));
+                            toast.message(
+                                t('editor.continueDraftReadyTitle', '续写草稿已生成'),
+                                {
+                                    description: t('editor.continueDraftReadyDescription', '为避免打断当前写作，本次未自动弹窗。'),
+                                    action: {
+                                        label: t('editor.continueDraftReadyAction', '查看草稿'),
+                                        onClick: () => setIsContinuePreviewOpen(true),
+                                    },
+                                },
+                            );
+                            window.setTimeout(() => setContinueStatus(''), 4000);
+                            return;
+                        }
+
+                        setContinueStatus(t('editor.continueDraftReadySilent', '续写草稿已生成（静默模式）'));
+                        window.setTimeout(() => setContinueStatus(''), 3000);
+                    } catch (error) {
+                        console.error('[Editor] failed to refresh chapter draft preview:', error);
+                    }
+                })();
+                return;
+            }
+            if (method === 'chapter.generate_draft') {
+                if (!chapterRef.current) return;
+                void (async () => {
+                    try {
+                        const current = chapterRef.current;
+                        if (!current) return;
+                        const session = await window.automation.invoke('draft.get_active', {
+                            novelId,
+                            workspace: 'chapter-editor',
+                            type: 'chapter-draft',
+                        }, 'desktop-ui') as DraftSessionRecord | null;
+                        if (!session || session.status !== 'draft' || session.chapterId !== current.id) {
+                            return;
+                        }
+                        const payload = session.payload as ChapterDraftPayload;
+                        const generatedText = (payload.generatedText || '').trim();
+                        if (!generatedText) return;
+                        setContinuePreviewText(generatedText);
+                        setContinuePreviewBaseTail((payload.baseContent || '').slice(-600));
+                        setIsContinuePreviewOpen(true);
+                        setContinueStatus(t('editor.continueNeedConfirm', '续写已生成，请先确认再插入'));
+                    } catch (error) {
+                        console.error('[Editor] failed to refresh chapter draft preview:', error);
+                    }
+                })();
+            }
+        });
+        return () => unsubscribeAutomation?.();
+    }, [novelId, t]);
 
     // --- 4. Flow Mode State ---
     const [isFlowMode, setIsFlowMode] = useState(false);
@@ -201,13 +380,18 @@ export default function Editor({ novelId, onBack }: EditorProps) {
     const [highlightedIdeaId, setHighlightedIdeaId] = useState<string | null>(null);
     const [pendingJumpIdea, setPendingJumpIdea] = useState<Idea | null>(null);
     const [pendingSearchJump, setPendingSearchJump] = useState<{ chapterId: string; keyword: string; context?: string } | null>(null);
+    const hasContinuePreviewDraft = continuePreviewText.trim().length > 0;
 
     // --- 6. Refs ---
     const editorRef = useRef<LexicalEditor | null>(null);
     const contentRef = useRef(content);
     const titleRef = useRef(title);
     const chapterRef = useRef(currentChapter);
+    const creativeDraftSessionRef = useRef<DraftSessionRecord | null>(null);
+    const creativeDraftUpdateQueueRef = useRef(Promise.resolve());
     const isSwitchingChapterRef = useRef(false);
+    const saveQueueRef = useRef(Promise.resolve());
+    const saveStatusTimerRef = useRef<number | null>(null);
     const titleGenTimersRef = useRef<number[]>([]);
     const titleGenStatusTimerRef = useRef<number | null>(null);
     const titleGenActiveRef = useRef(false);
@@ -217,12 +401,101 @@ export default function Editor({ novelId, onBack }: EditorProps) {
         contentRef.current = content;
         titleRef.current = title;
         chapterRef.current = currentChapter;
+        creativeDraftSessionRef.current = creativeDraftSession;
 
         // Sync global metadata whenever currentChapter changes
         if (currentChapter) {
             activeChapterMetadata = { id: currentChapter.id, title: currentChapter.title };
         }
-    }, [content, title, currentChapter]);
+    }, [content, title, currentChapter, creativeDraftSession]);
+
+    const applyCreativeDraftSession = useCallback((session: DraftSessionRecord | null) => {
+        creativeDraftSessionRef.current = session;
+        setCreativeDraftSession(session);
+        if (!session || session.status !== 'draft') {
+            setCreativeDraft({ ...EMPTY_CREATIVE_DRAFT });
+            setCreativeSelection({ ...EMPTY_DRAFT_SELECTION });
+            return;
+        }
+        const payload = session.payload as CreativeAssetsDraft;
+        setCreativeDraft({
+            plotLines: Array.isArray(payload.plotLines) ? payload.plotLines : [],
+            plotPoints: Array.isArray(payload.plotPoints) ? payload.plotPoints : [],
+            characters: Array.isArray(payload.characters) ? payload.characters : [],
+            items: Array.isArray(payload.items) ? payload.items : [],
+            skills: Array.isArray(payload.skills) ? payload.skills : [],
+            maps: Array.isArray(payload.maps) ? payload.maps : [],
+        });
+        setCreativeSelection(session.selection ?? { ...EMPTY_DRAFT_SELECTION });
+    }, []);
+
+    const refreshCreativeDraftSession = useCallback(async () => {
+        try {
+            const session = await window.automation.invoke('draft.get_active', {
+                novelId,
+                workspace: 'ai-workbench',
+            }, 'desktop-ui') as DraftSessionRecord | null;
+            applyCreativeDraftSession(session);
+        } catch (error) {
+            console.error('[Editor] failed to refresh creative draft session:', error);
+        }
+    }, [applyCreativeDraftSession, novelId]);
+
+    useEffect(() => {
+        void refreshCreativeDraftSession();
+        const timer = window.setInterval(() => {
+            void refreshCreativeDraftSession();
+        }, 2500);
+        return () => window.clearInterval(timer);
+    }, [refreshCreativeDraftSession]);
+
+    const queueCreativeDraftSync = useCallback((nextDraft: CreativeAssetsDraft, nextSelection: DraftSelection) => {
+        const currentSession = creativeDraftSessionRef.current;
+        setCreativeDraft(nextDraft);
+        setCreativeSelection(nextSelection);
+        if (!currentSession?.draftSessionId || currentSession.status !== 'draft') {
+            return;
+        }
+        const optimisticSession: DraftSessionRecord = {
+            ...currentSession,
+            payload: nextDraft,
+            selection: nextSelection,
+        };
+        creativeDraftSessionRef.current = optimisticSession;
+        setCreativeDraftSession(optimisticSession);
+        creativeDraftUpdateQueueRef.current = creativeDraftUpdateQueueRef.current
+            .then(async () => {
+                const sessionForUpdate = creativeDraftSessionRef.current;
+                if (!sessionForUpdate?.draftSessionId || sessionForUpdate.status !== 'draft') return;
+                const updated = await window.automation.invoke('draft.update', {
+                    draftSessionId: sessionForUpdate.draftSessionId,
+                    version: sessionForUpdate.version,
+                    payload: nextDraft,
+                    selection: nextSelection,
+                }, 'desktop-ui') as DraftSessionRecord;
+                applyCreativeDraftSession(updated);
+            })
+            .catch((error) => {
+                console.error('[Editor] failed to sync creative draft session:', error);
+                void refreshCreativeDraftSession();
+            });
+    }, [applyCreativeDraftSession, refreshCreativeDraftSession]);
+
+    const handleCreativeDraftChange = useCallback((next: CreativeAssetsDraft) => {
+        queueCreativeDraftSync(next, creativeSelection);
+    }, [creativeSelection, queueCreativeDraftSync]);
+
+    const handleCreativeSelectionChange = useCallback((next: DraftSelection) => {
+        queueCreativeDraftSync(creativeDraft, next);
+    }, [creativeDraft, queueCreativeDraftSync]);
+
+    const handleCreativeDraftAndSelectionChange = useCallback((nextDraft: CreativeAssetsDraft, nextSelection: DraftSelection) => {
+        queueCreativeDraftSync(nextDraft, nextSelection);
+    }, [queueCreativeDraftSync]);
+
+    const handleCreativeDraftSessionChange = useCallback((next: DraftSessionRecord | null) => {
+        applyCreativeDraftSession(next);
+    }, [applyCreativeDraftSession]);
 
     const clearTitleGenTimers = useCallback(() => {
         titleGenTimersRef.current.forEach((id) => window.clearTimeout(id));
@@ -236,6 +509,22 @@ export default function Editor({ novelId, onBack }: EditorProps) {
         }
     }, []);
 
+    const clearSaveStatusTimer = useCallback(() => {
+        if (saveStatusTimerRef.current !== null) {
+            window.clearTimeout(saveStatusTimerRef.current);
+            saveStatusTimerRef.current = null;
+        }
+    }, []);
+
+    const scheduleSaveStatusReset = useCallback((delay = 2200) => {
+        clearSaveStatusTimer();
+        saveStatusTimerRef.current = window.setTimeout(() => {
+            setSaveState('idle');
+            setSaveStatusText('');
+            saveStatusTimerRef.current = null;
+        }, delay);
+    }, [clearSaveStatusTimer]);
+
     const normalizeContinueTargetLength = useCallback((value: string) => {
         const parsed = Number(value);
         if (!Number.isFinite(parsed)) return 500;
@@ -246,13 +535,14 @@ export default function Editor({ novelId, onBack }: EditorProps) {
         return () => {
             clearTitleGenTimers();
             clearTitleGenStatusTimer();
+            clearSaveStatusTimer();
             titleGenActiveRef.current = false;
             if (continuePromptTimerRef.current !== null) {
                 window.clearTimeout(continuePromptTimerRef.current);
                 continuePromptTimerRef.current = null;
             }
         };
-    }, [clearTitleGenStatusTimer, clearTitleGenTimers]);
+    }, [clearSaveStatusTimer, clearTitleGenStatusTimer, clearTitleGenTimers]);
 
     // --- 7. UI Actions ---
     const toggleFlowMode = useCallback(async () => {
@@ -688,63 +978,96 @@ export default function Editor({ novelId, onBack }: EditorProps) {
     }, [loadVolumes, novelId]);
 
     // Save Logic (Moved Before handleSelectChapter)
-    const saveChanges = useCallback(async () => {
-        const currentRef = chapterRef.current;
-        if (!currentRef) return;
+    const saveChanges = useCallback(async (trigger: 'manual' | 'auto' | 'lifecycle' = 'manual') => {
+        const runSave = async () => {
+            const currentRef = chapterRef.current;
+            if (!currentRef) return;
 
-        // Capture snapshot of values to save immediately
-        // This ensures that even if we await, we use the values from when save was triggered
-        const contentToSave = contentRef.current;
-        const titleToSave = titleRef.current;
+            const contentToSave = contentRef.current;
+            const titleToSave = titleRef.current;
 
-        // Guard: If we've already switched chapters physically (ref mismatch), abort
-        if (chapterRef.current?.id !== currentRef.id) return;
+            if (chapterRef.current?.id !== currentRef.id) return;
 
-        let chapterUpdated = false;
+            const hasContentChanges = contentToSave !== currentRef.content;
+            const hasTitleChanges = titleToSave !== currentRef.title;
 
-        // Save Content
-        if (contentToSave !== currentRef.content) {
-            await window.db.saveChapter({
-                chapterId: currentRef.id,
-                content: contentToSave
-            });
-            chapterUpdated = true;
-        }
+            if (!hasContentChanges && !hasTitleChanges) {
+                if (trigger === 'manual') {
+                    setSaveState('saved');
+                    setSaveStatusText(t('editor.saveUpToDate'));
+                    scheduleSaveStatusReset();
+                }
+                return;
+            }
 
-        // Check staleness after first await
-        if (chapterRef.current?.id !== currentRef.id) return;
+            clearSaveStatusTimer();
+            if (trigger !== 'auto') {
+                setSaveState('saving');
+                setSaveStatusText(t('editor.saveSaving'));
+            }
 
-        // Save Title
-        if (titleToSave !== currentRef.title) {
-            await window.db.renameChapter({
-                chapterId: currentRef.id,
-                title: titleToSave
-            });
-            loadVolumes(); // Reload volumes to reflect title change in sidebar
-            chapterUpdated = true;
-        }
+            let chapterUpdated = false;
 
-        // Check staleness before updating state
-        if (chapterRef.current?.id !== currentRef.id) return;
+            try {
+                if (hasContentChanges) {
+                    await window.db.saveChapter({
+                        chapterId: currentRef.id,
+                        content: contentToSave
+                    });
+                    chapterUpdated = true;
+                }
 
-        // Update currentChapter state and recent files if anything changed
-        if (chapterUpdated) {
-            const updatedChapter = {
-                ...currentRef,
-                content: contentToSave,
-                title: titleToSave
-            };
-            setCurrentChapter(updatedChapter);
-            addToRecentFiles(updatedChapter);
-        }
-    }, [loadVolumes, addToRecentFiles]);
+                if (chapterRef.current?.id !== currentRef.id) return;
+
+                if (hasTitleChanges) {
+                    await window.db.renameChapter({
+                        chapterId: currentRef.id,
+                        title: titleToSave
+                    });
+                    loadVolumes();
+                    chapterUpdated = true;
+                }
+
+                if (chapterRef.current?.id !== currentRef.id) return;
+
+                if (chapterUpdated) {
+                    const updatedChapter = {
+                        ...currentRef,
+                        content: contentToSave,
+                        title: titleToSave
+                    };
+                    setCurrentChapter(updatedChapter);
+                    addToRecentFiles(updatedChapter);
+                }
+
+                if (trigger === 'auto') {
+                    setSaveState('idle');
+                    setSaveStatusText('');
+                } else {
+                    setSaveState('saved');
+                    setSaveStatusText(t('editor.saveSaved'));
+                    scheduleSaveStatusReset();
+                }
+            } catch (error) {
+                console.error('[Editor] saveChanges failed:', error);
+                setSaveState('error');
+                setSaveStatusText(t('editor.saveFailed'));
+                scheduleSaveStatusReset(3200);
+                throw error;
+            }
+        };
+
+        const queued = saveQueueRef.current.then(runSave, runSave);
+        saveQueueRef.current = queued.catch(() => undefined);
+        return queued;
+    }, [addToRecentFiles, clearSaveStatusTimer, loadVolumes, scheduleSaveStatusReset, t]);
 
     // Auto-Save Effect
     useEffect(() => {
         const timer = setTimeout(() => {
             if (currentChapter) {
                 if (content !== currentChapter.content || title !== currentChapter.title) {
-                    saveChanges();
+                    void saveChanges('auto');
                 }
             }
         }, 1000);
@@ -755,7 +1078,7 @@ export default function Editor({ novelId, onBack }: EditorProps) {
     useEffect(() => {
         const handleUnload = () => {
             if (chapterRef.current && (contentRef.current !== chapterRef.current.content || titleRef.current !== chapterRef.current.title)) {
-                saveChanges();
+                void saveChanges('lifecycle');
             }
         };
         window.addEventListener('beforeunload', handleUnload);
@@ -1757,8 +2080,10 @@ export default function Editor({ novelId, onBack }: EditorProps) {
                                 theme={preferences.theme}
                                 draft={creativeDraft}
                                 selection={creativeSelection}
-                                onDraftChange={setCreativeDraft}
-                                onSelectionChange={setCreativeSelection}
+                                draftSession={creativeDraftSession}
+                                onDraftChange={handleCreativeDraftChange}
+                                onSelectionChange={handleCreativeSelectionChange}
+                                onDraftSessionChange={handleCreativeDraftSessionChange}
                                 onDraftGenerated={() => {
                                     setIsDraftDockOpen(true);
                                     setViewMode('editor');
@@ -1868,28 +2193,21 @@ export default function Editor({ novelId, onBack }: EditorProps) {
                     </div>
 
                     {/* Right: Actions (Width fixed to match left) */}
-                    <div className="flex items-center gap-2 justify-end w-[180px] shrink-0">
+                    <div className="flex items-center gap-2 justify-end min-w-fit shrink-0">
                         <FlowModeButton
                             isActive={isFlowMode}
                             onClick={toggleFlowMode}
-                            className="mr-1"
+                            className="mr-1 shrink-0"
                         />
                         <button
                             onClick={() => {
                                 setSettingsInitialTab('general');
                                 setIsSettingsOpen(true);
                             }}
-                            className={`p-2 rounded-full transition-colors ${preferences.theme === 'dark' ? 'hover:bg-white/10 hover:text-white' : 'hover:bg-black/5 hover:text-black'}`}
+                            className={`shrink-0 p-2 rounded-full transition-colors ${preferences.theme === 'dark' ? 'hover:bg-white/10 hover:text-white' : 'hover:bg-black/5 hover:text-black'}`}
                             title={t('editor.settings')}
                         >
                             <Settings className="w-5 h-5" />
-                        </button>
-                        <button
-                            onClick={() => saveChanges()}
-                            className={`p-2 rounded-full transition-colors active:scale-90 ${preferences.theme === 'dark' ? 'hover:bg-white/10 hover:text-white' : 'hover:bg-black/5 hover:text-black'}`}
-                            title={t('editor.save')}
-                        >
-                            <Save className="w-5 h-5" />
                         </button>
                     </div>
                 </div>
@@ -1934,7 +2252,7 @@ export default function Editor({ novelId, onBack }: EditorProps) {
                         )}>
                             <div className="flex-1 min-w-0 relative">
                                 <LexicalChapterEditor
-                                    key={currentChapter.id}
+                                    key={`${currentChapter.id}:${editorRefreshToken}`}
                                     namespace={currentChapter.id}
                                     initialContent={currentChapter.content}
                                     onChange={(editorState) => {
@@ -1952,6 +2270,8 @@ export default function Editor({ novelId, onBack }: EditorProps) {
                                     onSave={saveChanges}
                                     onCreateIdea={handleCreateGlobalIdea}
                                     language={i18n.language}
+                                    saveIndicatorState={saveState}
+                                    saveIndicatorText={saveStatusText}
                                     toolbarActions={
                                         <>
                                             <button
@@ -1968,6 +2288,21 @@ export default function Editor({ novelId, onBack }: EditorProps) {
                                                 {isContinuing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
                                                 <span>{t('editor.continueWriting', 'AI 续写')}</span>
                                             </button>
+                                            {hasContinuePreviewDraft && (
+                                                <button
+                                                    onClick={() => setIsContinuePreviewOpen(true)}
+                                                    title={t('editor.continueViewDraft', 'View Continue Draft')}
+                                                    className={clsx(
+                                                        "shrink-0 px-2.5 py-2 rounded-lg border transition-colors inline-flex items-center gap-1.5 text-xs",
+                                                        preferences.theme === 'dark'
+                                                            ? "border-white/10 text-neutral-300 hover:bg-white/5"
+                                                            : "border-gray-200 text-gray-600 hover:bg-gray-50"
+                                                    )}
+                                                >
+                                                    <FileText className="w-4 h-4" />
+                                                    <span>{t('editor.continueViewDraft', 'View Continue Draft')}</span>
+                                                </button>
+                                            )}
                                             <button
                                                 onClick={() => void handleRebuildChapterSummary()}
                                                 disabled={isRebuildingSummary || !currentChapter}
@@ -2149,8 +2484,9 @@ export default function Editor({ novelId, onBack }: EditorProps) {
                                         theme={preferences.theme}
                                         draft={creativeDraft}
                                         selection={creativeSelection}
-                                        onDraftChange={setCreativeDraft}
-                                        onSelectionChange={setCreativeSelection}
+                                        onDraftChange={handleCreativeDraftChange}
+                                        onSelectionChange={handleCreativeSelectionChange}
+                                        onDraftAndSelectionChange={handleCreativeDraftAndSelectionChange}
                                     />
                                 </div>
                             )}
@@ -2172,8 +2508,9 @@ export default function Editor({ novelId, onBack }: EditorProps) {
                                             theme={preferences.theme}
                                             draft={creativeDraft}
                                             selection={creativeSelection}
-                                            onDraftChange={setCreativeDraft}
-                                            onSelectionChange={setCreativeSelection}
+                                            onDraftChange={handleCreativeDraftChange}
+                                            onSelectionChange={handleCreativeSelectionChange}
+                                            onDraftAndSelectionChange={handleCreativeDraftAndSelectionChange}
                                         />
                                     </div>
                                 </>
@@ -2295,12 +2632,10 @@ export default function Editor({ novelId, onBack }: EditorProps) {
                             <button
                                 onClick={() => {
                                     setIsContinuePreviewOpen(false);
-                                    setContinuePreviewText('');
-                                    setContinuePreviewBaseTail('');
                                 }}
                                 className={clsx("text-xs px-2 py-1 rounded border", preferences.theme === 'dark' ? 'border-white/10 text-neutral-300' : 'border-gray-200 text-gray-600')}
                             >
-                                {t('common.cancel', '取消')}
+                                {t('common.close', 'Close')}
                             </button>
                         </div>
 

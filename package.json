@@ -13,6 +13,7 @@
     "dev:desktop": "pnpm --filter novel-editor-desktop run dev",
     "db:push": "pnpm --filter @novel-editor/core run db:push",
     "db:generate": "pnpm --filter @novel-editor/core run generate",
+    "mcp:config": "pnpm --filter novel-editor-desktop run mcp:config",
     "lint": "turbo run lint",
     "format": "prettier --write \"**/*.{ts,tsx,md}\""
   },
