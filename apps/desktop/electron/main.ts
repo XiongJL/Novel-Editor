@@ -624,17 +624,17 @@ ipcMain.handle('db:get-novels', async () => {
             include: {
                 volumes: {
                     select: {
-                        chapters: { select: { wordCount: true } }
+                        chapters: { select: { content: true } }
                     }
                 }
             },
             orderBy: { updatedAt: 'desc' }
         });
 
-        // Calculate real word count from chapters dynamically
+        // Calculate real word count from visible plain text (Lexical JSON -> plain text)
         return novels.map(n => {
             const totalWords = n.volumes.reduce((acc, v) =>
-                acc + v.chapters.reduce((cAcc, c) => cAcc + c.wordCount, 0), 0
+                acc + v.chapters.reduce((cAcc, c) => cAcc + extractTextFromLexical(c.content || '').length, 0), 0
             );
             // Remove volumes from result to keep payload clean, but return correct wordCount
             const { volumes, ...rest } = n;
@@ -874,7 +874,7 @@ ipcMain.handle('db:save-chapter', async (_, { chapterId, content }: { chapterId:
         if (!chapter || !chapter.volume) throw new Error('Chapter or Volume not found');
 
         const novelId = chapter.volume.novelId;
-        const newWordCount = content.length;
+        const newWordCount = extractTextFromLexical(content).length;
         const delta = newWordCount - chapter.wordCount;
 
         // Transaction to ensure consistency

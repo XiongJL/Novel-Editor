@@ -473,14 +473,8 @@ body.flow-mode-active #sidebar-root.sidebar-open {
   opacity: 1;
   pointer-events: auto;
   transform: translateX(0);
-  background: #ffffff;
-  /* Default Light BG */
-  box-shadow: 20px 0 50px rgba(0, 0, 0, 0.3);
-}
-
-.dark body.flow-mode-active #sidebar-root.sidebar-open {
-  background: #0F0F13;
-  /* Default Dark BG */
+  /* Keep panel background from component theme classes; do not force white here. */
+  box-shadow: 14px 0 36px rgba(2, 6, 23, 0.45);
 }
 
 /* Backdrop for Sidebar */

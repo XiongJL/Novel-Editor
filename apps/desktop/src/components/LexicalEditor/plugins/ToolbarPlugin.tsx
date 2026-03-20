@@ -1,18 +1,22 @@
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext';
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
     FORMAT_TEXT_COMMAND,
     FORMAT_ELEMENT_COMMAND,
     UNDO_COMMAND,
     REDO_COMMAND,
+    COMMAND_PRIORITY_LOW,
+    SELECTION_CHANGE_COMMAND,
     TextFormatType,
     ElementFormatType,
-    $getRoot
+    $getRoot,
+    $getSelection,
+    $isRangeSelection
 } from 'lexical';
 import {
     Undo, Redo,
     Bold, Italic, Underline, Strikethrough,
-    AlignLeft, AlignCenter, AlignRight, AlignJustify,
+    AlignLeft, AlignCenter, AlignRight,
     Indent,
     Monitor, Smartphone,
     GalleryHorizontalEnd,
@@ -20,6 +24,7 @@ import {
     Check
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { mergeRegister } from '@lexical/utils';
 import { EditorPreferences } from '../../../hooks/useEditorPreferences';
 import { FORMAT_CONTENT_COMMAND } from './AutoFormatPlugin';
 import { RecentFilesDropdown, RecentFile } from '../../RecentFilesDropdown';
@@ -40,6 +45,10 @@ export default function ToolbarPlugin({ preferences, onUpdatePreference, recentF
     const { t } = useTranslation();
     const isDark = preferences.theme === 'dark';
     const [isCopied, setIsCopied] = useState(false);
+    const [currentAlignment, setCurrentAlignment] = useState<ElementFormatType>('left');
+    const activeButtonClass = isDark
+        ? 'bg-indigo-500/25 text-indigo-100 ring-1 ring-indigo-400/40'
+        : 'bg-indigo-600 text-white';
 
     const handleCopy = () => {
         editor.getEditorState().read(() => {
@@ -59,10 +68,50 @@ export default function ToolbarPlugin({ preferences, onUpdatePreference, recentF
         editor.dispatchCommand(FORMAT_ELEMENT_COMMAND, format);
     };
 
+    const updateAlignmentState = useCallback(() => {
+        const selection = $getSelection();
+        if (!$isRangeSelection(selection)) {
+            return;
+        }
+
+        const anchorNode = selection.anchor.getNode();
+        const topLevelElement = anchorNode.getTopLevelElementOrThrow();
+        const format = topLevelElement.getFormatType();
+        setCurrentAlignment(format || 'left');
+    }, []);
+
+    useEffect(() => {
+        return mergeRegister(
+            editor.registerUpdateListener(({ editorState }) => {
+                editorState.read(() => {
+                    updateAlignmentState();
+                });
+            }),
+            editor.registerCommand(
+                SELECTION_CHANGE_COMMAND,
+                () => {
+                    updateAlignmentState();
+                    return false;
+                },
+                COMMAND_PRIORITY_LOW,
+            ),
+        );
+    }, [editor, updateAlignmentState]);
+
+    const isAlignActive = (align: 'left' | 'center' | 'right') => {
+        if (align === 'left') {
+            return currentAlignment === 'left' || currentAlignment === 'start' || currentAlignment === '';
+        }
+        if (align === 'right') {
+            return currentAlignment === 'right' || currentAlignment === 'end';
+        }
+        return currentAlignment === 'center';
+    };
+
     const Button = ({ onClick, icon: Icon, label, title, active }: { onClick: () => void, icon: any, label?: string, title: string, active?: boolean }) => (
         <button
             onClick={onClick}
-            className={`flex items-center gap-1 p-1.5 rounded transition-colors ${active ? 'bg-indigo-600 text-white' : (isDark ? 'hover:bg-white/10 text-neutral-300 hover:text-white' : 'hover:bg-black/5 text-neutral-700 hover:text-black')}`}
+            className={`flex items-center gap-1 p-1.5 rounded transition-colors ${active ? activeButtonClass : (isDark ? 'hover:bg-white/10 text-neutral-300 hover:text-white' : 'hover:bg-black/5 text-neutral-700 hover:text-black')}`}
             title={title}
         >
             <Icon className="w-4 h-4" />
@@ -103,14 +152,14 @@ export default function ToolbarPlugin({ preferences, onUpdatePreference, recentF
                 <div className={`flex rounded border p-0.5 ${isDark ? 'bg-neutral-800 border-neutral-700' : 'bg-gray-50 border-gray-300'}`}>
                     <button
                         onClick={() => onUpdatePreference('maxWidth', 'wide')}
-                        className={`p-1.5 rounded ${preferences.maxWidth === 'wide' ? 'bg-indigo-600 text-white' : (isDark ? 'text-neutral-400 hover:text-white' : 'text-neutral-500 hover:text-black')}`}
+                        className={`p-1.5 rounded ${preferences.maxWidth === 'wide' ? activeButtonClass : (isDark ? 'text-neutral-400 hover:text-white' : 'text-neutral-500 hover:text-black')}`}
                         title={t('toolbar.wideMode')}
                     >
                         <Monitor className="w-3.5 h-3.5" />
                     </button>
                     <button
                         onClick={() => onUpdatePreference('maxWidth', 'mobile')}
-                        className={`p-1.5 rounded ${preferences.maxWidth === 'mobile' ? 'bg-indigo-600 text-white' : (isDark ? 'text-neutral-400 hover:text-white' : 'text-neutral-500 hover:text-black')}`}
+                        className={`p-1.5 rounded ${preferences.maxWidth === 'mobile' ? activeButtonClass : (isDark ? 'text-neutral-400 hover:text-white' : 'text-neutral-500 hover:text-black')}`}
                         title={t('toolbar.mobileMode')}
                     >
                         <Smartphone className="w-3.5 h-3.5" />
@@ -150,10 +199,9 @@ export default function ToolbarPlugin({ preferences, onUpdatePreference, recentF
 
             {/* Alignment */}
             <div className="flex items-center gap-1">
-                <Button onClick={() => formatElement('left')} icon={AlignLeft} title={t('toolbar.alignLeft')} />
-                <Button onClick={() => formatElement('center')} icon={AlignCenter} title={t('toolbar.alignCenter')} />
-                <Button onClick={() => formatElement('right')} icon={AlignRight} title={t('toolbar.alignRight')} />
-                <Button onClick={() => formatElement('justify')} icon={AlignJustify} title={t('toolbar.justify')} />
+                <Button onClick={() => formatElement('left')} icon={AlignLeft} title={t('toolbar.alignLeft')} active={isAlignActive('left')} />
+                <Button onClick={() => formatElement('center')} icon={AlignCenter} title={t('toolbar.alignCenter')} active={isAlignActive('center')} />
+                <Button onClick={() => formatElement('right')} icon={AlignRight} title={t('toolbar.alignRight')} active={isAlignActive('right')} />
             </div>
 
             <Divider isDark={isDark} />

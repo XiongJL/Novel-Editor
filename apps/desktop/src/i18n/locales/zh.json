@@ -76,6 +76,10 @@
   },
   "home": {
     "greeting": "晚上好，作家",
+    "greetingNight": "夜深了，作家",
+    "greetingMorning": "早上好，作家",
+    "greetingAfternoon": "下午好，作家",
+    "greetingEvening": "晚上好，作家",
     "noNovels": "暂无作品",
     "create": "创建新作品",
     "editNovel": "编辑作品信息",

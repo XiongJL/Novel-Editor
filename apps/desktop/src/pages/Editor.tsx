@@ -374,6 +374,7 @@ export default function Editor({ novelId, onBack }: EditorProps) {
     const [isFlowMode, setIsFlowMode] = useState(false);
     const [isFlowEntering, setIsFlowEntering] = useState(false);
     const [isFlowSwitching, setIsFlowSwitching] = useState(false);
+    const isWindowFullScreenRef = useRef(false);
 
     // --- 5. Jump & Temporary State ---
     const [shakingIdeaId, setShakingIdeaId] = useState<string | null>(null);
@@ -925,16 +926,55 @@ export default function Editor({ novelId, onBack }: EditorProps) {
         if (!(window as any).electron?.onFullScreenChange) return;
 
         const unsubscribe = (window as any).electron.onFullScreenChange((isFullScreen: boolean) => {
+            isWindowFullScreenRef.current = isFullScreen;
             if (!isFullScreen && isFlowMode) {
                 // User exited fullscreen (e.g., via ESC)
                 document.body.classList.remove('flow-mode-active');
                 setIsFlowMode(false);
+                setIsFlowEntering(false);
+                setIsFlowSwitching(false);
                 setIsSidePanelOpen(true);
             }
         });
 
         return () => unsubscribe();
     }, [isFlowMode]);
+
+    // Flow mode ESC fallback:
+    // Some environments do not reliably emit fullscreen-change on ESC,
+    // so we always allow ESC to exit flow mode locally.
+    useEffect(() => {
+        if (!isFlowMode) return;
+
+        const handleEscExitFlow = (e: KeyboardEvent) => {
+            if (e.key !== 'Escape') return;
+            e.preventDefault();
+            e.stopPropagation();
+
+            // Flow mode UX:
+            // 1st ESC closes side panel (if open)
+            // 2nd ESC exits flow mode
+            if (isSidePanelOpen) {
+                setIsSidePanelOpen(false);
+                return;
+            }
+
+            document.body.classList.remove('flow-mode-active');
+            setIsFlowMode(false);
+            setIsFlowEntering(false);
+            setIsFlowSwitching(false);
+            setIsSidePanelOpen(true);
+
+            if (isWindowFullScreenRef.current && (window as any).electron?.toggleFullScreen) {
+                (window as any).electron.toggleFullScreen().catch((error: unknown) => {
+                    console.warn('[Editor] failed to exit fullscreen on ESC fallback:', error);
+                });
+            }
+        };
+
+        window.addEventListener('keydown', handleEscExitFlow, { capture: true });
+        return () => window.removeEventListener('keydown', handleEscExitFlow, { capture: true } as EventListenerOptions);
+    }, [isFlowMode, isSidePanelOpen]);
 
     // Load Volumes
     const loadVolumes = useCallback(async () => {
@@ -1970,7 +2010,7 @@ export default function Editor({ novelId, onBack }: EditorProps) {
                         className={clsx(
                             "h-full flex flex-col border-r w-64", // Fixed width
                             isFlowMode ? "absolute left-12 z-40 shadow-2xl" : "flex-shrink-0 relative transition-all duration-300",
-                            preferences.theme === 'dark' ? 'border-white/5 bg-[#0F0F13]' : 'border-gray-200 bg-gray-50',
+                            preferences.theme === 'dark' ? 'border-[#1f2533] bg-[#0F0F13]' : 'border-gray-200 bg-gray-50',
                             isSidePanelOpen && "sidebar-open"
                         )}
                     >

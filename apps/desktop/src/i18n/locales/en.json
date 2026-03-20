@@ -72,6 +72,10 @@
   },
   "home": {
     "greeting": "Good Evening, Writer",
+    "greetingNight": "Good Night, Writer",
+    "greetingMorning": "Good Morning, Writer",
+    "greetingAfternoon": "Good Afternoon, Writer",
+    "greetingEvening": "Good Evening, Writer",
     "noNovels": "No libraries found.",
     "create": "Create New Novel",
     "editNovel": "Edit Novel",

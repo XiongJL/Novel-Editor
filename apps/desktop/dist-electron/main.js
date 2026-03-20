@@ -8412,7 +8412,7 @@ ipcMain.handle("db:get-novels", async () => {
       include: {
         volumes: {
           select: {
-            chapters: { select: { wordCount: true } }
+            chapters: { select: { content: true } }
           }
         }
       },
@@ -8420,7 +8420,7 @@ ipcMain.handle("db:get-novels", async () => {
     });
     return novels.map((n) => {
       const totalWords = n.volumes.reduce(
-        (acc, v) => acc + v.chapters.reduce((cAcc, c) => cAcc + c.wordCount, 0),
+        (acc, v) => acc + v.chapters.reduce((cAcc, c) => cAcc + extractTextFromLexical(c.content || "").length, 0),
         0
       );
       const { volumes, ...rest } = n;
@@ -8630,7 +8630,7 @@ ipcMain.handle("db:save-chapter", async (_, { chapterId, content }) => {
     if (!chapter || !chapter.volume)
       throw new Error("Chapter or Volume not found");
     const novelId = chapter.volume.novelId;
-    const newWordCount = content.length;
+    const newWordCount = extractTextFromLexical(content).length;
     const delta = newWordCount - chapter.wordCount;
     const [, updatedChapter] = await db.$transaction([
       // 1. Update Novel WordCount

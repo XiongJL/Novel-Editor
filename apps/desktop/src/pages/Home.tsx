@@ -28,9 +28,21 @@ export default function Home() {
     const [editingNovel, setEditingNovel] = useState<Novel | null>(null);
     const [editForm, setEditForm] = useState({ title: '', coverUrl: '' });
     const [isGlobalSettingsOpen, setIsGlobalSettingsOpen] = useState(false);
+    const [currentHour, setCurrentHour] = useState<number>(() => new Date().getHours());
 
     useEffect(() => {
         loadNovels();
+    }, []);
+
+    useEffect(() => {
+        const updateCurrentHour = () => {
+            setCurrentHour(new Date().getHours());
+        };
+        updateCurrentHour();
+        const timer = window.setInterval(updateCurrentHour, 60 * 1000);
+        return () => {
+            window.clearInterval(timer);
+        };
     }, []);
 
     useEffect(() => {
@@ -98,6 +110,15 @@ export default function Home() {
         }
     }
 
+    const greetingKey =
+        currentHour < 5
+            ? 'home.greetingNight'
+            : currentHour < 12
+                ? 'home.greetingMorning'
+                : currentHour < 18
+                    ? 'home.greetingAfternoon'
+                    : 'home.greetingEvening';
+
     return (
         <div className={clsx(
             "relative min-h-screen w-full overflow-hidden font-sans selection:bg-indigo-500/30 transition-colors duration-500",
@@ -133,7 +154,7 @@ export default function Home() {
                                 transition={{ delay: 0.2 }}
                                 className={clsx("text-lg font-light tracking-wide", isDark ? "text-neutral-400" : "text-gray-500")}
                             >
-                                {t('home.greeting')}
+                                {t(greetingKey)}
                             </motion.p>
                         </div>
 
