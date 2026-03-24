@@ -8449,6 +8449,29 @@ ipcMain.handle("db:update-novel", async (_, { id, data }) => {
     throw e;
   }
 });
+ipcMain.handle("db:delete-novel", async (_, novelId) => {
+  var _a;
+  console.log("[Main] Received db:delete-novel:", novelId);
+  try {
+    const novel = await db.novel.findUnique({
+      where: { id: novelId },
+      select: { coverUrl: true }
+    });
+    if ((_a = novel == null ? void 0 : novel.coverUrl) == null ? void 0 : _a.startsWith("covers/")) {
+      const coverPath = path.join(app.getPath("userData"), novel.coverUrl);
+      if (fs$2.existsSync(coverPath)) {
+        fs$2.unlinkSync(coverPath);
+      }
+    }
+    await db.novel.delete({
+      where: { id: novelId }
+    });
+    return { ok: true };
+  } catch (e) {
+    console.error("[Main] db:delete-novel failed:", e);
+    throw e;
+  }
+});
 ipcMain.handle("db:upload-novel-cover", async (_, novelId) => {
   var _a;
   try {

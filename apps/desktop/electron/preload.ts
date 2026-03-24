@@ -12,7 +12,8 @@ contextBridge.exposeInMainWorld('db', {
     saveChapter: (data: { chapterId: string; content: string }) => ipcRenderer.invoke('db:save-chapter', data),
     renameVolume: (data: { volumeId: string; title: string }) => ipcRenderer.invoke('db:rename-volume', data),
     renameChapter: (data: { chapterId: string; title: string }) => ipcRenderer.invoke('db:rename-chapter', data),
-    updateNovel: (data: { id: string; data: { title?: string; coverUrl?: string; formatting?: string } }) => ipcRenderer.invoke('db:update-novel', data),
+    updateNovel: (data: { id: string; data: { title?: string; coverUrl?: string; description?: string; formatting?: string } }) => ipcRenderer.invoke('db:update-novel', data),
+    deleteNovel: (novelId: string) => ipcRenderer.invoke('db:delete-novel', novelId),
     uploadNovelCover: (novelId: string) => ipcRenderer.invoke('db:upload-novel-cover', novelId),
 
     // Idea

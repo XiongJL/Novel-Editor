@@ -1,19 +1,133 @@
-import { useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { ProjectCard } from '../components/ProjectCard';
-import { Plus, Settings, Upload, X } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
+import { BookOpen, ChevronLeft, ChevronRight, Search, Settings, Trash2, Upload, X } from 'lucide-react';
+import { clsx } from 'clsx';
+import { useTranslation } from 'react-i18next';
 import Editor from './Editor';
 import SettingsModal from '../components/SettingsModal';
-import { useTranslation } from 'react-i18next';
-import { useEditorPreferences } from '../hooks/useEditorPreferences';
-import { clsx } from 'clsx';
 
 const ACTIVE_NOVEL_STORAGE_KEY = 'novel_editor_active_novel_id';
+const VISIBLE_STACK_COUNT = 5;
+const WHEEL_THRESHOLD = 90;
+const ANIMATION_DURATION_MS = 700;
+const DELETE_DROP_DURATION_MS = 800;
+const BASE_CARD_WIDTH = 290;
+const BASE_CARD_HEIGHT = 400;
+const BASE_CARD_PADDING = 35;
+
+type StackState = {
+    x: number;
+    y: number;
+    scale: number;
+    rotateX: number;
+    rotateZ: number;
+    opacity: number;
+    zIndex: number;
+    blur: number;
+};
+
+type HomeLayoutPreset = {
+    tier: 'wide' | 'medium' | 'compact';
+    shellPadding: number;
+    sectionMaxWidth: number;
+    sectionMaxHeight: number;
+    sectionPaddingX: number;
+    leftColumnWidth: number;
+    headlineSize: number;
+    headlineBottom: number;
+    metaBottom: number;
+    summaryMaxHeight: number;
+    stageScale: number;
+    stagePerspective: number;
+    navBottom: string;
+    navRight: number;
+    actionCompact: boolean;
+};
+
+const STACK_SLOTS: StackState[] = [
+    { x: 0, y: 0, scale: 1, rotateX: 0, rotateZ: 0, opacity: 1, zIndex: 120, blur: 0 },
+    { x: 90, y: -40, scale: 0.92, rotateX: 6, rotateZ: -4, opacity: 0.94, zIndex: 80, blur: 0 },
+    { x: 170, y: -85, scale: 0.84, rotateX: 10, rotateZ: -7, opacity: 0.85, zIndex: 50, blur: 0 },
+    { x: 230, y: -130, scale: 0.76, rotateX: 13, rotateZ: -9, opacity: 0.65, zIndex: 25, blur: 0 },
+    { x: 280, y: -175, scale: 0.68, rotateX: 15, rotateZ: -11, opacity: 0.45, zIndex: 10, blur: 0 }
+];
+
+const OFFSCREEN_RIGHT: StackState = {
+    x: 350,
+    y: -220,
+    scale: 0.6,
+    rotateX: 20,
+    rotateZ: -15,
+    opacity: 0,
+    zIndex: 0,
+    blur: 0
+};
+
+const OFFSCREEN_LEFT: StackState = {
+    x: -120,
+    y: 120,
+    scale: 1.2,
+    rotateX: -10,
+    rotateZ: 5,
+    opacity: 0,
+    zIndex: 150,
+    blur: 0
+};
+
+function normalizeIndex(index: number, total: number): number {
+    if (total <= 0) return 0;
+    return ((index % total) + total) % total;
+}
+
+function lerp(from: number, to: number, progress: number) {
+    return from + (to - from) * progress;
+}
+
+function easeOutQuart(progress: number) {
+    return 1 - Math.pow(1 - progress, 4);
+}
+
+function stringToColor(text: string) {
+    let hash = 0;
+    for (let i = 0; i < text.length; i++) {
+        hash = text.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    const hex = (hash & 0x00ffffff).toString(16).toUpperCase();
+    return `#${'00000'.substring(0, 6 - hex.length)}${hex}`;
+}
+
+function generateGradient(seed: string) {
+    const c1 = stringToColor(seed);
+    const c2 = stringToColor(seed.split('').reverse().join(''));
+    return `linear-gradient(155deg, ${c1}, ${c2})`;
+}
+
+function uniqueIndices(first: number[], second: number[]) {
+    return [...new Set([...first, ...second])];
+}
+
+function parseFormatting(formatting?: string): Record<string, any> {
+    if (!formatting) return {};
+    try {
+        const parsed = JSON.parse(formatting);
+        return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch {
+        return {};
+    }
+}
+
+function readNovelAuthor(novel?: any): string {
+    if (!novel) return '';
+    const formatting = parseFormatting(novel.formatting);
+    return typeof formatting.author === 'string' ? formatting.author : '';
+}
 
 export default function Home() {
     const { t } = useTranslation();
-    const { preferences } = useEditorPreferences();
-    const isDark = preferences.theme === 'dark';
+    const [viewportSize, setViewportSize] = useState(() => ({
+        width: typeof window === 'undefined' ? 1500 : window.innerWidth,
+        height: typeof window === 'undefined' ? 900 : window.innerHeight
+    }));
 
     const [selectedNovelId, setSelectedNovelId] = useState<string | null>(() => {
         try {
@@ -24,25 +138,426 @@ export default function Home() {
     });
     const [novels, setNovels] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
+    const [activeDeckIndex, setActiveDeckIndex] = useState(0);
+    const [isDeckAnimating, setIsDeckAnimating] = useState(false);
+    const [visibleIndices, setVisibleIndices] = useState<number[]>([]);
+    const [cardStateMap, setCardStateMap] = useState<Record<number, StackState>>({});
 
-    const [editingNovel, setEditingNovel] = useState<Novel | null>(null);
-    const [editForm, setEditForm] = useState({ title: '', coverUrl: '' });
     const [isGlobalSettingsOpen, setIsGlobalSettingsOpen] = useState(false);
-    const [currentHour, setCurrentHour] = useState<number>(() => new Date().getHours());
+    const [isEditorOpen, setIsEditorOpen] = useState(false);
+    const [isLibrarySearchOpen, setIsLibrarySearchOpen] = useState(false);
+    const [librarySearchQuery, setLibrarySearchQuery] = useState('');
+    const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
+    const [pendingDeleteNovelId, setPendingDeleteNovelId] = useState<string | null>(null);
+    const [isDeletingNovel, setIsDeletingNovel] = useState(false);
+    const [droppingNovelId, setDroppingNovelId] = useState<string | null>(null);
+    const [editForm, setEditForm] = useState({ title: '', coverUrl: '', description: '', author: '' });
+
+    const animationFrameRef = useRef<number | null>(null);
+    const wheelAccumulatorRef = useRef(0);
+    const librarySearchInputRef = useRef<HTMLInputElement | null>(null);
+
+    const activeNovel = useMemo(() => {
+        if (!novels.length) return null;
+        return novels[normalizeIndex(activeDeckIndex, novels.length)];
+    }, [activeDeckIndex, novels]);
+    const pendingDeleteNovel = useMemo(() => {
+        if (!pendingDeleteNovelId) return null;
+        return novels.find((novel) => novel.id === pendingDeleteNovelId) || null;
+    }, [novels, pendingDeleteNovelId]);
+    const filteredNovels = useMemo(() => {
+        const keyword = librarySearchQuery.trim().toLowerCase();
+        if (!keyword) {
+            return novels.map((novel, index) => ({ novel, index }));
+        }
+        return novels
+            .map((novel, index) => ({ novel, index }))
+            .filter(({ novel }) => {
+                const title = String(novel.title || '').toLowerCase();
+                const author = readNovelAuthor(novel).toLowerCase();
+                const description = String(novel.description || '').toLowerCase();
+                return title.includes(keyword) || author.includes(keyword) || description.includes(keyword);
+            });
+    }, [librarySearchQuery, novels]);
+
+    const orderedVisibleIndices = useMemo(() => {
+        return [...visibleIndices].sort((a, b) => (cardStateMap[a]?.zIndex ?? 0) - (cardStateMap[b]?.zIndex ?? 0));
+    }, [cardStateMap, visibleIndices]);
+
+    const displayTitle = isEditorOpen ? editForm.title.trim() || activeNovel?.title || '-' : activeNovel?.title || '-';
+    const displayAuthor = isEditorOpen
+        ? editForm.author.trim() || t('home.authorFallback', { defaultValue: '-' })
+        : readNovelAuthor(activeNovel) || t('home.authorFallback', { defaultValue: '-' });
+    const displayWordCount = useMemo(() => {
+        const raw = Number(activeNovel?.wordCount ?? 0);
+        if (!Number.isFinite(raw) || raw < 0) return 0;
+        return Math.round(raw);
+    }, [activeNovel?.wordCount]);
+    const displayDescription = isEditorOpen
+        ? editForm.description.trim() || t('home.deckDescriptionFallback', { title: displayTitle })
+        : activeNovel?.description?.trim() || t('home.deckDescriptionFallback', { title: displayTitle });
+
+    const layoutPreset = useMemo<HomeLayoutPreset>(() => {
+        const { width, height } = viewportSize;
+        if (width >= 1500) {
+            return {
+                tier: 'wide',
+                shellPadding: 40,
+                sectionMaxWidth: 1400,
+                sectionMaxHeight: 860,
+                sectionPaddingX: 100,
+                leftColumnWidth: 420,
+                headlineSize: 82,
+                headlineBottom: 40,
+                metaBottom: 40,
+                summaryMaxHeight: 260,
+                stageScale: height < 860 ? Math.max(0.84, height / 860) : 1,
+                stagePerspective: 2500,
+                navBottom: '10%',
+                navRight: 0,
+                actionCompact: false
+            };
+        }
+        if (width >= 1280) {
+            return {
+                tier: 'medium',
+                shellPadding: 30,
+                sectionMaxWidth: 1280,
+                sectionMaxHeight: 790,
+                sectionPaddingX: 72,
+                leftColumnWidth: 380,
+                headlineSize: 68,
+                headlineBottom: 32,
+                metaBottom: 28,
+                summaryMaxHeight: 210,
+                stageScale: height < 760 ? Math.max(0.78, height / 760) : 0.9,
+                stagePerspective: 2200,
+                navBottom: '8%',
+                navRight: -8,
+                actionCompact: false
+            };
+        }
+        return {
+            tier: 'compact',
+            shellPadding: 20,
+            sectionMaxWidth: 1160,
+            sectionMaxHeight: 730,
+            sectionPaddingX: 44,
+            leftColumnWidth: 340,
+            headlineSize: 56,
+            headlineBottom: 24,
+            metaBottom: 22,
+            summaryMaxHeight: 160,
+            stageScale: height < 700 ? Math.max(0.7, height / 700) : 0.78,
+            stagePerspective: 1900,
+            navBottom: '7%',
+            navRight: -12,
+            actionCompact: true
+        };
+    }, [viewportSize]);
+
+    const cardWidth = Math.round(BASE_CARD_WIDTH * layoutPreset.stageScale);
+    const cardHeight = Math.round(BASE_CARD_HEIGHT * layoutPreset.stageScale);
+    const cardPadding = Math.max(22, Math.round(BASE_CARD_PADDING * layoutPreset.stageScale));
+    const cardTitleSize = Math.max(30, Math.round(48 * layoutPreset.stageScale));
+
+    const getVisibleIndices = useCallback((startIndex: number) => {
+        if (!novels.length) return [];
+        const count = Math.min(VISIBLE_STACK_COUNT, novels.length);
+        const result: number[] = [];
+        for (let i = 0; i < count; i++) {
+            result.push(normalizeIndex(startIndex + i, novels.length));
+        }
+        return result;
+    }, [novels.length]);
+
+    const buildIdleStateMap = useCallback((startIndex: number) => {
+        const indices = getVisibleIndices(startIndex);
+        const map: Record<number, StackState> = {};
+        indices.forEach((index, slotPos) => {
+            map[index] = { ...STACK_SLOTS[slotPos] };
+        });
+        return { indices, map };
+    }, [getVisibleIndices]);
+
+    const cancelAnimation = useCallback(() => {
+        if (animationFrameRef.current) {
+            window.cancelAnimationFrame(animationFrameRef.current);
+            animationFrameRef.current = null;
+        }
+    }, []);
+
+    const applyIdleScene = useCallback((index: number) => {
+        if (!novels.length) {
+            setVisibleIndices([]);
+            setCardStateMap({});
+            return;
+        }
+        const normalized = normalizeIndex(index, novels.length);
+        const { indices, map } = buildIdleStateMap(normalized);
+        setVisibleIndices(indices);
+        setCardStateMap(map);
+    }, [buildIdleStateMap, novels.length]);
+
+    const animateDirectTo = useCallback((targetIndex: number) => {
+        if (!novels.length || isDeckAnimating) return;
+
+        const normalizedTarget = normalizeIndex(targetIndex, novels.length);
+        if (normalizedTarget === activeDeckIndex) return;
+
+        cancelAnimation();
+        setIsDeckAnimating(true);
+
+        const currentVisible = getVisibleIndices(activeDeckIndex);
+        const targetVisible = getVisibleIndices(normalizedTarget);
+        const allIndices = uniqueIndices(currentVisible, targetVisible);
+        const startStates: Record<number, StackState> = {};
+        const endStates: Record<number, StackState> = {};
+
+        const delta = normalizedTarget - activeDeckIndex;
+        const isNext = delta === 1 || delta < -1;
+
+        for (const index of allIndices) {
+            const fromPos = currentVisible.indexOf(index);
+            const toPos = targetVisible.indexOf(index);
+
+            startStates[index] = fromPos !== -1
+                ? { ...STACK_SLOTS[fromPos] }
+                : { ...(isNext ? OFFSCREEN_RIGHT : OFFSCREEN_LEFT) };
+
+            endStates[index] = toPos !== -1
+                ? { ...STACK_SLOTS[toPos] }
+                : { ...(isNext ? OFFSCREEN_LEFT : OFFSCREEN_RIGHT) };
+        }
+
+        setVisibleIndices(allIndices);
+        setCardStateMap(startStates);
+
+        let startTime: number | null = null;
+        const frame = (timestamp: number) => {
+            if (!startTime) startTime = timestamp;
+            const raw = Math.min((timestamp - startTime) / ANIMATION_DURATION_MS, 1);
+            const eased = easeOutQuart(raw);
+
+            const nextMap: Record<number, StackState> = {};
+            for (const index of allIndices) {
+                const fromState = startStates[index];
+                const toState = endStates[index];
+                nextMap[index] = {
+                    x: lerp(fromState.x, toState.x, eased),
+                    y: lerp(fromState.y, toState.y, eased),
+                    scale: lerp(fromState.scale, toState.scale, eased),
+                    rotateX: lerp(fromState.rotateX, toState.rotateX, eased),
+                    rotateZ: lerp(fromState.rotateZ, toState.rotateZ, eased),
+                    opacity: lerp(fromState.opacity, toState.opacity, eased),
+                    zIndex: Math.round(lerp(fromState.zIndex, toState.zIndex, eased)),
+                    blur: lerp(fromState.blur, toState.blur, eased)
+                };
+            }
+
+            setCardStateMap(nextMap);
+
+            if (raw < 1) {
+                animationFrameRef.current = window.requestAnimationFrame(frame);
+                return;
+            }
+
+            animationFrameRef.current = null;
+            setActiveDeckIndex(normalizedTarget);
+            const { indices, map } = buildIdleStateMap(normalizedTarget);
+            setVisibleIndices(indices);
+            setCardStateMap(map);
+            setIsDeckAnimating(false);
+        };
+
+        animationFrameRef.current = window.requestAnimationFrame(frame);
+    }, [activeDeckIndex, buildIdleStateMap, cancelAnimation, getVisibleIndices, isDeckAnimating, novels.length]);
+
+    const goNext = useCallback(() => {
+        if (!novels.length || isDeletingNovel) return;
+        animateDirectTo(activeDeckIndex + 1);
+    }, [activeDeckIndex, animateDirectTo, isDeletingNovel, novels.length]);
+
+    const goPrev = useCallback(() => {
+        if (!novels.length || isDeletingNovel) return;
+        animateDirectTo(activeDeckIndex - 1);
+    }, [activeDeckIndex, animateDirectTo, isDeletingNovel, novels.length]);
+
+    const startOpenNovel = useCallback(() => {
+        if (!activeNovel || isDeckAnimating || isEditorOpen || isLibrarySearchOpen || isDeleteConfirmOpen || isDeletingNovel) return;
+        setSelectedNovelId(activeNovel.id);
+    }, [activeNovel, isDeckAnimating, isDeleteConfirmOpen, isDeletingNovel, isEditorOpen, isLibrarySearchOpen]);
+
+    const openEditorForActiveNovel = useCallback(() => {
+        if (!activeNovel) return;
+        setEditForm({
+            title: activeNovel.title || '',
+            coverUrl: activeNovel.coverUrl || '',
+            description: activeNovel.description || '',
+            author: readNovelAuthor(activeNovel)
+        });
+        setPendingDeleteNovelId(activeNovel.id);
+        setIsEditorOpen(true);
+    }, [activeNovel]);
+
+    const closeEditor = useCallback(() => {
+        setIsEditorOpen(false);
+        setIsDeleteConfirmOpen(false);
+        setPendingDeleteNovelId(null);
+    }, []);
+
+    const openLibrarySearch = useCallback(() => {
+        if (!novels.length || isDeletingNovel) return;
+        setLibrarySearchQuery('');
+        setIsLibrarySearchOpen(true);
+    }, [isDeletingNovel, novels.length]);
+
+    const closeLibrarySearch = useCallback(() => {
+        setIsLibrarySearchOpen(false);
+    }, []);
+
+    const selectNovelFromSearch = useCallback((index: number) => {
+        setIsLibrarySearchOpen(false);
+        setLibrarySearchQuery('');
+        animateDirectTo(index);
+    }, [animateDirectTo]);
+
+    async function loadNovels(options?: { preserveFrontNovelId?: string }) {
+        try {
+            const data = await window.db.getNovels();
+            setNovels(data);
+            if (!selectedNovelId && options?.preserveFrontNovelId) {
+                const nextFrontIndex = data.findIndex((novel) => novel.id === options.preserveFrontNovelId);
+                if (nextFrontIndex >= 0) {
+                    setActiveDeckIndex(nextFrontIndex);
+                }
+            }
+            if (selectedNovelId && !data.some((novel) => novel.id === selectedNovelId)) {
+                setSelectedNovelId(null);
+            }
+        } catch (error) {
+            console.error('[Home] Failed to load novels', error);
+        } finally {
+            setLoading(false);
+        }
+    }
+
+    async function handleCreateNovel() {
+        const title = `${t('home.newNovelPrefix', { defaultValue: '新作品' })} ${new Date().toLocaleTimeString()}`;
+        try {
+            await window.db.createNovel(title);
+            await loadNovels();
+            setActiveDeckIndex((prev) => prev + 1);
+        } catch (error: any) {
+            console.error('[Home] create novel failed:', error);
+            alert(`Create failed: ${error.message || 'Unknown error'}`);
+        }
+    }
+
+    async function saveEdit() {
+        if (!activeNovel || isDeletingNovel) return;
+        const editingNovelId = activeNovel.id;
+        try {
+            const nextFormatting = parseFormatting(activeNovel.formatting);
+            const nextAuthor = editForm.author.trim();
+            if (nextAuthor) {
+                nextFormatting.author = nextAuthor;
+            } else {
+                delete nextFormatting.author;
+            }
+            const patchData: { title?: string; coverUrl?: string; description?: string; formatting?: string } = {
+                title: editForm.title.trim() || activeNovel.title,
+                coverUrl: editForm.coverUrl.trim() || undefined,
+                formatting: JSON.stringify(nextFormatting)
+            };
+            const nextDescription = editForm.description.trim();
+            if (nextDescription) {
+                patchData.description = nextDescription;
+            }
+            await window.db.updateNovel({
+                id: activeNovel.id,
+                data: patchData
+            });
+            setIsEditorOpen(false);
+            await loadNovels({ preserveFrontNovelId: editingNovelId });
+        } catch (error: any) {
+            alert(`Save failed: ${error.message || 'Unknown error'}`);
+        }
+    }
+
+    async function uploadCoverForActiveNovel() {
+        if (!activeNovel) return;
+        const result = await window.db.uploadNovelCover(activeNovel.id);
+        if (result?.path) {
+            setEditForm((prev) => ({ ...prev, coverUrl: result.path }));
+        }
+    }
+
+    const openDeleteConfirm = useCallback(() => {
+        if (!activeNovel || isDeletingNovel) return;
+        setPendingDeleteNovelId(activeNovel.id);
+        setIsDeleteConfirmOpen(true);
+    }, [activeNovel, isDeletingNovel]);
+
+    const closeDeleteConfirm = useCallback(() => {
+        if (isDeletingNovel) return;
+        setIsDeleteConfirmOpen(false);
+    }, [isDeletingNovel]);
+
+    const confirmDeleteNovel = useCallback(async () => {
+        if (isDeletingNovel) return;
+        const targetNovelId = pendingDeleteNovelId || activeNovel?.id;
+        if (!targetNovelId) return;
+
+        const removingIndex = novels.findIndex((novel) => novel.id === targetNovelId);
+        if (removingIndex < 0) {
+            setIsDeleteConfirmOpen(false);
+            setPendingDeleteNovelId(null);
+            return;
+        }
+
+        try {
+            cancelAnimation();
+            setIsDeleteConfirmOpen(false);
+            setIsEditorOpen(false);
+            setIsDeckAnimating(true);
+            setIsDeletingNovel(true);
+            setDroppingNovelId(targetNovelId);
+
+            await new Promise<void>((resolve) => {
+                window.setTimeout(() => resolve(), DELETE_DROP_DURATION_MS);
+            });
+
+            await window.db.deleteNovel(targetNovelId);
+            const data = await window.db.getNovels();
+            setNovels(data);
+
+            if (!data.length) {
+                setActiveDeckIndex(0);
+            } else {
+                setActiveDeckIndex(Math.min(removingIndex, data.length - 1));
+            }
+        } catch (error: any) {
+            console.error('[Home] delete novel failed:', error);
+            alert(`${t('home.deleteNovelFailed', { defaultValue: 'Delete failed' })}: ${error.message || 'Unknown error'}`);
+        } finally {
+            setDroppingNovelId(null);
+            setPendingDeleteNovelId(null);
+            setIsDeletingNovel(false);
+            setIsDeckAnimating(false);
+        }
+    }, [activeNovel?.id, cancelAnimation, isDeletingNovel, novels, pendingDeleteNovelId, t]);
 
     useEffect(() => {
         loadNovels();
     }, []);
 
     useEffect(() => {
-        const updateCurrentHour = () => {
-            setCurrentHour(new Date().getHours());
+        const handleResize = () => {
+            setViewportSize({ width: window.innerWidth, height: window.innerHeight });
         };
-        updateCurrentHour();
-        const timer = window.setInterval(updateCurrentHour, 60 * 1000);
-        return () => {
-            window.clearInterval(timer);
-        };
+        window.addEventListener('resize', handleResize);
+        return () => window.removeEventListener('resize', handleResize);
     }, []);
 
     useEffect(() => {
@@ -63,266 +578,607 @@ export default function Home() {
         }
     }, [selectedNovelId]);
 
-    async function loadNovels() {
-        try {
-            const data = await window.db.getNovels();
-            setNovels(data);
-            if (selectedNovelId && !data.some((novel) => novel.id === selectedNovelId)) {
-                setSelectedNovelId(null);
-            }
-        } catch (error) {
-            console.error('Failed to load novels', error);
-        } finally {
-            setLoading(false);
+    useEffect(() => {
+        if (!isLibrarySearchOpen) return;
+        const timer = window.setTimeout(() => {
+            librarySearchInputRef.current?.focus();
+        }, 40);
+        return () => window.clearTimeout(timer);
+    }, [isLibrarySearchOpen]);
+
+    useEffect(() => {
+        if (selectedNovelId) {
+            setIsEditorOpen(false);
+            setIsLibrarySearchOpen(false);
+            setLibrarySearchQuery('');
+            setIsDeleteConfirmOpen(false);
+            setPendingDeleteNovelId(null);
+            setIsDeletingNovel(false);
+            setDroppingNovelId(null);
         }
-    }
+    }, [selectedNovelId]);
 
-    async function handleCreateNovel() {
-        const title = `新作品 ${new Date().toLocaleTimeString()}`;
-        try {
-            await window.db.createNovel(title);
-            loadNovels();
-        } catch (error: any) {
-            console.error('[Home] Create novel failed:', error);
-            alert(`创建失败: ${error.message || '未知错误'}`);
+    useEffect(() => {
+        if (!novels.length) {
+            setActiveDeckIndex(0);
+            setVisibleIndices([]);
+            setCardStateMap({});
+            return;
         }
-    }
+        const normalized = normalizeIndex(activeDeckIndex, novels.length);
+        if (normalized !== activeDeckIndex) {
+            setActiveDeckIndex(normalized);
+            return;
+        }
+        if (!selectedNovelId && !isDeckAnimating) {
+            applyIdleScene(normalized);
+        }
+    }, [activeDeckIndex, applyIdleScene, isDeckAnimating, novels.length, selectedNovelId]);
 
-    function openEdit(novel: Novel) {
-        setEditingNovel(novel);
-        setEditForm({ title: novel.title, coverUrl: novel.coverUrl || '' });
-    }
+    useEffect(() => {
+        if (selectedNovelId || !novels.length) return;
 
-    async function saveEdit() {
-        if (!editingNovel) return;
-        try {
-            await window.db.updateNovel({
-                id: editingNovel.id,
-                data: {
-                    title: editForm.title,
-                    coverUrl: editForm.coverUrl || undefined
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (isDeleteConfirmOpen) {
+                if (event.key === 'Escape') {
+                    event.preventDefault();
+                    closeDeleteConfirm();
+                } else if (event.key === 'Enter') {
+                    event.preventDefault();
+                    void confirmDeleteNovel();
                 }
-            });
-            setEditingNovel(null);
-            loadNovels();
-        } catch (error: any) {
-            alert(`保存失败: ${error.message}`);
-        }
-    }
+                return;
+            }
 
-    const greetingKey =
-        currentHour < 5
-            ? 'home.greetingNight'
-            : currentHour < 12
-                ? 'home.greetingMorning'
-                : currentHour < 18
-                    ? 'home.greetingAfternoon'
-                    : 'home.greetingEvening';
+            if (isLibrarySearchOpen) {
+                if (event.key === 'Escape') {
+                    event.preventDefault();
+                    closeLibrarySearch();
+                } else if (event.key === 'Enter' && filteredNovels.length === 1) {
+                    event.preventDefault();
+                    selectNovelFromSearch(filteredNovels[0].index);
+                }
+                return;
+            }
+
+            if (event.key === 'Escape') {
+                if (isEditorOpen) {
+                    event.preventDefault();
+                    closeEditor();
+                }
+                return;
+            }
+
+            if (event.key === 'Enter') {
+                if (isEditorOpen) {
+                    const target = event.target as HTMLElement | null;
+                    const isTextarea = target?.tagName === 'TEXTAREA';
+                    const canSave = !isTextarea || event.ctrlKey || event.metaKey;
+                    if (!canSave) return;
+                    event.preventDefault();
+                    void saveEdit();
+                } else {
+                    event.preventDefault();
+                    startOpenNovel();
+                }
+                return;
+            }
+
+            if (isEditorOpen || isDeckAnimating) return;
+
+            if (event.key === 'ArrowLeft') {
+                event.preventDefault();
+                goPrev();
+            } else if (event.key === 'ArrowRight') {
+                event.preventDefault();
+                goNext();
+            }
+        };
+
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [closeDeleteConfirm, closeEditor, closeLibrarySearch, confirmDeleteNovel, filteredNovels, goNext, goPrev, isDeleteConfirmOpen, isDeckAnimating, isEditorOpen, isLibrarySearchOpen, novels.length, saveEdit, selectNovelFromSearch, selectedNovelId, startOpenNovel]);
+
+    useEffect(() => {
+        if (selectedNovelId || !novels.length || isEditorOpen || isLibrarySearchOpen || isDeleteConfirmOpen || isDeletingNovel) return;
+
+        const handleWheel = (event: WheelEvent) => {
+            if (isDeckAnimating) return;
+            wheelAccumulatorRef.current += event.deltaY;
+            if (wheelAccumulatorRef.current >= WHEEL_THRESHOLD) {
+                wheelAccumulatorRef.current = 0;
+                goNext();
+            } else if (wheelAccumulatorRef.current <= -WHEEL_THRESHOLD) {
+                wheelAccumulatorRef.current = 0;
+                goPrev();
+            }
+        };
+
+        window.addEventListener('wheel', handleWheel, { passive: true });
+        return () => window.removeEventListener('wheel', handleWheel);
+    }, [goNext, goPrev, isDeckAnimating, isDeleteConfirmOpen, isDeletingNovel, isEditorOpen, isLibrarySearchOpen, novels.length, selectedNovelId]);
+
+    useEffect(() => {
+        return () => {
+            cancelAnimation();
+        };
+    }, [cancelAnimation]);
 
     return (
-        <div className={clsx(
-            "relative min-h-screen w-full overflow-hidden font-sans selection:bg-indigo-500/30 transition-colors duration-500",
-            isDark ? "bg-[#0a0a0f] text-neutral-200" : "bg-gray-50 text-gray-900"
-        )}>
-
-            {/* Background Gradient Mesh */}
-            <div className="absolute inset-0 z-0">
-                <div className={clsx(
-                    "absolute top-[-20%] left-[-10%] h-[800px] w-[800px] rounded-full blur-[120px] transition-colors duration-500",
-                    isDark ? "bg-indigo-900/10" : "bg-indigo-200/20"
-                )} />
-                <div className={clsx(
-                    "absolute bottom-[-20%] right-[-10%] h-[600px] w-[600px] rounded-full blur-[100px] transition-colors duration-500",
-                    isDark ? "bg-purple-900/10" : "bg-purple-200/20"
-                )} />
-            </div>
-
-            {/* Main Content */}
-            <AnimatePresence>
+        <div className="relative h-screen w-full overflow-hidden bg-[#f2f2f2] text-black">
+            <AnimatePresence mode="wait">
                 {!selectedNovelId ? (
                     <motion.div
+                        key="home-shell"
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
-                        exit={{ opacity: 0, scale: 0.95, filter: "blur(10px)" }}
-                        transition={{ duration: 0.5 }}
-                        className="relative z-10 flex h-screen w-full flex-col items-center justify-center p-8"
+                        exit={{ opacity: 0 }}
+                        transition={{ duration: 0.35 }}
+                        className="flex h-screen w-full items-center justify-center"
+                        style={{ padding: layoutPreset.shellPadding }}
                     >
-                        <div className="mb-12 text-center">
-                            <motion.p
-                                initial={{ y: -20, opacity: 0 }}
-                                animate={{ y: 0, opacity: 1 }}
-                                transition={{ delay: 0.2 }}
-                                className={clsx("text-lg font-light tracking-wide", isDark ? "text-neutral-400" : "text-gray-500")}
-                            >
-                                {t(greetingKey)}
-                            </motion.p>
-                        </div>
+                        <section
+                            className={clsx(
+                                'relative flex h-full w-full items-center rounded-[40px] bg-white',
+                                'shadow-[0_40px_100px_rgba(0,0,0,0.05)] transition-opacity duration-500',
+                                isEditorOpen && 'pointer-events-none opacity-15'
+                            )}
+                            style={{
+                                maxWidth: layoutPreset.sectionMaxWidth,
+                                maxHeight: layoutPreset.sectionMaxHeight,
+                                paddingLeft: layoutPreset.sectionPaddingX,
+                                paddingRight: layoutPreset.sectionPaddingX
+                            }}
+                        >
+                            <div className="flex h-[78%] min-h-0 shrink-0 flex-col" style={{ width: layoutPreset.leftColumnWidth }}>
+                                <div className="mb-6 inline-flex items-center gap-3 text-[11px] font-bold uppercase tracking-[0.2em] text-neutral-500">
+                                    <span className="h-0.5 w-5 bg-black" />
+                                    {t('home.deckStudioLabel', { defaultValue: 'Archive Studio' })}
+                                </div>
 
-                        {loading ? (
-                            <div className={isDark ? "text-neutral-500" : "text-gray-400"}>{t('common.loading')}</div>
-                        ) : novels.length > 0 ? (
-                            <div className="flex flex-wrap justify-center gap-8 max-w-[1200px] overflow-y-auto max-h-[80vh] py-4">
-                                {novels.map(novel => (
-                                    <ProjectCard
-                                        key={novel.id}
-                                        novel={novel}
-                                        onOpen={() => setSelectedNovelId(novel.id)}
-                                        onEdit={() => openEdit(novel)}
-                                    />
-                                ))}
-                                {/* Add Button Card */}
-                                <motion.div
-                                    className={clsx(
-                                        "flex h-[480px] w-[320px] items-center justify-center rounded-xl border border-dashed transition-all duration-300 cursor-pointer shadow-sm",
-                                        isDark
-                                            ? "border-white/10 bg-white/5 hover:bg-white/10"
-                                            : "border-gray-300 bg-white/50 hover:bg-white hover:border-indigo-300 hover:shadow-md"
-                                    )}
-                                    onClick={handleCreateNovel}
-                                    whileHover={{ scale: 1.02 }}
-                                    whileTap={{ scale: 0.98 }}
+                                <h1
+                                    className="leading-[1.05] font-black tracking-[-0.04em]"
+                                    style={{
+                                        fontSize: `clamp(44px, ${layoutPreset.headlineSize / 14}vw, ${layoutPreset.headlineSize}px)`,
+                                        marginBottom: layoutPreset.headlineBottom
+                                    }}
                                 >
-                                    <div className="text-center">
-                                        <Plus className={clsx("w-12 h-12 mx-auto mb-4 opacity-50", isDark ? "text-neutral-500" : "text-gray-400")} />
-                                        <span className={clsx("font-medium", isDark ? "text-neutral-500" : "text-gray-500")}>{t('home.create')}</span>
+                                    {t('home.deckHeadline')}
+                                </h1>
+
+                                <div className="grid grid-cols-2 gap-7" style={{ marginBottom: layoutPreset.metaBottom }}>
+                                    <div>
+                                        <span className="mb-2 block text-[10px] font-bold uppercase text-neutral-400">{t('home.title')}</span>
+                                        <span className="text-base font-bold">{displayTitle}</span>
                                     </div>
-                                </motion.div>
-                            </div>
-                        ) : (
-                            <div className="text-center">
-                                <p className={clsx("mb-4", isDark ? "text-neutral-500" : "text-gray-400")}>{t('home.noNovels')}</p>
-                                <button
-                                    onClick={handleCreateNovel}
-                                    className="flex items-center gap-2 px-6 py-3 bg-indigo-600 hover:bg-indigo-700 rounded-full text-white transition-colors shadow-lg shadow-indigo-500/20"
+                                    <div>
+                                        <span className="mb-2 block text-[10px] font-bold uppercase text-neutral-400">{t('home.author')}</span>
+                                        <span className="flex items-center justify-between gap-3 text-base font-bold">
+                                            <span className="truncate">{displayAuthor}</span>
+                                            <span className="shrink-0 text-sm text-neutral-500">
+                                                {displayWordCount.toLocaleString()} {t('home.words')}
+                                            </span>
+                                        </span>
+                                    </div>
+                                </div>
+
+                                <div
+                                    className="min-h-0 flex-1 overflow-y-auto border-l-2 border-[#f0f0f0] pl-6 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+                                    style={{ maxHeight: layoutPreset.summaryMaxHeight }}
                                 >
-                                    <Plus className="w-4 h-4" />
-                                    <span>{t('home.create')}</span>
+                                    <span className="mb-2 block text-[10px] font-bold uppercase text-neutral-400">
+                                        {t('home.deckSummaryLabel', { defaultValue: 'Summary' })}
+                                    </span>
+                                    <div className="scroll-smooth text-sm leading-7 text-neutral-600">
+                                        {displayDescription}
+                                    </div>
+                                </div>
+
+                                <div className={clsx('mt-7 gap-3', layoutPreset.actionCompact ? 'grid grid-cols-2' : 'flex flex-wrap')}>
+                                    <button
+                                        type="button"
+                                        onClick={activeNovel ? startOpenNovel : handleCreateNovel}
+                                        className={clsx(
+                                            'inline-flex items-center gap-2 rounded-xl px-6 py-3.5 text-sm font-bold transition',
+                                            layoutPreset.actionCompact && 'col-span-2 justify-center',
+                                            'bg-black text-white hover:bg-black/85 disabled:cursor-not-allowed disabled:opacity-60'
+                                        )}
+                                        disabled={isDeletingNovel || isDeleteConfirmOpen}
+                                    >
+                                        <BookOpen className="h-4 w-4" />
+                                        {activeNovel ? t('home.continue') : t('home.create')}
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={openEditorForActiveNovel}
+                                        disabled={!activeNovel || isDeletingNovel || isDeleteConfirmOpen}
+                                        className={clsx(
+                                            'rounded-xl px-6 py-3.5 text-sm font-bold transition',
+                                            activeNovel && !isDeletingNovel && !isDeleteConfirmOpen
+                                                ? 'bg-[#f5f5f5] hover:bg-[#ececec]'
+                                                : 'cursor-not-allowed bg-neutral-200 text-neutral-400'
+                                        )}
+                                    >
+                                        {t('home.editNovel')}
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={openLibrarySearch}
+                                        disabled={!novels.length || isDeletingNovel || isDeleteConfirmOpen}
+                                        className={clsx(
+                                            'inline-flex items-center gap-2 rounded-xl px-6 py-3.5 text-sm font-bold transition',
+                                            novels.length && !isDeletingNovel && !isDeleteConfirmOpen
+                                                ? 'bg-[#f5f5f5] hover:bg-[#ececec]'
+                                                : 'cursor-not-allowed bg-neutral-200 text-neutral-400'
+                                        )}
+                                    >
+                                        <Search className="h-4 w-4" />
+                                        {t('home.searchAllNovels')}
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div className="relative h-full min-w-0 grow" style={{ perspective: layoutPreset.stagePerspective }}>
+                                <div className="absolute inset-0 [transform-style:preserve-3d]">
+                                    {orderedVisibleIndices.map((index) => {
+                                        const novel = novels[index];
+                                        const state = cardStateMap[index];
+                                        if (!novel || !state) return null;
+
+                                        const isFront = index === normalizeIndex(activeDeckIndex, novels.length);
+                                        const hasCover = Boolean(novel.coverUrl);
+                                        const cardTitle = isEditorOpen && isFront
+                                            ? editForm.title.trim() || (novel.title || '').trim() || '-'
+                                            : (novel.title || '').trim() || '-';
+                                        return (
+                                            <button
+                                                key={novel.id}
+                                                type="button"
+                                                onClick={() => {
+                                                    if (isDeckAnimating || isEditorOpen || isLibrarySearchOpen || isDeletingNovel || isDeleteConfirmOpen) return;
+                                                    if (isFront) {
+                                                        startOpenNovel();
+                                                        return;
+                                                    }
+                                                    animateDirectTo(index);
+                                                }}
+                                                className={clsx(
+                                                    'absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-[20px]',
+                                                    'border border-black/10 text-left shadow-[0_20px_50px_rgba(0,0,0,0.15)]',
+                                                    isFront && 'ring-1 ring-black/20',
+                                                    droppingNovelId === novel.id && 'pointer-events-none'
+                                                )}
+                                                style={{
+                                                    opacity: droppingNovelId === novel.id ? 0 : state.opacity,
+                                                    zIndex: droppingNovelId === novel.id ? 300 : state.zIndex,
+                                                    filter: `blur(${state.blur}px)`,
+                                                    transformStyle: 'preserve-3d',
+                                                    transition: 'opacity 300ms, transform 800ms cubic-bezier(0.16, 1, 0.3, 1)',
+                                                    width: cardWidth,
+                                                    height: cardHeight,
+                                                    transform: droppingNovelId === novel.id
+                                                        ? `translate3d(calc(-50% + ${state.x * layoutPreset.stageScale}px), calc(-50% + ${(state.y + 820) * layoutPreset.stageScale}px), -200px) rotateX(-30deg) rotateZ(15deg) scale(${Math.max(0.65, state.scale * 0.8)})`
+                                                        : `translate3d(calc(-50% + ${state.x * layoutPreset.stageScale}px), calc(-50% + ${state.y * layoutPreset.stageScale}px), ${state.zIndex}px) rotateX(${state.rotateX}deg) rotateZ(${state.rotateZ}deg) scale(${state.scale})`
+                                                }}
+                                            >
+                                                <div
+                                                    className="absolute inset-0"
+                                                    style={hasCover ? undefined : { background: generateGradient(cardTitle) }}
+                                                />
+                                                {hasCover && (
+                                                    <img
+                                                        src={novel.coverUrl.startsWith('covers/') ? `local-resource://${novel.coverUrl}` : novel.coverUrl}
+                                                        alt={cardTitle}
+                                                        className="absolute inset-0 h-full w-full object-cover"
+                                                    />
+                                                )}
+                                                <div className={clsx('relative z-10 h-full', hasCover && 'opacity-0')} style={{ padding: cardPadding }}>
+                                                    <div
+                                                        className="h-full overflow-hidden font-black tracking-[-0.02em] break-words"
+                                                        style={{ fontSize: cardTitleSize, lineHeight: 1.08 }}
+                                                    >
+                                                        {cardTitle}
+                                                    </div>
+                                                </div>
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+
+                                <div className="absolute z-20 flex gap-3" style={{ bottom: layoutPreset.navBottom, right: layoutPreset.navRight }}>
+                                    <button
+                                        type="button"
+                                        onClick={goPrev}
+                                        className="flex h-[50px] w-[50px] items-center justify-center rounded-full bg-white shadow-[0_4px_12px_rgba(0,0,0,0.1)] transition hover:bg-black hover:text-white disabled:cursor-not-allowed disabled:opacity-45"
+                                        disabled={isLibrarySearchOpen || isDeletingNovel || isDeleteConfirmOpen}
+                                    >
+                                        <ChevronLeft className="h-5 w-5" />
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={goNext}
+                                        className="flex h-[50px] w-[50px] items-center justify-center rounded-full bg-white shadow-[0_4px_12px_rgba(0,0,0,0.1)] transition hover:bg-black hover:text-white disabled:cursor-not-allowed disabled:opacity-45"
+                                        disabled={isLibrarySearchOpen || isDeletingNovel || isDeleteConfirmOpen}
+                                    >
+                                        <ChevronRight className="h-5 w-5" />
+                                    </button>
+                                </div>
+                            </div>
+                        </section>
+
+                        {!selectedNovelId && (
+                            <div className="fixed right-12 top-12 z-50">
+                                <button
+                                    onClick={() => setIsGlobalSettingsOpen(true)}
+                                    className="rounded-full bg-white p-3 text-black shadow-[0_4px_12px_rgba(0,0,0,0.1)] transition hover:bg-black hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                                    disabled={isDeletingNovel}
+                                >
+                                    <Settings className="h-5 w-5" />
                                 </button>
                             </div>
                         )}
 
-                        {/* Edit Modal */}
-                        {editingNovel && (
-                            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-                                <motion.div
-                                    initial={{ scale: 0.9, opacity: 0 }}
-                                    animate={{ scale: 1, opacity: 1 }}
-                                    className={clsx(
-                                        "w-full max-w-md rounded-xl p-6 shadow-2xl border",
-                                        isDark ? "bg-[#1a1a20] border-white/10 text-white" : "bg-white border-gray-200 text-gray-900"
-                                    )}
-                                >
-                                    <h3 className="text-xl font-bold mb-4">{t('home.editNovel')}</h3>
-
-                                    <div className="space-y-4">
-                                        <div>
-                                            <label className={clsx("block text-xs uppercase mb-1", isDark ? "text-neutral-500" : "text-gray-400")}>{t('home.title')}</label>
-                                            <input
-                                                value={editForm.title}
-                                                onChange={e => setEditForm({ ...editForm, title: e.target.value })}
-                                                className={clsx(
-                                                    "w-full border rounded p-2 outline-none focus:border-indigo-500 transition-colors",
-                                                    isDark ? "bg-black/50 border-white/10" : "bg-gray-50 border-gray-200"
-                                                )}
-                                            />
-                                        </div>
-                                        <div>
-                                            <label className={clsx("block text-xs uppercase mb-2", isDark ? "text-neutral-500" : "text-gray-400")}>{t('home.coverUrl')}</label>
-                                            <div className="flex items-center gap-3">
-                                                {editForm.coverUrl ? (
-                                                    <div className="relative group">
-                                                        <img
-                                                            src={editForm.coverUrl.startsWith('covers/') ? `local-resource://${editForm.coverUrl}` : editForm.coverUrl}
-                                                            alt="cover"
-                                                            className={clsx("w-16 h-24 object-cover rounded-lg border", isDark ? "border-white/10" : "border-gray-200")}
-                                                        />
-                                                        <button
-                                                            onClick={() => setEditForm({ ...editForm, coverUrl: '' })}
-                                                            className="absolute -top-1 -right-1 p-0.5 rounded-full bg-red-500 text-white opacity-0 group-hover:opacity-100 transition-opacity"
-                                                        >
-                                                            <X className="w-3 h-3" />
-                                                        </button>
-                                                    </div>
-                                                ) : (
-                                                    <div className={clsx(
-                                                        "w-16 h-24 rounded-lg border border-dashed flex items-center justify-center",
-                                                        isDark ? "border-white/10 text-neutral-600" : "border-gray-300 text-gray-400"
-                                                    )}>
-                                                        <Upload className="w-5 h-5 opacity-40" />
-                                                    </div>
-                                                )}
-                                                <button
-                                                    onClick={async () => {
-                                                        if (!editingNovel) return;
-                                                        const result = await window.db.uploadNovelCover(editingNovel.id);
-                                                        if (result) {
-                                                            setEditForm({ ...editForm, coverUrl: result.path });
-                                                        }
-                                                    }}
-                                                    className={clsx(
-                                                        "text-xs px-3 py-1.5 rounded-lg border transition-colors flex items-center gap-1.5",
-                                                        isDark ? "border-white/10 hover:bg-white/5 text-neutral-300" : "border-gray-200 hover:bg-gray-50 text-gray-600"
-                                                    )}
-                                                >
-                                                    <Upload className="w-3.5 h-3.5" />
-                                                    {t('home.uploadCover', '上传封面')}
-                                                </button>
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    <div className="flex justify-end gap-2 mt-6">
-                                        <button
-                                            onClick={() => setEditingNovel(null)}
-                                            className={clsx(
-                                                "px-4 py-2 rounded transition-colors",
-                                                isDark ? "hover:bg-white/5 text-neutral-400" : "hover:bg-gray-100 text-gray-500"
-                                            )}
-                                        >
-                                            {t('common.cancel')}
-                                        </button>
-                                        <button
-                                            onClick={saveEdit}
-                                            className="px-4 py-2 rounded bg-indigo-600 hover:bg-indigo-500 transition-colors text-white font-medium shadow-md shadow-indigo-500/20"
-                                        >
-                                            {t('common.save')}
-                                        </button>
-                                    </div>
-                                </motion.div>
+                        {loading && (
+                            <div className="fixed bottom-8 left-1/2 z-40 -translate-x-1/2 rounded-full bg-white/85 px-4 py-2 text-sm text-neutral-600 shadow">
+                                {t('common.loading')}
                             </div>
                         )}
-
                     </motion.div>
                 ) : (
                     <Editor
+                        key="editor-page"
                         novelId={selectedNovelId}
                         onBack={() => setSelectedNovelId(null)}
                     />
                 )}
             </AnimatePresence>
 
-            <SettingsModal
-                isOpen={isGlobalSettingsOpen}
-                onClose={() => setIsGlobalSettingsOpen(false)}
-            />
+            <div
+                className={clsx(
+                    'fixed inset-0 z-[9500] overflow-y-auto bg-white/95 p-10 backdrop-blur-sm transition duration-300',
+                    isLibrarySearchOpen ? 'pointer-events-auto opacity-100 scale-100' : 'pointer-events-none opacity-0 scale-[1.02]'
+                )}
+            >
+                <div className="mx-auto w-full max-w-[1360px]">
+                    <div className="mb-8 flex items-start justify-between gap-6">
+                        <div>
+                            <h3 className="text-3xl font-black tracking-tight">
+                                {t('home.searchAllTitle')}
+                            </h3>
+                            <p className="mt-2 text-sm text-neutral-500">
+                                {t('home.searchAllHint')}
+                            </p>
+                            <p className="mt-1 text-xs text-neutral-400">
+                                {t('home.searchAllEscHint')}
+                            </p>
+                        </div>
+                        <button
+                            type="button"
+                            onClick={closeLibrarySearch}
+                            className="flex h-11 w-11 items-center justify-center rounded-full bg-white shadow-[0_5px_15px_rgba(0,0,0,0.08)] transition hover:bg-black hover:text-white"
+                        >
+                            <X className="h-5 w-5" />
+                        </button>
+                    </div>
 
-            {/* Global Settings Trigger (Top Right) */}
-            {!selectedNovelId && (
-                <div className="absolute top-6 right-6 z-20">
+                    <div className="mb-8 flex items-center gap-3">
+                        <div className="relative w-full max-w-[460px]">
+                            <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400" />
+                            <input
+                                ref={librarySearchInputRef}
+                                value={librarySearchQuery}
+                                onChange={(event) => setLibrarySearchQuery(event.target.value)}
+                                placeholder={t('home.searchAllPlaceholder')}
+                                className="h-12 w-full rounded-xl border border-neutral-200 bg-white pl-11 pr-4 text-sm font-medium text-neutral-900 outline-none transition focus:border-black"
+                            />
+                        </div>
+                        <div className="text-sm font-semibold text-neutral-500">
+                            {t('home.searchAllResultCount', { count: filteredNovels.length })}
+                        </div>
+                    </div>
+
+                    {filteredNovels.length ? (
+                        <div className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-8 pb-10">
+                            {filteredNovels.map(({ novel, index }) => {
+                                const hasCover = Boolean(novel.coverUrl);
+                                const title = (novel.title || '-').trim();
+                                return (
+                                    <button
+                                        key={novel.id}
+                                        type="button"
+                                        onClick={() => selectNovelFromSearch(index)}
+                                        className="group aspect-[3/4] overflow-hidden rounded-2xl border border-black/5 bg-white text-left shadow-[0_10px_30px_rgba(0,0,0,0.05)] transition hover:-translate-y-2"
+                                    >
+                                        <div className="relative h-full w-full">
+                                            <div
+                                                className="absolute inset-0"
+                                                style={hasCover ? undefined : { background: generateGradient(title) }}
+                                            />
+                                            {hasCover && (
+                                                <img
+                                                    src={novel.coverUrl.startsWith('covers/') ? `local-resource://${novel.coverUrl}` : novel.coverUrl}
+                                                    alt={title}
+                                                    className="absolute inset-0 h-full w-full object-cover"
+                                                />
+                                            )}
+                                            <div
+                                                className={clsx(
+                                                    'relative z-10 flex h-full flex-col justify-end p-4 transition',
+                                                    hasCover ? 'text-white' : 'text-white',
+                                                    hasCover && 'bg-gradient-to-t from-black/65 via-black/20 to-transparent'
+                                                )}
+                                            >
+                                                <div className="line-clamp-2 text-base font-black leading-tight tracking-tight">
+                                                    {title}
+                                                </div>
+                                                <div className="mt-1 text-xs font-semibold opacity-85">
+                                                    {readNovelAuthor(novel) || t('home.authorFallback', { defaultValue: '-' })}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    ) : (
+                        <div className="rounded-2xl border border-dashed border-neutral-300 bg-white/80 px-6 py-12 text-center text-neutral-500">
+                            {t('home.searchAllEmpty')}
+                        </div>
+                    )}
+                </div>
+            </div>
+
+            <aside
+                className={clsx(
+                    'fixed right-0 top-0 z-[9999] flex h-full w-[500px] flex-col bg-white p-[60px]',
+                    'shadow-[-30px_0_90px_rgba(0,0,0,0.1)] transition-transform duration-700',
+                    '[transition-timing-function:cubic-bezier(0.16,1,0.3,1)]',
+                    isEditorOpen ? 'translate-x-0' : 'translate-x-full'
+                )}
+            >
+                <div className="mb-8 flex items-center justify-between">
+                    <h3 className="text-2xl font-black">{t('home.editNovel')}</h3>
                     <button
-                        onClick={() => setIsGlobalSettingsOpen(true)}
-                        className={clsx(
-                            "p-3 rounded-full transition-all backdrop-blur-md border",
-                            isDark
-                                ? "bg-white/5 hover:bg-white/10 text-neutral-400 hover:text-white border-white/5"
-                                : "bg-white/50 hover:bg-white text-gray-500 hover:text-gray-900 border-gray-200 shadow-sm"
-                        )}
+                        type="button"
+                        onClick={closeEditor}
+                        className="flex h-9 w-9 items-center justify-center rounded-full bg-[#f4f4f4] transition hover:bg-black hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                        disabled={isDeletingNovel}
                     >
-                        <Settings className="w-5 h-5" />
+                        <X className="h-4 w-4" />
                     </button>
                 </div>
-            )}
 
+                <label className="mb-2 block text-[10px] font-bold uppercase text-neutral-400">
+                    {t('home.coverUrl')}
+                </label>
+                <button
+                    type="button"
+                    onClick={uploadCoverForActiveNovel}
+                    className="relative mb-7 flex h-[140px] w-full flex-col items-center justify-center overflow-hidden rounded-xl border-2 border-dashed border-neutral-200 transition hover:border-neutral-300 disabled:cursor-not-allowed disabled:opacity-60"
+                    disabled={isDeletingNovel}
+                >
+                    {editForm.coverUrl ? (
+                        <img
+                            src={editForm.coverUrl.startsWith('covers/') ? `local-resource://${editForm.coverUrl}` : editForm.coverUrl}
+                            alt="cover preview"
+                            className="absolute inset-0 h-full w-full object-cover"
+                        />
+                    ) : (
+                        <>
+                            <Upload className="mb-2 h-5 w-5 text-neutral-400" />
+                            <span className="text-xs text-neutral-400">{t('home.uploadCover', { defaultValue: 'Upload cover image' })}</span>
+                        </>
+                    )}
+                </button>
+
+                <div className="mb-6">
+                    <label className="mb-2 block text-[10px] font-bold uppercase text-neutral-400">{t('home.title')}</label>
+                    <input
+                        value={editForm.title}
+                        onChange={(event) => setEditForm((prev) => ({ ...prev, title: event.target.value }))}
+                        className="w-full border-0 border-b border-neutral-200 py-2 text-base font-semibold outline-none transition focus:border-neutral-900"
+                        disabled={isDeletingNovel}
+                    />
+                </div>
+
+                <div className="mb-6">
+                    <label className="mb-2 block text-[10px] font-bold uppercase text-neutral-400">{t('home.author')}</label>
+                    <input
+                        value={editForm.author}
+                        onChange={(event) => setEditForm((prev) => ({ ...prev, author: event.target.value }))}
+                        className="w-full border-0 border-b border-neutral-200 py-2 text-base font-semibold outline-none transition focus:border-neutral-900"
+                        disabled={isDeletingNovel}
+                    />
+                </div>
+
+                <div className="mb-6">
+                    <label className="mb-2 block text-[10px] font-bold uppercase text-neutral-400">
+                        {t('home.deckSummaryLabel', { defaultValue: 'Summary' })}
+                    </label>
+                    <textarea
+                        value={editForm.description}
+                        onChange={(event) => setEditForm((prev) => ({ ...prev, description: event.target.value }))}
+                        className="h-24 w-full resize-none border-0 border-b border-neutral-200 py-2 text-base font-semibold outline-none transition focus:border-neutral-900"
+                        disabled={isDeletingNovel}
+                    />
+                </div>
+
+                <div className="mt-auto flex items-center gap-3">
+                    <button
+                        type="button"
+                        onClick={saveEdit}
+                        className="rounded-xl bg-black px-5 py-3 text-sm font-bold text-white transition hover:bg-black/85 disabled:cursor-not-allowed disabled:opacity-60"
+                        disabled={isDeletingNovel}
+                    >
+                        {t('common.save')}
+                    </button>
+                    <button
+                        type="button"
+                        onClick={closeEditor}
+                        className="rounded-xl bg-[#f4f4f4] px-5 py-3 text-sm font-bold transition hover:bg-[#ececec] disabled:cursor-not-allowed disabled:opacity-60"
+                        disabled={isDeletingNovel}
+                    >
+                        {t('common.cancel')}
+                    </button>
+                </div>
+
+                <div className="mt-4 text-[11px] text-neutral-400">
+                    {t('home.enterToSaveHint', { defaultValue: 'Press Enter to save. In summary field, use Ctrl/Cmd + Enter.' })}
+                </div>
+
+                <div className="mt-5 border-t border-neutral-100 pt-5">
+                    <button
+                        type="button"
+                        onClick={openDeleteConfirm}
+                        className="inline-flex items-center gap-2 text-xs font-bold text-red-500 opacity-60 transition hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-30"
+                        disabled={!activeNovel || isDeletingNovel}
+                    >
+                        <Trash2 className="h-4 w-4" />
+                        {t('home.deleteNovelTrigger', { defaultValue: 'Delete novel...' })}
+                    </button>
+                </div>
+            </aside>
+
+            <div
+                className={clsx(
+                    'fixed inset-0 z-[10000] flex items-center justify-center bg-white/85 backdrop-blur-xl transition',
+                    isDeleteConfirmOpen ? 'pointer-events-auto opacity-100' : 'pointer-events-none opacity-0'
+                )}
+                onClick={closeDeleteConfirm}
+            >
+                <div
+                    className="w-full max-w-[360px] px-6 text-center"
+                    onClick={(event) => event.stopPropagation()}
+                >
+                    <h3 className="mb-3 text-2xl font-black">
+                        {t('home.deleteNovelConfirmTitle', { defaultValue: 'Permanently delete this novel?' })}
+                    </h3>
+                    <p className="mb-7 text-sm leading-6 text-neutral-500">
+                        {t('home.deleteNovelConfirmDescription', {
+                            defaultValue: 'This action cannot be undone. All chapters and related materials under "{{title}}" will be removed.',
+                            title: pendingDeleteNovel?.title || activeNovel?.title || '-'
+                        })}
+                    </p>
+                    <div className="flex items-center justify-center gap-3">
+                        <button
+                            type="button"
+                            onClick={closeDeleteConfirm}
+                            className="rounded-xl bg-[#f4f4f4] px-5 py-2.5 text-sm font-bold transition hover:bg-[#ececec]"
+                        >
+                            {t('common.cancel')}
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => void confirmDeleteNovel()}
+                            className="rounded-xl bg-red-500 px-5 py-2.5 text-sm font-bold text-white transition hover:bg-red-600"
+                        >
+                            {t('home.deleteNovelConfirmAction', { defaultValue: 'Delete' })}
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <SettingsModal isOpen={isGlobalSettingsOpen} onClose={() => setIsGlobalSettingsOpen(false)} />
         </div>
     );
 }

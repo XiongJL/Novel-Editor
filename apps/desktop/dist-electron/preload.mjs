@@ -12,6 +12,7 @@ electron.contextBridge.exposeInMainWorld("db", {
   renameVolume: (data) => electron.ipcRenderer.invoke("db:rename-volume", data),
   renameChapter: (data) => electron.ipcRenderer.invoke("db:rename-chapter", data),
   updateNovel: (data) => electron.ipcRenderer.invoke("db:update-novel", data),
+  deleteNovel: (novelId) => electron.ipcRenderer.invoke("db:delete-novel", novelId),
   uploadNovelCover: (novelId) => electron.ipcRenderer.invoke("db:upload-novel-cover", novelId),
   // Idea
   getIdeas: (novelId) => electron.ipcRenderer.invoke("db:get-ideas", novelId),

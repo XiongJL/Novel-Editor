@@ -10,7 +10,8 @@ interface DBAPI {
     saveChapter: (data: { chapterId: string; content: string }) => Promise<Chapter>
     renameVolume: (data: { volumeId: string; title: string }) => Promise<Volume>
     renameChapter: (data: { chapterId: string; title: string }) => Promise<Chapter>
-    updateNovel: (data: { id: string; data: { title?: string; coverUrl?: string; formatting?: string } }) => Promise<Novel>
+    updateNovel: (data: { id: string; data: { title?: string; coverUrl?: string; description?: string; formatting?: string } }) => Promise<Novel>
+    deleteNovel: (novelId: string) => Promise<{ ok: boolean }>
     uploadNovelCover: (novelId: string) => Promise<{ path: string } | null>
     getIdeas: (novelId: string) => Promise<Idea[]>
     createIdea: (data: Idea) => Promise<Idea>

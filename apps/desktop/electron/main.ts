@@ -649,7 +649,7 @@ ipcMain.handle('db:get-novels', async () => {
     }
 })
 
-ipcMain.handle('db:update-novel', async (_, { id, data }: { id: string, data: { title?: string, coverUrl?: string, formatting?: string } }) => {
+ipcMain.handle('db:update-novel', async (_, { id, data }: { id: string, data: { title?: string, coverUrl?: string, description?: string, formatting?: string } }) => {
     console.log('[Main] Updating novel:', id, data);
     try {
         return await db.novel.update({
@@ -661,6 +661,32 @@ ipcMain.handle('db:update-novel', async (_, { id, data }: { id: string, data: { 
         });
     } catch (e) {
         console.error('[Main] db:update-novel failed:', e);
+        throw e;
+    }
+})
+
+ipcMain.handle('db:delete-novel', async (_, novelId: string) => {
+    console.log('[Main] Received db:delete-novel:', novelId);
+    try {
+        const novel = await db.novel.findUnique({
+            where: { id: novelId },
+            select: { coverUrl: true }
+        });
+
+        if (novel?.coverUrl?.startsWith('covers/')) {
+            const coverPath = path.join(app.getPath('userData'), novel.coverUrl);
+            if (fs.existsSync(coverPath)) {
+                fs.unlinkSync(coverPath);
+            }
+        }
+
+        await db.novel.delete({
+            where: { id: novelId }
+        });
+
+        return { ok: true };
+    } catch (e) {
+        console.error('[Main] db:delete-novel failed:', e);
         throw e;
     }
 })
