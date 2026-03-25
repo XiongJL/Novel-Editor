@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { BookOpen, ChevronLeft, ChevronRight, Search, Settings, Trash2, Upload, X } from 'lucide-react';
+import { BookOpen, ChevronLeft, ChevronRight, Plus, Search, Settings, Trash2, Upload, X } from 'lucide-react';
 import { clsx } from 'clsx';
 import { useTranslation } from 'react-i18next';
 import Editor from './Editor';
 import SettingsModal from '../components/SettingsModal';
+import { useEditorPreferences } from '../hooks/useEditorPreferences';
 
 const ACTIVE_NOVEL_STORAGE_KEY = 'novel_editor_active_novel_id';
 const VISIBLE_STACK_COUNT = 5;
@@ -124,6 +125,8 @@ function readNovelAuthor(novel?: any): string {
 
 export default function Home() {
     const { t } = useTranslation();
+    const { preferences } = useEditorPreferences();
+    const isDarkTheme = preferences.theme === 'dark';
     const [viewportSize, setViewportSize] = useState(() => ({
         width: typeof window === 'undefined' ? 1500 : window.innerWidth,
         height: typeof window === 'undefined' ? 900 : window.innerHeight
@@ -445,9 +448,8 @@ export default function Home() {
     async function handleCreateNovel() {
         const title = `${t('home.newNovelPrefix', { defaultValue: '新作品' })} ${new Date().toLocaleTimeString()}`;
         try {
-            await window.db.createNovel(title);
-            await loadNovels();
-            setActiveDeckIndex((prev) => prev + 1);
+            const createdNovel = await window.db.createNovel(title);
+            await loadNovels({ preserveFrontNovelId: createdNovel.id });
         } catch (error: any) {
             console.error('[Home] create novel failed:', error);
             alert(`Create failed: ${error.message || 'Unknown error'}`);
@@ -705,7 +707,20 @@ export default function Home() {
     }, [cancelAnimation]);
 
     return (
-        <div className="relative h-screen w-full overflow-hidden bg-[#f2f2f2] text-black">
+        <div className={clsx(
+            'relative h-screen w-full overflow-hidden transition-colors',
+            isDarkTheme ? 'dark bg-[#0b0b10] text-white' : 'bg-[#f2f2f2] text-black'
+        )}>
+            {isDarkTheme && (
+                <div
+                    aria-hidden="true"
+                    className="pointer-events-none absolute inset-0"
+                    style={{
+                        background:
+                            'radial-gradient(circle at 14% 18%, rgba(99,102,241,0.11), transparent 26%), radial-gradient(circle at 82% 24%, rgba(168,85,247,0.08), transparent 24%), radial-gradient(circle at 78% 78%, rgba(59,130,246,0.08), transparent 22%)'
+                    }}
+                />
+            )}
             <AnimatePresence mode="wait">
                 {!selectedNovelId ? (
                     <motion.div
@@ -719,8 +734,10 @@ export default function Home() {
                     >
                         <section
                             className={clsx(
-                                'relative flex h-full w-full items-center rounded-[40px] bg-white',
-                                'shadow-[0_40px_100px_rgba(0,0,0,0.05)] transition-opacity duration-500',
+                                'relative flex h-full w-full items-center rounded-[40px] transition-[opacity,background-color,border-color,box-shadow] duration-500',
+                                isDarkTheme
+                                    ? 'overflow-hidden bg-[linear-gradient(180deg,#16161d_0%,#121219_60%,#101016_100%)] shadow-[0_50px_120px_rgba(0,0,0,0.55),inset_0_1px_0_rgba(255,255,255,0.03)]'
+                                    : 'bg-white shadow-[0_40px_100px_rgba(0,0,0,0.05)]',
                                 isEditorOpen && 'pointer-events-none opacity-15'
                             )}
                             style={{
@@ -730,9 +747,25 @@ export default function Home() {
                                 paddingRight: layoutPreset.sectionPaddingX
                             }}
                         >
+                            {isDarkTheme && (
+                                <>
+                                    <div
+                                        aria-hidden="true"
+                                        className="pointer-events-none absolute inset-0"
+                                        style={{
+                                            background:
+                                                'radial-gradient(circle at 18% 22%, rgba(99,102,241,0.08), transparent 24%), radial-gradient(circle at 82% 30%, rgba(59,130,246,0.06), transparent 26%), linear-gradient(90deg, rgba(255,255,255,0.015), transparent 24%, transparent 76%, rgba(255,255,255,0.01))'
+                                        }}
+                                    />
+                                    <div className="pointer-events-none absolute inset-y-16 left-[48%] w-px bg-gradient-to-b from-transparent via-white/6 to-transparent" />
+                                </>
+                            )}
                             <div className="flex h-[78%] min-h-0 shrink-0 flex-col" style={{ width: layoutPreset.leftColumnWidth }}>
-                                <div className="mb-6 inline-flex items-center gap-3 text-[11px] font-bold uppercase tracking-[0.2em] text-neutral-500">
-                                    <span className="h-0.5 w-5 bg-black" />
+                                <div className={clsx(
+                                    'mb-6 inline-flex items-center gap-3 text-[11px] font-bold uppercase tracking-[0.2em]',
+                                    isDarkTheme ? 'text-neutral-400' : 'text-neutral-500'
+                                )}>
+                                    <span className={clsx('h-px w-9', isDarkTheme ? 'bg-gradient-to-r from-white/80 to-white/10' : 'bg-black')} />
                                     {t('home.deckStudioLabel', { defaultValue: 'Archive Studio' })}
                                 </div>
 
@@ -746,79 +779,138 @@ export default function Home() {
                                     {t('home.deckHeadline')}
                                 </h1>
 
-                                <div className="grid grid-cols-2 gap-7" style={{ marginBottom: layoutPreset.metaBottom }}>
-                                    <div>
-                                        <span className="mb-2 block text-[10px] font-bold uppercase text-neutral-400">{t('home.title')}</span>
-                                        <span className="text-base font-bold">{displayTitle}</span>
+                                <div className="grid grid-cols-3 gap-4" style={{ marginBottom: layoutPreset.metaBottom }}>
+                                    <div className={clsx(
+                                        'rounded-2xl px-4 py-3',
+                                        isDarkTheme ? 'bg-white/[0.035] shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]' : ''
+                                    )}>
+                                          <span className={clsx('mb-2 block text-[10px] font-bold uppercase tracking-[0.18em]', isDarkTheme ? 'text-neutral-500' : 'text-neutral-400')}>{t('home.title')}</span>
+                                          <span className={clsx('block text-base font-bold leading-tight', isDarkTheme ? 'text-neutral-50' : 'text-black')}>{displayTitle}</span>
+                                      </div>
+                                      <div className={clsx(
+                                        'rounded-2xl px-4 py-3',
+                                        isDarkTheme ? 'bg-white/[0.035] shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]' : ''
+                                    )}>
+                                          <span className={clsx('mb-2 block text-[10px] font-bold uppercase tracking-[0.18em]', isDarkTheme ? 'text-neutral-500' : 'text-neutral-400')}>{t('home.author')}</span>
+                                          <span className={clsx('block truncate text-base font-bold leading-tight', isDarkTheme ? 'text-neutral-50' : 'text-black')}>{displayAuthor}</span>
                                     </div>
-                                    <div>
-                                        <span className="mb-2 block text-[10px] font-bold uppercase text-neutral-400">{t('home.author')}</span>
-                                        <span className="flex items-center justify-between gap-3 text-base font-bold">
-                                            <span className="truncate">{displayAuthor}</span>
-                                            <span className="shrink-0 text-sm text-neutral-500">
-                                                {displayWordCount.toLocaleString()} {t('home.words')}
-                                            </span>
-                                        </span>
+                                    <div className={clsx(
+                                        'rounded-2xl px-4 py-3',
+                                        isDarkTheme ? 'bg-white/[0.035] shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]' : ''
+                                    )}>
+                                          <span className={clsx('mb-2 block text-[10px] font-bold uppercase tracking-[0.18em]', isDarkTheme ? 'text-neutral-500' : 'text-neutral-400')}>{t('home.words')}</span>
+                                          <span className={clsx('block text-base font-bold leading-tight', isDarkTheme ? 'text-neutral-200' : 'text-neutral-700')}>
+                                              {displayWordCount.toLocaleString()} {t('home.words')}
+                                          </span>
                                     </div>
                                 </div>
 
                                 <div
-                                    className="min-h-0 flex-1 overflow-y-auto border-l-2 border-[#f0f0f0] pl-6 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-                                    style={{ maxHeight: layoutPreset.summaryMaxHeight }}
-                                >
-                                    <span className="mb-2 block text-[10px] font-bold uppercase text-neutral-400">
-                                        {t('home.deckSummaryLabel', { defaultValue: 'Summary' })}
-                                    </span>
-                                    <div className="scroll-smooth text-sm leading-7 text-neutral-600">
-                                        {displayDescription}
-                                    </div>
-                                </div>
+                                      className={clsx(
+                                          'relative min-h-0 flex-1 overflow-y-auto rounded-[26px] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden',
+                                          isDarkTheme
+                                              ? 'bg-[linear-gradient(180deg,rgba(255,255,255,0.03),rgba(255,255,255,0.015))] px-6 py-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]'
+                                              : 'border border-[#f0f0f0] pl-6'
+                                      )}
+                                      style={{ maxHeight: layoutPreset.summaryMaxHeight }}
+                                  >
+                                      {isDarkTheme && (
+                                          <div className="pointer-events-none absolute inset-y-5 left-6 w-px bg-gradient-to-b from-transparent via-indigo-300/45 to-transparent" />
+                                      )}
+                                      <span className={clsx('mb-2 block text-[10px] font-bold uppercase', isDarkTheme ? 'text-neutral-500' : 'text-neutral-400')}>
+                                          {t('home.deckSummaryLabel', { defaultValue: 'Summary' })}
+                                      </span>
+                                      <div className={clsx('scroll-smooth text-sm leading-7', isDarkTheme ? 'pl-5 text-neutral-300/95' : 'text-neutral-600')}>
+                                          {displayDescription}
+                                      </div>
+                                  </div>
 
-                                <div className={clsx('mt-7 gap-3', layoutPreset.actionCompact ? 'grid grid-cols-2' : 'flex flex-wrap')}>
+                                <div className={clsx('mt-5 gap-3', layoutPreset.actionCompact ? 'grid grid-cols-3' : 'flex flex-wrap')}>
                                     <button
                                         type="button"
-                                        onClick={activeNovel ? startOpenNovel : handleCreateNovel}
+                                        onClick={startOpenNovel}
                                         className={clsx(
                                             'inline-flex items-center gap-2 rounded-xl px-6 py-3.5 text-sm font-bold transition',
-                                            layoutPreset.actionCompact && 'col-span-2 justify-center',
-                                            'bg-black text-white hover:bg-black/85 disabled:cursor-not-allowed disabled:opacity-60'
+                                            layoutPreset.actionCompact && 'col-span-3 justify-center py-3 text-[15px]',
+                                            isDarkTheme
+                                                ? 'bg-[linear-gradient(135deg,#6366f1,#4f46e5_52%,#7c3aed)] text-white shadow-[0_16px_36px_rgba(79,70,229,0.32),inset_0_1px_0_rgba(255,255,255,0.18)] hover:translate-y-[-1px] hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60'
+                                                : 'bg-black text-white hover:bg-black/85 disabled:cursor-not-allowed disabled:opacity-60'
                                         )}
-                                        disabled={isDeletingNovel || isDeleteConfirmOpen}
+                                        disabled={!activeNovel || isDeletingNovel || isDeleteConfirmOpen}
                                     >
-                                        <BookOpen className="h-4 w-4" />
-                                        {activeNovel ? t('home.continue') : t('home.create')}
+                                        <BookOpen className={clsx(layoutPreset.actionCompact ? 'h-4.5 w-4.5' : 'h-4 w-4')} />
+                                        {t('home.continue')}
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={handleCreateNovel}
+                                        disabled={isDeletingNovel || isDeleteConfirmOpen}
+                                        className={clsx(
+                                            'inline-flex rounded-xl text-sm font-bold transition',
+                                            layoutPreset.actionCompact
+                                                ? 'h-[96px] flex-col items-center justify-center gap-2 px-3 text-center text-[15px]'
+                                                : 'items-center justify-center gap-2 px-4 py-3.5',
+                                            isDarkTheme
+                                                ? 'bg-white/[0.04] text-neutral-100 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)] hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-60'
+                                                : 'bg-[#f5f5f5] hover:bg-[#ececec] disabled:cursor-not-allowed disabled:opacity-60'
+                                        )}
+                                    >
+                                        <Plus className={clsx(layoutPreset.actionCompact ? 'h-4.5 w-4.5' : 'h-4 w-4')} />
+                                        <span className={clsx(layoutPreset.actionCompact ? 'whitespace-nowrap leading-none' : '')}>
+                                            {t(layoutPreset.actionCompact ? 'home.createShort' : 'home.create')}
+                                        </span>
                                     </button>
                                     <button
                                         type="button"
                                         onClick={openEditorForActiveNovel}
                                         disabled={!activeNovel || isDeletingNovel || isDeleteConfirmOpen}
                                         className={clsx(
-                                            'rounded-xl px-6 py-3.5 text-sm font-bold transition',
+                                            'inline-flex rounded-xl text-sm font-bold transition',
+                                            layoutPreset.actionCompact
+                                                ? 'h-[96px] flex-col items-center justify-center gap-2 px-3 text-center text-[15px]'
+                                                : 'items-center justify-center px-4 py-3.5',
                                             activeNovel && !isDeletingNovel && !isDeleteConfirmOpen
-                                                ? 'bg-[#f5f5f5] hover:bg-[#ececec]'
-                                                : 'cursor-not-allowed bg-neutral-200 text-neutral-400'
+                                                ? (isDarkTheme ? 'bg-white/[0.04] text-neutral-100 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)] hover:bg-white/[0.08]' : 'bg-[#f5f5f5] hover:bg-[#ececec]')
+                                                : (isDarkTheme ? 'cursor-not-allowed bg-white/[0.025] text-neutral-500' : 'cursor-not-allowed bg-neutral-200 text-neutral-400')
                                         )}
                                     >
-                                        {t('home.editNovel')}
+                                        <Settings className={clsx(layoutPreset.actionCompact ? 'h-4.5 w-4.5' : 'hidden')} />
+                                        <span className={clsx(layoutPreset.actionCompact ? 'whitespace-nowrap leading-none' : '')}>
+                                            {t(layoutPreset.actionCompact ? 'home.editNovelShort' : 'home.editNovel')}
+                                        </span>
                                     </button>
                                     <button
                                         type="button"
                                         onClick={openLibrarySearch}
                                         disabled={!novels.length || isDeletingNovel || isDeleteConfirmOpen}
                                         className={clsx(
-                                            'inline-flex items-center gap-2 rounded-xl px-6 py-3.5 text-sm font-bold transition',
+                                            'inline-flex rounded-xl text-sm font-bold transition',
+                                            layoutPreset.actionCompact
+                                                ? 'h-[96px] flex-col items-center justify-center gap-2 px-3 text-center text-[15px]'
+                                                : 'items-center justify-center gap-2 px-4 py-3.5',
                                             novels.length && !isDeletingNovel && !isDeleteConfirmOpen
-                                                ? 'bg-[#f5f5f5] hover:bg-[#ececec]'
-                                                : 'cursor-not-allowed bg-neutral-200 text-neutral-400'
+                                                ? (isDarkTheme ? 'bg-white/[0.04] text-neutral-100 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)] hover:bg-white/[0.08]' : 'bg-[#f5f5f5] hover:bg-[#ececec]')
+                                                : (isDarkTheme ? 'cursor-not-allowed bg-white/[0.025] text-neutral-500' : 'cursor-not-allowed bg-neutral-200 text-neutral-400')
                                         )}
                                     >
-                                        <Search className="h-4 w-4" />
-                                        {t('home.searchAllNovels')}
+                                        <Search className={clsx(layoutPreset.actionCompact ? 'h-4.5 w-4.5' : 'h-4 w-4')} />
+                                        <span className={clsx(layoutPreset.actionCompact ? 'whitespace-nowrap leading-none' : '')}>
+                                            {t('home.searchAllNovels')}
+                                        </span>
                                     </button>
                                 </div>
                             </div>
 
                             <div className="relative h-full min-w-0 grow" style={{ perspective: layoutPreset.stagePerspective }}>
+                                {isDarkTheme && (
+                                    <div
+                                        aria-hidden="true"
+                                        className="pointer-events-none absolute left-[58%] top-[52%] h-[380px] w-[380px] -translate-x-1/2 -translate-y-1/2 rounded-full blur-3xl"
+                                        style={{
+                                            background: 'radial-gradient(circle, rgba(99,102,241,0.14) 0%, rgba(99,102,241,0.06) 38%, transparent 72%)'
+                                        }}
+                                    />
+                                )}
                                 <div className="absolute inset-0 [transform-style:preserve-3d]">
                                     {orderedVisibleIndices.map((index) => {
                                         const novel = novels[index];
@@ -844,8 +936,10 @@ export default function Home() {
                                                 }}
                                                 className={clsx(
                                                     'absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-[20px]',
-                                                    'border border-black/10 text-left shadow-[0_20px_50px_rgba(0,0,0,0.15)]',
-                                                    isFront && 'ring-1 ring-black/20',
+                                                    isDarkTheme
+                                                        ? 'border border-white/[0.08] text-left shadow-[0_32px_70px_rgba(0,0,0,0.38)]'
+                                                        : 'border border-black/10 text-left shadow-[0_20px_50px_rgba(0,0,0,0.15)]',
+                                                    isFront && (isDarkTheme ? 'ring-1 ring-white/[0.08]' : 'ring-1 ring-black/20'),
                                                     droppingNovelId === novel.id && 'pointer-events-none'
                                                 )}
                                                 style={{
@@ -889,7 +983,12 @@ export default function Home() {
                                     <button
                                         type="button"
                                         onClick={goPrev}
-                                        className="flex h-[50px] w-[50px] items-center justify-center rounded-full bg-white shadow-[0_4px_12px_rgba(0,0,0,0.1)] transition hover:bg-black hover:text-white disabled:cursor-not-allowed disabled:opacity-45"
+                                        className={clsx(
+                                            'flex h-[46px] w-[46px] items-center justify-center rounded-full transition disabled:cursor-not-allowed disabled:opacity-45',
+                                            isDarkTheme
+                                                ? 'bg-black/28 text-neutral-300 shadow-[0_8px_24px_rgba(0,0,0,0.24)] backdrop-blur-xl hover:bg-black/40 hover:text-white'
+                                                : 'bg-white shadow-[0_4px_12px_rgba(0,0,0,0.1)] hover:bg-black hover:text-white'
+                                        )}
                                         disabled={isLibrarySearchOpen || isDeletingNovel || isDeleteConfirmOpen}
                                     >
                                         <ChevronLeft className="h-5 w-5" />
@@ -897,7 +996,12 @@ export default function Home() {
                                     <button
                                         type="button"
                                         onClick={goNext}
-                                        className="flex h-[50px] w-[50px] items-center justify-center rounded-full bg-white shadow-[0_4px_12px_rgba(0,0,0,0.1)] transition hover:bg-black hover:text-white disabled:cursor-not-allowed disabled:opacity-45"
+                                        className={clsx(
+                                            'flex h-[46px] w-[46px] items-center justify-center rounded-full transition disabled:cursor-not-allowed disabled:opacity-45',
+                                            isDarkTheme
+                                                ? 'bg-black/28 text-neutral-300 shadow-[0_8px_24px_rgba(0,0,0,0.24)] backdrop-blur-xl hover:bg-black/40 hover:text-white'
+                                                : 'bg-white shadow-[0_4px_12px_rgba(0,0,0,0.1)] hover:bg-black hover:text-white'
+                                        )}
                                         disabled={isLibrarySearchOpen || isDeletingNovel || isDeleteConfirmOpen}
                                     >
                                         <ChevronRight className="h-5 w-5" />
@@ -910,7 +1014,12 @@ export default function Home() {
                             <div className="fixed right-12 top-12 z-50">
                                 <button
                                     onClick={() => setIsGlobalSettingsOpen(true)}
-                                    className="rounded-full bg-white p-3 text-black shadow-[0_4px_12px_rgba(0,0,0,0.1)] transition hover:bg-black hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                                    className={clsx(
+                                        'rounded-full p-3 transition disabled:cursor-not-allowed disabled:opacity-50',
+                                        isDarkTheme
+                                            ? 'bg-black/28 text-neutral-300 shadow-[0_10px_28px_rgba(0,0,0,0.24)] backdrop-blur-xl hover:bg-black/40 hover:text-white'
+                                            : 'bg-white text-black shadow-[0_4px_12px_rgba(0,0,0,0.1)] hover:bg-black hover:text-white'
+                                    )}
                                     disabled={isDeletingNovel}
                                 >
                                     <Settings className="h-5 w-5" />
@@ -919,7 +1028,10 @@ export default function Home() {
                         )}
 
                         {loading && (
-                            <div className="fixed bottom-8 left-1/2 z-40 -translate-x-1/2 rounded-full bg-white/85 px-4 py-2 text-sm text-neutral-600 shadow">
+                            <div className={clsx(
+                                'fixed bottom-8 left-1/2 z-40 -translate-x-1/2 rounded-full px-4 py-2 text-sm shadow',
+                                isDarkTheme ? 'border border-white/10 bg-[#17171f]/90 text-neutral-300' : 'bg-white/85 text-neutral-600'
+                            )}>
                                 {t('common.loading')}
                             </div>
                         )}
@@ -935,27 +1047,33 @@ export default function Home() {
 
             <div
                 className={clsx(
-                    'fixed inset-0 z-[9500] overflow-y-auto bg-white/95 p-10 backdrop-blur-sm transition duration-300',
+                    'fixed inset-0 z-[9500] overflow-y-auto p-10 backdrop-blur-sm transition duration-300',
+                    isDarkTheme ? 'bg-[#09090dcc]/95' : 'bg-white/95',
                     isLibrarySearchOpen ? 'pointer-events-auto opacity-100 scale-100' : 'pointer-events-none opacity-0 scale-[1.02]'
                 )}
             >
                 <div className="mx-auto w-full max-w-[1360px]">
                     <div className="mb-8 flex items-start justify-between gap-6">
                         <div>
-                            <h3 className="text-3xl font-black tracking-tight">
+                            <h3 className={clsx('text-3xl font-black tracking-tight', isDarkTheme ? 'text-white' : 'text-black')}>
                                 {t('home.searchAllTitle')}
                             </h3>
-                            <p className="mt-2 text-sm text-neutral-500">
+                            <p className={clsx('mt-2 text-sm', isDarkTheme ? 'text-neutral-400' : 'text-neutral-500')}>
                                 {t('home.searchAllHint')}
                             </p>
-                            <p className="mt-1 text-xs text-neutral-400">
+                            <p className={clsx('mt-1 text-xs', isDarkTheme ? 'text-neutral-500' : 'text-neutral-400')}>
                                 {t('home.searchAllEscHint')}
                             </p>
                         </div>
                         <button
                             type="button"
                             onClick={closeLibrarySearch}
-                            className="flex h-11 w-11 items-center justify-center rounded-full bg-white shadow-[0_5px_15px_rgba(0,0,0,0.08)] transition hover:bg-black hover:text-white"
+                            className={clsx(
+                                'flex h-11 w-11 items-center justify-center rounded-full transition',
+                                isDarkTheme
+                                    ? 'border border-white/10 bg-[#17171f] text-neutral-200 shadow-[0_5px_15px_rgba(0,0,0,0.35)] hover:bg-white hover:text-black'
+                                    : 'bg-white shadow-[0_5px_15px_rgba(0,0,0,0.08)] hover:bg-black hover:text-white'
+                            )}
                         >
                             <X className="h-5 w-5" />
                         </button>
@@ -969,10 +1087,15 @@ export default function Home() {
                                 value={librarySearchQuery}
                                 onChange={(event) => setLibrarySearchQuery(event.target.value)}
                                 placeholder={t('home.searchAllPlaceholder')}
-                                className="h-12 w-full rounded-xl border border-neutral-200 bg-white pl-11 pr-4 text-sm font-medium text-neutral-900 outline-none transition focus:border-black"
+                                className={clsx(
+                                    'h-12 w-full rounded-xl border pl-11 pr-4 text-sm font-medium outline-none transition',
+                                    isDarkTheme
+                                        ? 'border-white/10 bg-[#13131a] text-neutral-100 placeholder:text-neutral-500 focus:border-white/30'
+                                        : 'border-neutral-200 bg-white text-neutral-900 focus:border-black'
+                                )}
                             />
                         </div>
-                        <div className="text-sm font-semibold text-neutral-500">
+                        <div className={clsx('text-sm font-semibold', isDarkTheme ? 'text-neutral-400' : 'text-neutral-500')}>
                             {t('home.searchAllResultCount', { count: filteredNovels.length })}
                         </div>
                     </div>
@@ -987,7 +1110,12 @@ export default function Home() {
                                         key={novel.id}
                                         type="button"
                                         onClick={() => selectNovelFromSearch(index)}
-                                        className="group aspect-[3/4] overflow-hidden rounded-2xl border border-black/5 bg-white text-left shadow-[0_10px_30px_rgba(0,0,0,0.05)] transition hover:-translate-y-2"
+                                        className={clsx(
+                                            'group aspect-[3/4] overflow-hidden rounded-2xl text-left transition hover:-translate-y-2',
+                                            isDarkTheme
+                                                ? 'border border-white/8 bg-[#13131a] shadow-[0_10px_30px_rgba(0,0,0,0.35)]'
+                                                : 'border border-black/5 bg-white shadow-[0_10px_30px_rgba(0,0,0,0.05)]'
+                                        )}
                                     >
                                         <div className="relative h-full w-full">
                                             <div
@@ -1021,7 +1149,10 @@ export default function Home() {
                             })}
                         </div>
                     ) : (
-                        <div className="rounded-2xl border border-dashed border-neutral-300 bg-white/80 px-6 py-12 text-center text-neutral-500">
+                        <div className={clsx(
+                            'rounded-2xl border border-dashed px-6 py-12 text-center',
+                            isDarkTheme ? 'border-white/10 bg-[#13131a]/80 text-neutral-500' : 'border-neutral-300 bg-white/80 text-neutral-500'
+                        )}>
                             {t('home.searchAllEmpty')}
                         </div>
                     )}
@@ -1030,31 +1161,37 @@ export default function Home() {
 
             <aside
                 className={clsx(
-                    'fixed right-0 top-0 z-[9999] flex h-full w-[500px] flex-col bg-white p-[60px]',
-                    'shadow-[-30px_0_90px_rgba(0,0,0,0.1)] transition-transform duration-700',
+                    'fixed right-0 top-0 z-[9999] flex h-full w-[500px] flex-col p-[60px] transition-transform duration-700',
+                    isDarkTheme ? 'bg-[#13131a] text-white shadow-[-30px_0_90px_rgba(0,0,0,0.35)]' : 'bg-white shadow-[-30px_0_90px_rgba(0,0,0,0.1)]',
                     '[transition-timing-function:cubic-bezier(0.16,1,0.3,1)]',
                     isEditorOpen ? 'translate-x-0' : 'translate-x-full'
                 )}
             >
                 <div className="mb-8 flex items-center justify-between">
-                    <h3 className="text-2xl font-black">{t('home.editNovel')}</h3>
+                    <h3 className={clsx('text-2xl font-black', isDarkTheme ? 'text-white' : 'text-black')}>{t('home.editNovel')}</h3>
                     <button
                         type="button"
                         onClick={closeEditor}
-                        className="flex h-9 w-9 items-center justify-center rounded-full bg-[#f4f4f4] transition hover:bg-black hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                        className={clsx(
+                            'flex h-9 w-9 items-center justify-center rounded-full transition disabled:cursor-not-allowed disabled:opacity-50',
+                            isDarkTheme ? 'bg-white/5 text-neutral-300 hover:bg-white hover:text-black' : 'bg-[#f4f4f4] hover:bg-black hover:text-white'
+                        )}
                         disabled={isDeletingNovel}
                     >
                         <X className="h-4 w-4" />
                     </button>
                 </div>
 
-                <label className="mb-2 block text-[10px] font-bold uppercase text-neutral-400">
+                <label className={clsx('mb-2 block text-[10px] font-bold uppercase', isDarkTheme ? 'text-neutral-500' : 'text-neutral-400')}>
                     {t('home.coverUrl')}
                 </label>
                 <button
                     type="button"
                     onClick={uploadCoverForActiveNovel}
-                    className="relative mb-7 flex h-[140px] w-full flex-col items-center justify-center overflow-hidden rounded-xl border-2 border-dashed border-neutral-200 transition hover:border-neutral-300 disabled:cursor-not-allowed disabled:opacity-60"
+                    className={clsx(
+                        'relative mb-7 flex h-[140px] w-full flex-col items-center justify-center overflow-hidden rounded-xl border-2 border-dashed transition disabled:cursor-not-allowed disabled:opacity-60',
+                        isDarkTheme ? 'border-white/10 hover:border-white/20' : 'border-neutral-200 hover:border-neutral-300'
+                    )}
                     disabled={isDeletingNovel}
                 >
                     {editForm.coverUrl ? (
@@ -1065,40 +1202,49 @@ export default function Home() {
                         />
                     ) : (
                         <>
-                            <Upload className="mb-2 h-5 w-5 text-neutral-400" />
-                            <span className="text-xs text-neutral-400">{t('home.uploadCover', { defaultValue: 'Upload cover image' })}</span>
+                              <Upload className={clsx('mb-2 h-5 w-5', isDarkTheme ? 'text-neutral-500' : 'text-neutral-400')} />
+                              <span className={clsx('text-xs', isDarkTheme ? 'text-neutral-500' : 'text-neutral-400')}>{t('home.uploadCover', { defaultValue: 'Upload cover image' })}</span>
                         </>
                     )}
                 </button>
 
                 <div className="mb-6">
-                    <label className="mb-2 block text-[10px] font-bold uppercase text-neutral-400">{t('home.title')}</label>
+                    <label className={clsx('mb-2 block text-[10px] font-bold uppercase', isDarkTheme ? 'text-neutral-500' : 'text-neutral-400')}>{t('home.title')}</label>
                     <input
                         value={editForm.title}
                         onChange={(event) => setEditForm((prev) => ({ ...prev, title: event.target.value }))}
-                        className="w-full border-0 border-b border-neutral-200 py-2 text-base font-semibold outline-none transition focus:border-neutral-900"
+                        className={clsx(
+                            'w-full border-0 border-b py-2 text-base font-semibold outline-none transition',
+                            isDarkTheme ? 'border-white/10 bg-transparent text-white focus:border-white/30' : 'border-neutral-200 focus:border-neutral-900'
+                        )}
                         disabled={isDeletingNovel}
                     />
                 </div>
 
                 <div className="mb-6">
-                    <label className="mb-2 block text-[10px] font-bold uppercase text-neutral-400">{t('home.author')}</label>
+                    <label className={clsx('mb-2 block text-[10px] font-bold uppercase', isDarkTheme ? 'text-neutral-500' : 'text-neutral-400')}>{t('home.author')}</label>
                     <input
                         value={editForm.author}
                         onChange={(event) => setEditForm((prev) => ({ ...prev, author: event.target.value }))}
-                        className="w-full border-0 border-b border-neutral-200 py-2 text-base font-semibold outline-none transition focus:border-neutral-900"
+                        className={clsx(
+                            'w-full border-0 border-b py-2 text-base font-semibold outline-none transition',
+                            isDarkTheme ? 'border-white/10 bg-transparent text-white focus:border-white/30' : 'border-neutral-200 focus:border-neutral-900'
+                        )}
                         disabled={isDeletingNovel}
                     />
                 </div>
 
                 <div className="mb-6">
-                    <label className="mb-2 block text-[10px] font-bold uppercase text-neutral-400">
+                    <label className={clsx('mb-2 block text-[10px] font-bold uppercase', isDarkTheme ? 'text-neutral-500' : 'text-neutral-400')}>
                         {t('home.deckSummaryLabel', { defaultValue: 'Summary' })}
                     </label>
                     <textarea
                         value={editForm.description}
                         onChange={(event) => setEditForm((prev) => ({ ...prev, description: event.target.value }))}
-                        className="h-24 w-full resize-none border-0 border-b border-neutral-200 py-2 text-base font-semibold outline-none transition focus:border-neutral-900"
+                        className={clsx(
+                            'h-24 w-full resize-none border-0 border-b py-2 text-base font-semibold outline-none transition',
+                            isDarkTheme ? 'border-white/10 bg-transparent text-white focus:border-white/30' : 'border-neutral-200 focus:border-neutral-900'
+                        )}
                         disabled={isDeletingNovel}
                     />
                 </div>
@@ -1107,7 +1253,10 @@ export default function Home() {
                     <button
                         type="button"
                         onClick={saveEdit}
-                        className="rounded-xl bg-black px-5 py-3 text-sm font-bold text-white transition hover:bg-black/85 disabled:cursor-not-allowed disabled:opacity-60"
+                        className={clsx(
+                            'rounded-xl px-5 py-3 text-sm font-bold transition disabled:cursor-not-allowed disabled:opacity-60',
+                            isDarkTheme ? 'bg-white text-black hover:bg-white/85' : 'bg-black text-white hover:bg-black/85'
+                        )}
                         disabled={isDeletingNovel}
                     >
                         {t('common.save')}
@@ -1115,18 +1264,21 @@ export default function Home() {
                     <button
                         type="button"
                         onClick={closeEditor}
-                        className="rounded-xl bg-[#f4f4f4] px-5 py-3 text-sm font-bold transition hover:bg-[#ececec] disabled:cursor-not-allowed disabled:opacity-60"
+                        className={clsx(
+                            'rounded-xl px-5 py-3 text-sm font-bold transition disabled:cursor-not-allowed disabled:opacity-60',
+                            isDarkTheme ? 'bg-white/5 text-neutral-200 hover:bg-white/10' : 'bg-[#f4f4f4] hover:bg-[#ececec]'
+                        )}
                         disabled={isDeletingNovel}
                     >
                         {t('common.cancel')}
                     </button>
                 </div>
 
-                <div className="mt-4 text-[11px] text-neutral-400">
+                <div className={clsx('mt-4 text-[11px]', isDarkTheme ? 'text-neutral-500' : 'text-neutral-400')}>
                     {t('home.enterToSaveHint', { defaultValue: 'Press Enter to save. In summary field, use Ctrl/Cmd + Enter.' })}
                 </div>
 
-                <div className="mt-5 border-t border-neutral-100 pt-5">
+                <div className={clsx('mt-5 border-t pt-5', isDarkTheme ? 'border-white/5' : 'border-neutral-100')}>
                     <button
                         type="button"
                         onClick={openDeleteConfirm}
@@ -1141,7 +1293,8 @@ export default function Home() {
 
             <div
                 className={clsx(
-                    'fixed inset-0 z-[10000] flex items-center justify-center bg-white/85 backdrop-blur-xl transition',
+                    'fixed inset-0 z-[10000] flex items-center justify-center backdrop-blur-xl transition',
+                    isDarkTheme ? 'bg-black/60' : 'bg-white/85',
                     isDeleteConfirmOpen ? 'pointer-events-auto opacity-100' : 'pointer-events-none opacity-0'
                 )}
                 onClick={closeDeleteConfirm}
@@ -1150,10 +1303,10 @@ export default function Home() {
                     className="w-full max-w-[360px] px-6 text-center"
                     onClick={(event) => event.stopPropagation()}
                 >
-                    <h3 className="mb-3 text-2xl font-black">
+                    <h3 className={clsx('mb-3 text-2xl font-black', isDarkTheme ? 'text-white' : 'text-black')}>
                         {t('home.deleteNovelConfirmTitle', { defaultValue: 'Permanently delete this novel?' })}
                     </h3>
-                    <p className="mb-7 text-sm leading-6 text-neutral-500">
+                    <p className={clsx('mb-7 text-sm leading-6', isDarkTheme ? 'text-neutral-400' : 'text-neutral-500')}>
                         {t('home.deleteNovelConfirmDescription', {
                             defaultValue: 'This action cannot be undone. All chapters and related materials under "{{title}}" will be removed.',
                             title: pendingDeleteNovel?.title || activeNovel?.title || '-'
@@ -1163,7 +1316,10 @@ export default function Home() {
                         <button
                             type="button"
                             onClick={closeDeleteConfirm}
-                            className="rounded-xl bg-[#f4f4f4] px-5 py-2.5 text-sm font-bold transition hover:bg-[#ececec]"
+                            className={clsx(
+                                'rounded-xl px-5 py-2.5 text-sm font-bold transition',
+                                isDarkTheme ? 'bg-white/5 text-neutral-200 hover:bg-white/10' : 'bg-[#f4f4f4] hover:bg-[#ececec]'
+                            )}
                         >
                             {t('common.cancel')}
                         </button>
