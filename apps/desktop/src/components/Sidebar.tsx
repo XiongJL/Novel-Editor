@@ -1,10 +1,11 @@
 import { useState, useEffect, memo, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Book, ChevronRight, ChevronDown, Plus, FileText } from 'lucide-react';
+import { Book, ChevronRight, ChevronDown, Plus, FileText, Trash2 } from 'lucide-react';
 import clsx from 'clsx';
 import { formatNumber } from '../utils/format';
 import { useTranslation } from 'react-i18next';
 import { Volume, ChapterMetadata } from '../types';
+import { ConfirmModal } from './ui/ConfirmModal';
 
 interface SidebarProps {
     volumes: Volume[];
@@ -15,6 +16,7 @@ interface SidebarProps {
     onCreateVolume: () => void;
     onRenameVolume: (id: string, newTitle: string) => void;
     onRenameChapter: (id: string, newTitle: string) => void;
+    onDeleteChapter: (id: string) => void;
     theme: 'dark' | 'light';
     lastCreatedVolumeId?: string | null;
 }
@@ -26,7 +28,8 @@ const ChapterItem = memo(({
     isDark,
     chapFormat,
     onSelect,
-    onRename
+    onRename,
+    onDelete
 }: {
     chapter: ChapterMetadata;
     currentChapterId: string | null;
@@ -34,6 +37,7 @@ const ChapterItem = memo(({
     chapFormat: string;
     onSelect: (id: string) => void;
     onRename: (id: string, newTitle: string) => void;
+    onDelete: (chapter: ChapterMetadata) => void;
 }) => {
     const { t } = useTranslation();
     const [isEditing, setIsEditing] = useState(false);
@@ -66,7 +70,7 @@ const ChapterItem = memo(({
                 if (e.key === 'Enter') onSelect(chapter.id);
             }}
             className={clsx(
-                "flex items-center gap-2 p-2 mt-1 rounded text-sm cursor-pointer transition-colors min-h-[32px] outline-none focus:ring-1 focus:ring-purple-500",
+                "group flex items-center gap-2 p-2 mt-1 rounded text-sm cursor-pointer transition-colors min-h-[32px] outline-none focus:ring-1 focus:ring-purple-500",
                 currentChapterId === chapter.id
                     ? (isDark ? "bg-purple-500/10 text-purple-300" : "bg-purple-500/10 text-purple-700")
                     : (isDark ? "text-neutral-500 hover:text-neutral-300 hover:bg-white/5" : "text-neutral-500 hover:text-neutral-800 hover:bg-black/5")
@@ -92,6 +96,22 @@ const ChapterItem = memo(({
                     {chapter.title ? <span className={clsx("ml-2", isDark ? "text-neutral-400" : "text-neutral-500")}>{chapter.title}</span> : ''}
                 </span>
             )}
+            {!isEditing && (
+                <button
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        onDelete(chapter);
+                    }}
+                    className={clsx(
+                        "opacity-0 group-hover:opacity-100 p-1 rounded transition-opacity",
+                        isDark ? "hover:bg-[#20202a] text-neutral-500 hover:text-red-300" : "hover:bg-gray-200 text-neutral-400 hover:text-red-500"
+                    )}
+                    title={t('sidebar.deleteChapter')}
+                    aria-label={t('sidebar.deleteChapter')}
+                >
+                    <Trash2 className="w-3 h-3" />
+                </button>
+            )}
         </div>
     );
 });
@@ -108,7 +128,8 @@ const VolumeItem = memo(({
     onCreateChapter,
     onRenameVolume,
     onSelectChapter,
-    onRenameChapter
+    onRenameChapter,
+    onDeleteChapter
 }: {
     volume: Volume;
     isExpanded: boolean;
@@ -121,6 +142,7 @@ const VolumeItem = memo(({
     onRenameVolume: (id: string, title: string) => void;
     onSelectChapter: (id: string) => void;
     onRenameChapter: (id: string, title: string) => void;
+    onDeleteChapter: (chapter: ChapterMetadata) => void;
 }) => {
     const { t } = useTranslation();
     const [isEditing, setIsEditing] = useState(false);
@@ -224,6 +246,7 @@ const VolumeItem = memo(({
                                 chapFormat={chapFormat}
                                 onSelect={onSelectChapter}
                                 onRename={onRenameChapter}
+                                onDelete={onDeleteChapter}
                             />
                         ))}
                         {volume.chapters.length === 0 && (
@@ -248,11 +271,13 @@ const Sidebar = memo(({
     onCreateVolume,
     onRenameVolume,
     onRenameChapter,
+    onDeleteChapter,
     theme,
     lastCreatedVolumeId
 }: SidebarProps) => {
     const { t } = useTranslation();
     const [expandedVolumes, setExpandedVolumes] = useState<Record<string, boolean>>({});
+    const [pendingDeleteChapter, setPendingDeleteChapter] = useState<ChapterMetadata | null>(null);
 
     const isDark = theme === 'dark';
 
@@ -290,44 +315,70 @@ const Sidebar = memo(({
         }));
     }, []);
 
-    return (
-        <div className={clsx(
-            "w-64 border-r flex flex-col h-full transition-colors duration-300",
-            isDark ? "bg-[#0F0F13] border-white/5" : "bg-gray-50 border-gray-200"
-        )}>
-            <div className={clsx("p-4 border-b flex items-center justify-between", isDark ? "border-white/5" : "border-gray-200")}>
-                <h2 className={clsx("text-sm font-medium uppercase tracking-wider flex items-center gap-2", isDark ? "text-neutral-400" : "text-neutral-500")}>
-                    <Book className="w-4 h-4" />
-                    {t('sidebar.explorer')}
-                </h2>
-                <button
-                    onClick={onCreateVolume}
-                    className={clsx("p-1 rounded transition-colors", isDark ? "hover:bg-white/10 text-neutral-400 hover:text-white" : "hover:bg-black/5 text-neutral-500 hover:text-black")}
-                    title={t('sidebar.newVolume')}
-                >
-                    <Plus className="w-4 h-4" />
-                </button>
-            </div>
+    const totalChapterCount = volumes.reduce((count, volume) => count + volume.chapters.length, 0);
+    const pendingChapterLabel = pendingDeleteChapter
+        ? `${formatNumber(chapFormat, pendingDeleteChapter.order)}${pendingDeleteChapter.title ? ` ${pendingDeleteChapter.title}` : ''}`
+        : '';
+    const isDeletingLastChapter = totalChapterCount === 1;
 
-            <div className="flex-1 overflow-y-auto p-2 scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent">
-                {volumes.map(volume => (
-                    <VolumeItem
-                        key={volume.id}
-                        volume={volume}
-                        isExpanded={!!expandedVolumes[volume.id]}
-                        currentChapterId={currentChapterId}
-                        isDark={isDark}
-                        volFormat={volFormat}
-                        chapFormat={chapFormat}
-                        onToggle={toggleVolume}
-                        onCreateChapter={onCreateChapter}
-                        onRenameVolume={onRenameVolume}
-                        onRenameChapter={onRenameChapter}
-                        onSelectChapter={onSelectChapter}
-                    />
-                ))}
+    return (
+        <>
+            <div className={clsx(
+                "w-64 border-r flex flex-col h-full transition-colors duration-300",
+                isDark ? "bg-[#0F0F13] border-white/5" : "bg-gray-50 border-gray-200"
+            )}>
+                <div className={clsx("p-4 border-b flex items-center justify-between", isDark ? "border-white/5" : "border-gray-200")}>
+                    <h2 className={clsx("text-sm font-medium uppercase tracking-wider flex items-center gap-2", isDark ? "text-neutral-400" : "text-neutral-500")}>
+                        <Book className="w-4 h-4" />
+                        {t('sidebar.explorer')}
+                    </h2>
+                    <button
+                        onClick={onCreateVolume}
+                        className={clsx("p-1 rounded transition-colors", isDark ? "hover:bg-white/10 text-neutral-400 hover:text-white" : "hover:bg-black/5 text-neutral-500 hover:text-black")}
+                        title={t('sidebar.newVolume')}
+                    >
+                        <Plus className="w-4 h-4" />
+                    </button>
+                </div>
+
+                <div className="flex-1 overflow-y-auto p-2 scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent">
+                    {volumes.map(volume => (
+                        <VolumeItem
+                            key={volume.id}
+                            volume={volume}
+                            isExpanded={!!expandedVolumes[volume.id]}
+                            currentChapterId={currentChapterId}
+                            isDark={isDark}
+                            volFormat={volFormat}
+                            chapFormat={chapFormat}
+                            onToggle={toggleVolume}
+                            onCreateChapter={onCreateChapter}
+                            onRenameVolume={onRenameVolume}
+                            onRenameChapter={onRenameChapter}
+                            onDeleteChapter={setPendingDeleteChapter}
+                            onSelectChapter={onSelectChapter}
+                        />
+                    ))}
+                </div>
             </div>
-        </div >
+            <ConfirmModal
+                isOpen={!!pendingDeleteChapter}
+                onClose={() => setPendingDeleteChapter(null)}
+                onConfirm={() => {
+                    if (pendingDeleteChapter) {
+                        onDeleteChapter(pendingDeleteChapter.id);
+                    }
+                }}
+                title={t('sidebar.deleteChapter')}
+                message={
+                    isDeletingLastChapter
+                        ? t('sidebar.deleteLastChapterConfirm')
+                        : t('sidebar.deleteChapterConfirm', { title: pendingChapterLabel || t('search.untitled') })
+                }
+                confirmText={t('sidebar.deleteChapterAction')}
+                theme={theme}
+            />
+        </>
     );
 });
 

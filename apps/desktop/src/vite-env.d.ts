@@ -6,6 +6,12 @@ interface DBAPI {
     getVolumes: (novelId: string) => Promise<Volume[]>
     createVolume: (data: { novelId: string; title: string }) => Promise<Volume>
     createChapter: (data: { volumeId: string; title: string; order: number }) => Promise<Chapter>
+    deleteChapter: (data: { chapterId: string }) => Promise<{
+        mode: 'deleted' | 'reset'
+        chapterId: string
+        fallbackChapterId: string | null
+        chapter?: Chapter | null
+    }>
     getChapter: (chapterId: string) => Promise<Chapter | null>
     saveChapter: (data: { chapterId: string; content: string }) => Promise<Chapter>
     renameVolume: (data: { volumeId: string; title: string }) => Promise<Volume>

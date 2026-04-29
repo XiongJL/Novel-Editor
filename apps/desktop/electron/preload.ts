@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld('db', {
     getVolumes: (novelId: string) => ipcRenderer.invoke('db:get-volumes', novelId),
     createVolume: (data: { novelId: string; title: string }) => ipcRenderer.invoke('db:create-volume', data),
     createChapter: (data: { volumeId: string; title: string; order: number }) => ipcRenderer.invoke('db:create-chapter', data),
+    deleteChapter: (data: { chapterId: string }) => ipcRenderer.invoke('db:delete-chapter', data),
     getChapter: (chapterId: string) => ipcRenderer.invoke('db:get-chapter', chapterId),
     saveChapter: (data: { chapterId: string; content: string }) => ipcRenderer.invoke('db:save-chapter', data),
     renameVolume: (data: { volumeId: string; title: string }) => ipcRenderer.invoke('db:rename-volume', data),

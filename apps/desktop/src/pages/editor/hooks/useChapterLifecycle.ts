@@ -114,6 +114,38 @@ export function useChapterLifecycle({
         });
     }, [novelId]);
 
+    const syncChapterIntoEditor = useCallback((chapter: Chapter) => {
+        chapterCacheRef.current.set(chapter.id, chapter);
+        activeChapterIdRef.current = chapter.id;
+        isSwitchingChapterRef.current = false;
+        chapterRef.current = chapter;
+        titleRef.current = chapter.title;
+        contentRef.current = chapter.content;
+        setCurrentChapter(chapter);
+        setTitle(chapter.title);
+        setContent(chapter.content);
+        setIsLoading(false);
+        onActiveChapterMetadataChange?.({ id: chapter.id, title: chapter.title });
+        onClearTitleCandidates?.();
+        localStorage.setItem(`last_chapter_${novelId}`, chapter.id);
+        addToRecentFiles(chapter);
+    }, [addToRecentFiles, novelId, onActiveChapterMetadataChange, onClearTitleCandidates]);
+
+    const clearEditorChapterState = useCallback(() => {
+        activeChapterIdRef.current = null;
+        isSwitchingChapterRef.current = false;
+        chapterRef.current = null;
+        titleRef.current = '';
+        contentRef.current = '';
+        setCurrentChapter(null);
+        setTitle('');
+        setContent('');
+        setIsLoading(false);
+        onActiveChapterMetadataChange?.(null);
+        onClearTitleCandidates?.();
+        localStorage.removeItem(`last_chapter_${novelId}`);
+    }, [novelId, onActiveChapterMetadataChange, onClearTitleCandidates]);
+
     const loadVolumes = useCallback(async () => {
         try {
             const data = await window.db.getVolumes(novelId);
@@ -249,14 +281,14 @@ export function useChapterLifecycle({
 
     const handleSelectChapter = useCallback(async (chapterId: string) => {
         if (isSwitchingChapterRef.current && activeChapterIdRef.current === chapterId) return;
-        if (currentChapter?.id === chapterId) return;
+        if (chapterRef.current?.id === chapterId) return;
 
         isSwitchingChapterRef.current = true;
         onActiveChapterMetadataChange?.({ id: chapterId, title: 'Loading...' });
         activeChapterIdRef.current = chapterId;
         onBeforeSelectChapter?.();
 
-        const oldChapter = currentChapter;
+        const oldChapter = chapterRef.current;
         const oldContent = contentRef.current;
         const oldTitle = titleRef.current;
 
@@ -334,6 +366,46 @@ export function useChapterLifecycle({
         onBeforeSelectChapter,
         onClearTitleCandidates,
     ]);
+
+    const handleDeleteChapter = useCallback(async (chapterId: string) => {
+        const isDeletingCurrent = chapterRef.current?.id === chapterId;
+
+        try {
+            const result = await window.db.deleteChapter({ chapterId });
+            chapterCacheRef.current.delete(chapterId);
+            handleDeleteRecent(chapterId);
+
+            const refreshedVolumes = await window.db.getVolumes(novelId);
+            setVolumes(refreshedVolumes);
+
+            if (result.mode === 'reset') {
+                const resetChapter = result.chapter ?? await window.db.getChapter(chapterId);
+                if (resetChapter) {
+                    syncChapterIntoEditor(resetChapter);
+                } else {
+                    clearEditorChapterState();
+                }
+                return;
+            }
+
+            if (!isDeletingCurrent) {
+                return;
+            }
+
+            clearEditorChapterState();
+
+            if (!result.fallbackChapterId) {
+                return;
+            }
+
+            const fallbackChapter = await window.db.getChapter(result.fallbackChapterId);
+            if (fallbackChapter) {
+                syncChapterIntoEditor(fallbackChapter);
+            }
+        } catch (error) {
+            console.error('Failed to delete chapter:', error);
+        }
+    }, [clearEditorChapterState, handleDeleteRecent, novelId, syncChapterIntoEditor]);
 
     const handleCreateChapter = useCallback(async (volumeId: string) => {
         const volume = volumes.find((item) => item.id === volumeId);
@@ -415,6 +487,7 @@ export function useChapterLifecycle({
         loadVolumes,
         saveChanges,
         handleSelectChapter,
+        handleDeleteChapter,
         handleCreateChapter,
         handleCreateVolume,
         handleRenameVolume,

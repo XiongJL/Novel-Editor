@@ -7,6 +7,7 @@ electron.contextBridge.exposeInMainWorld("db", {
   getVolumes: (novelId) => electron.ipcRenderer.invoke("db:get-volumes", novelId),
   createVolume: (data) => electron.ipcRenderer.invoke("db:create-volume", data),
   createChapter: (data) => electron.ipcRenderer.invoke("db:create-chapter", data),
+  deleteChapter: (data) => electron.ipcRenderer.invoke("db:delete-chapter", data),
   getChapter: (chapterId) => electron.ipcRenderer.invoke("db:get-chapter", chapterId),
   saveChapter: (data) => electron.ipcRenderer.invoke("db:save-chapter", data),
   renameVolume: (data) => electron.ipcRenderer.invoke("db:rename-volume", data),

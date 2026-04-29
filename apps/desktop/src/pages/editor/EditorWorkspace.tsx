@@ -122,6 +122,7 @@ export default function Editor({ novelId, onBack }: EditorProps) {
         handleCreateVolume,
         handleRenameVolume,
         handleRenameChapter,
+        handleDeleteChapter,
     } = useChapterLifecycle({
         novelId,
         t,
@@ -589,6 +590,7 @@ export default function Editor({ novelId, onBack }: EditorProps) {
                                 onCreateVolume={handleCreateVolume}
                                 onRenameVolume={handleRenameVolume}
                                 onRenameChapter={handleRenameChapter}
+                                onDeleteChapter={handleDeleteChapter}
                                 theme={preferences.theme}
                                 lastCreatedVolumeId={lastCreatedVolumeId}
                             />

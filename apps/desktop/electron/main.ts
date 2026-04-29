@@ -853,6 +853,154 @@ ipcMain.handle('db:rename-chapter', async (_, { chapterId, title }: { chapterId:
     }
 })
 
+ipcMain.handle('db:delete-chapter', async (_, { chapterId }: { chapterId: string }) => {
+    try {
+        const chapter = await db.chapter.findUnique({
+            where: { id: chapterId },
+            select: {
+                id: true,
+                title: true,
+                content: true,
+                wordCount: true,
+                order: true,
+                volumeId: true,
+                volume: {
+                    select: {
+                        novelId: true,
+                        title: true,
+                        order: true,
+                    }
+                }
+            }
+        });
+
+        if (!chapter?.volume) {
+            throw new Error('Chapter not found');
+        }
+
+        const novelId = chapter.volume.novelId;
+        const chaptersInNovel = await db.chapter.findMany({
+            where: { volume: { novelId } },
+            select: {
+                id: true,
+                title: true,
+                content: true,
+                order: true,
+                volumeId: true,
+                volume: {
+                    select: {
+                        title: true,
+                        order: true,
+                    }
+                }
+            },
+            orderBy: [
+                { volume: { order: 'asc' } },
+                { order: 'asc' },
+            ],
+        });
+
+        const targetIndex = chaptersInNovel.findIndex((item) => item.id === chapterId);
+        if (targetIndex === -1) {
+            throw new Error('Chapter not found');
+        }
+
+        if (chaptersInNovel.length === 1) {
+            const [, resetChapter] = await db.$transaction([
+                db.novel.update({
+                    where: { id: novelId },
+                    data: {
+                        wordCount: 0,
+                        updatedAt: new Date(),
+                    }
+                }),
+                db.chapter.update({
+                    where: { id: chapterId },
+                    data: {
+                        title: '',
+                        content: '',
+                        wordCount: 0,
+                        updatedAt: new Date(),
+                    },
+                    include: {
+                        volume: {
+                            select: {
+                                novelId: true,
+                            }
+                        }
+                    }
+                }),
+            ]);
+
+            await searchIndex.indexChapter({
+                ...resetChapter,
+                novelId,
+                volumeTitle: chapter.volume.title,
+                volumeOrder: chapter.volume.order,
+            });
+
+            return {
+                mode: 'reset' as const,
+                chapterId,
+                fallbackChapterId: chapterId,
+                chapter: resetChapter,
+            };
+        }
+
+        const fallbackChapterId = chaptersInNovel[targetIndex + 1]?.id ?? chaptersInNovel[targetIndex - 1]?.id ?? null;
+        const siblingChapters = chaptersInNovel.filter((item) => item.volumeId === chapter.volumeId && item.id !== chapterId);
+        const reorderedSiblings = siblingChapters.map((item, index) => ({
+            ...item,
+            nextOrder: index + 1,
+        }));
+        const siblingsNeedingReorder = reorderedSiblings.filter((item) => item.order !== item.nextOrder);
+
+        await db.$transaction([
+            db.novel.update({
+                where: { id: novelId },
+                data: {
+                    wordCount: { decrement: chapter.wordCount },
+                    updatedAt: new Date(),
+                }
+            }),
+            db.chapter.delete({
+                where: { id: chapterId },
+            }),
+            ...siblingsNeedingReorder.map((item) => db.chapter.update({
+                where: { id: item.id },
+                data: {
+                    order: item.nextOrder,
+                    updatedAt: new Date(),
+                }
+            })),
+        ]);
+
+        await searchIndex.removeFromIndex('chapter', chapterId);
+
+        for (const item of siblingsNeedingReorder) {
+            await searchIndex.indexChapter({
+                id: item.id,
+                title: item.title,
+                content: item.content,
+                volumeId: item.volumeId,
+                novelId,
+                volumeTitle: item.volume?.title,
+                order: item.nextOrder,
+                volumeOrder: item.volume?.order,
+            });
+        }
+
+        return {
+            mode: 'deleted' as const,
+            chapterId,
+            fallbackChapterId,
+        };
+    } catch (e) {
+        console.error('[Main] db:delete-chapter failed:', e);
+        throw e;
+    }
+})
+
 
 ipcMain.handle('db:create-novel', async (_, title: string) => {
     console.log('[Main] Received db:create-novel:', title);

@@ -257,6 +257,10 @@
     "idea": "Ideas",
     "newVolume": "New Volume",
     "addChapter": "Add Chapter",
+    "deleteChapter": "Delete Chapter",
+    "deleteChapterAction": "Delete",
+    "deleteChapterConfirm": "Delete \"{{title}}\"? This action cannot be undone.",
+    "deleteLastChapterConfirm": "This is the last chapter in the novel. We will keep one empty chapter as the default starting chapter after deletion.",
     "noChapters": "No chapters",
     "renameTip": "Double click to rename",
     "search": "Search"

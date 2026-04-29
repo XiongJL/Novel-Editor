@@ -8609,6 +8609,143 @@ ipcMain.handle("db:rename-chapter", async (_, { chapterId, title }) => {
     throw e;
   }
 });
+ipcMain.handle("db:delete-chapter", async (_, { chapterId }) => {
+  var _a, _b, _c, _d;
+  try {
+    const chapter = await db.chapter.findUnique({
+      where: { id: chapterId },
+      select: {
+        id: true,
+        title: true,
+        content: true,
+        wordCount: true,
+        order: true,
+        volumeId: true,
+        volume: {
+          select: {
+            novelId: true,
+            title: true,
+            order: true
+          }
+        }
+      }
+    });
+    if (!(chapter == null ? void 0 : chapter.volume)) {
+      throw new Error("Chapter not found");
+    }
+    const novelId = chapter.volume.novelId;
+    const chaptersInNovel = await db.chapter.findMany({
+      where: { volume: { novelId } },
+      select: {
+        id: true,
+        title: true,
+        content: true,
+        order: true,
+        volumeId: true,
+        volume: {
+          select: {
+            title: true,
+            order: true
+          }
+        }
+      },
+      orderBy: [
+        { volume: { order: "asc" } },
+        { order: "asc" }
+      ]
+    });
+    const targetIndex = chaptersInNovel.findIndex((item) => item.id === chapterId);
+    if (targetIndex === -1) {
+      throw new Error("Chapter not found");
+    }
+    if (chaptersInNovel.length === 1) {
+      const [, resetChapter] = await db.$transaction([
+        db.novel.update({
+          where: { id: novelId },
+          data: {
+            wordCount: 0,
+            updatedAt: /* @__PURE__ */ new Date()
+          }
+        }),
+        db.chapter.update({
+          where: { id: chapterId },
+          data: {
+            title: "",
+            content: "",
+            wordCount: 0,
+            updatedAt: /* @__PURE__ */ new Date()
+          },
+          include: {
+            volume: {
+              select: {
+                novelId: true
+              }
+            }
+          }
+        })
+      ]);
+      await indexChapter({
+        ...resetChapter,
+        novelId,
+        volumeTitle: chapter.volume.title,
+        volumeOrder: chapter.volume.order
+      });
+      return {
+        mode: "reset",
+        chapterId,
+        fallbackChapterId: chapterId,
+        chapter: resetChapter
+      };
+    }
+    const fallbackChapterId = ((_a = chaptersInNovel[targetIndex + 1]) == null ? void 0 : _a.id) ?? ((_b = chaptersInNovel[targetIndex - 1]) == null ? void 0 : _b.id) ?? null;
+    const siblingChapters = chaptersInNovel.filter((item) => item.volumeId === chapter.volumeId && item.id !== chapterId);
+    const reorderedSiblings = siblingChapters.map((item, index) => ({
+      ...item,
+      nextOrder: index + 1
+    }));
+    const siblingsNeedingReorder = reorderedSiblings.filter((item) => item.order !== item.nextOrder);
+    await db.$transaction([
+      db.novel.update({
+        where: { id: novelId },
+        data: {
+          wordCount: { decrement: chapter.wordCount },
+          updatedAt: /* @__PURE__ */ new Date()
+        }
+      }),
+      db.chapter.delete({
+        where: { id: chapterId }
+      }),
+      ...siblingsNeedingReorder.map((item) => db.chapter.update({
+        where: { id: item.id },
+        data: {
+          order: item.nextOrder,
+          updatedAt: /* @__PURE__ */ new Date()
+        }
+      }))
+    ]);
+    await removeFromIndex("chapter", chapterId);
+    for (const item of siblingsNeedingReorder) {
+      await indexChapter({
+        id: item.id,
+        title: item.title,
+        content: item.content,
+        volumeId: item.volumeId,
+        novelId,
+        volumeTitle: (_c = item.volume) == null ? void 0 : _c.title,
+        order: item.nextOrder,
+        volumeOrder: (_d = item.volume) == null ? void 0 : _d.order
+      });
+    }
+    return {
+      mode: "deleted",
+      chapterId,
+      fallbackChapterId
+    };
+  } catch (e) {
+    console.error("[Main] db:delete-chapter failed:", e);
+    throw e;
+  }
+});
 ipcMain.handle("db:create-novel", async (_, title) => {
   console.log("[Main] Received db:create-novel:", title);
   try {

@@ -263,6 +263,10 @@
     "idea": "灵感",
     "newVolume": "新建卷",
     "addChapter": "添加章节",
+    "deleteChapter": "删除章节",
+    "deleteChapterAction": "确认删除",
+    "deleteChapterConfirm": "确定要删除“{{title}}”吗？此操作不可撤销。",
+    "deleteLastChapterConfirm": "这是当前作品的最后一章。确认后系统会保留一个空白章节，作为默认起始章节。",
     "noChapters": "暂无章节",
     "renameTip": "双击重命名",
     "search": "搜索"
